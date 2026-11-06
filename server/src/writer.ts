@@ -3,9 +3,10 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
-import { AUTHOR_RE, applyCommand, historyTarget, nextGroup, parse, replay, serializeSound, type Diag, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, analyze, applyCommand, historyTarget, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSound, soundWav, type Diag, type Library, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
+import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeSounds, type Project } from './project.ts';
 import type { ServerMessage, Snapshot } from './protocol.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
@@ -38,13 +39,16 @@ const utcNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The sound a tape command is about (its first argument), if any. */
 function soundOf(cmd: string): string | null {
-  return /^sound (?:new|set|mark) (\S+)/.exec(cmd)?.[1] ?? null;
+  return /^sound (?:new|set|mark|patch|mutate) (\S+)/.exec(cmd)?.[1] ?? null;
 }
 
 export class Writer {
   project: Project;
   readonly hub = new Hub();
   readonly cache: RenderCache;
+  /** What the checks are held to: the project's `style`, else the defaults. */
+  readonly style: Style;
+  private readonly measured = new Map<string, Measured>();
   private entries: TapeEntry[];
   private library: Library;
   private readonly listeners = new Set<Listener>();
@@ -55,6 +59,11 @@ export class Writer {
     this.project = project;
     this.now = o.now ?? utcNow;
     this.cache = new RenderCache(project.dir);
+    try {
+      this.style = resolveStyle(project.json.style);
+    } catch (e) {
+      throw new ProjectError(`project.json: ${(e as Error).message}`);
+    }
     this.entries = readTape(project);
     this.library = this.replayed(this.entries);
     this.hub.attach(readRequestRecords(project));
@@ -126,6 +135,29 @@ export class Writer {
     return this.cache.render(this.sound(id));
   }
 
+  /** The sound's numbers and checks, measured once for each distinct render. */
+  measure(id: string): Measured {
+    const r = this.render(id);
+    let m = this.measured.get(r.key);
+    if (!m) {
+      const analysis = analyze(r.samples);
+      m = { analysis, checks: runChecks(r.samples, analysis, this.style) };
+      this.measured.set(r.key, m);
+      if (this.measured.size > 128) this.measured.delete(this.measured.keys().next().value!);
+    }
+    return m;
+  }
+
+  /** Hash of the sound's float samples (what the cards and summaries show the first 12 digits of). */
+  samplesHashOf(id: string): string {
+    return samplesHash(this.render(id).samples);
+  }
+
+  /** The sound's WAV file bytes. */
+  wavOf(id: string): Uint8Array {
+    return soundWav(this.sound(id), this.render(id).samples);
+  }
+
   history(o: HistoryRequest = {}): TapeEntry[] {
     let es = this.entries.filter((e) => (!o.by || e.by === o.by) && (!o.sound || soundOf(e.cmd) === o.sound));
     if (o.limit !== undefined) es = es.slice(-o.limit);
@@ -136,6 +168,7 @@ export class Writer {
     return {
       project: { name: this.project.json.name, dir: this.project.dir },
       sounds: this.sounds(),
+      style: this.style,
       tape: [...this.entries],
       requests: [...readRequests(this.project).values()],
       presence: this.hub.presence(),
@@ -177,9 +210,9 @@ export class Writer {
       for (const c of parsed.commands) {
         try {
           const before = c.op === 'set' ? next.get(c.id) : undefined;
-          applyCommand(next, c);
-          if (c.op === 'set' && before && next.get(c.id) && c.values.every(([n, v]) => before[n] === v)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
-          added.push({ seq: ++seq, by: req.by, at, group, cmd: c.text });
+          const normal = applyCommand(next, c);
+          if (c.op === 'set' && before && serializeSound(before) === serializeSound(next.get(c.id)!)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
+          added.push({ seq: ++seq, by: req.by, at, group, cmd: normal ?? c.text });
         } catch (e) {
           errors.push({ line: c.line, col: 1, message: (e as Error).message });
         }

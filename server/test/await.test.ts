@@ -104,7 +104,7 @@ describe('the token file', () => {
   });
 
   it.skipIf(process.platform === 'win32')('is created readable by the user alone, outside the project, and removed on stop', () => {
-    writeTokenFile(proj, { url: 'http://127.0.0.1:7418/', token: 'secret' });
+    writeTokenFile(proj, { url: 'http://127.0.0.1:7427/', token: 'secret' });
     const f = tokenFilePath(proj);
     expect(f.startsWith(proj)).toBe(false);
     expect(statSync(f).mode & 0o777).toBe(0o600);
@@ -115,7 +115,7 @@ describe('the token file', () => {
   });
 
   it.skipIf(process.platform === 'win32')('is not trusted when others can read it, or its server is gone', () => {
-    writeTokenFile(proj, { url: 'http://127.0.0.1:7418/', token: 'secret' });
+    writeTokenFile(proj, { url: 'http://127.0.0.1:7427/', token: 'secret' });
     const f = tokenFilePath(proj);
     writeFileSync(f, JSON.stringify({ pid: process.pid, url: 'u', token: 't', dir: proj }), { mode: 0o644 });
     chmodSync(f, 0o644);

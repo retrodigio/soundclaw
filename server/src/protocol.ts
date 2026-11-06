@@ -2,7 +2,7 @@
 // import them without pulling in any Node code.
 
 import type { Presence } from './await.ts';
-import type { Diag, Sound, TapeEntry, WorkRequest } from '@soundclaw/core';
+import type { Diag, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
 
 export type { Presence };
 export { HUMAN_RE } from '@soundclaw/core';
@@ -12,6 +12,8 @@ export interface Snapshot {
   project: { name: string; dir: string; /** The server user's home folder, so the page can show the folder as ~/…. */ home?: string };
   /** Every sound's document; the page renders them with the same core the agent's renders use. */
   sounds: Sound[];
+  /** What the checks are held to (the card's badge uses the same numbers the CLI does). */
+  style: Style;
   /** The whole history tape (undone groups included, with the undo that undid them). */
   tape: TapeEntry[];
   requests: WorkRequest[];

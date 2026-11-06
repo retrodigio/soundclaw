@@ -20,6 +20,8 @@ export interface ProjectJson {
   format: typeof PROJECT_FORMAT;
   version: 1;
   name: string;
+  /** What the checks are held to (core's Style keys: loudnessTarget, loudnessTolerance, truePeakMax, dcMax, clickMax, silenceMax, tailFloorDb); the defaults for any left out. */
+  style?: Record<string, number>;
 }
 
 export class ProjectError extends Error {}

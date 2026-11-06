@@ -47,9 +47,17 @@ command in its normal form. A batch is one group. The sounds are the tape replay
   CLI takes `--by`. An agent that wants to know what a person did reads the history.
 - **Text on disk.** Everything is plain text and git-friendly. The history is append-only.
 
-The only document today is a **sound** with a placeholder voice, a sine tone with `frequency`,
-`duration` and `volume`. The folder already has places (`instruments/`, `songs/`, `sets/`) for the
-documents the fuller tool will add.
+The only document today is a **sound**, with one of two voices: the **classic voice** (sfxr's 25
+parameters; below) or the S0 placeholder, a sine tone with `frequency`, `duration` and `volume`.
+The folder already has places (`instruments/`, `songs/`, `sets/`) for the documents the fuller tool
+will add.
+
+**The tape is the source of truth; `sounds/<id>.sfx` is written from it.** Every command, including
+a person's action in the dashboard, goes on `history.jsonl`, and the sounds are the tape replayed.
+`sounds/*.sfx` are rewritten from the replayed library after each change so that they read and
+diff well in git. A hand edit to one is overwritten by the next change (turning an edited file into
+a command is a later step). Commands that settle something the text left open (a default seed for a
+preset or a mutation) write the settled value into their normal form, so the tape replays exactly.
 
 ## Rendering
 
@@ -59,11 +67,57 @@ polynomial on a folded phase), because those are exactly specified by IEEE-754 w
 is not. So a sound renders to the same bits in Node and in any browser; a test renders the same
 document in Node and in Chromium and compares every byte, and golden hashes pin the output.
 
+### The classic voice and bit-exactness
+
+`core/src/classic.ts` is a port of a reference synthesiser written in Lua (doubles throughout), and
+reproduces its samples exactly for every patch and seed, including the noise stream (xorshift
+seeded by FNV-1a over the text form) and the WAV quantisation (`trunc(s × 32000)`). Two places in
+the reference lean on the platform's maths library, where results may differ in the last bit between
+engines and operating systems, and the port replaces both with arithmetic that IEEE-754 fixes:
+
+- **The sine** (`math.sin` in the reference, for the sine wave and for vibrato) is `sinRad` in
+  `core/src/mathx.ts`, a port of fdlibm's `__kernel_sin`, `__kernel_cos` and argument reduction,
+  written with `+ - * /` only. It is the algorithm V8's `Math.sin` is built on, and a test checks it
+  equals `Math.sin` on this platform over 200,000 arguments; a second test pins a hash of its
+  output so a change of code or platform shows. The same bits in Node and in every browser, whatever
+  their own `Math.sin` does.
+- **The cube** (`x ^ 3` in the reference: slide, deltaSlide, lowPass) is `cube`, x³ rounded once
+  (Dekker's exact products, then one rounding; tested against exact integer arithmetic). A libm
+  `pow(x, 3)` is not always correctly rounded (one libm in use here was off in the last bit for
+  one argument in six), so `cube` can differ from a given platform's `pow` by one unit in the last
+  place on some inputs.
+
+Squares are `x * x`, which every `pow(x, 2)` equals. Everything else is `+ - * /`, `Math.floor`,
+`Math.abs` and integer operations.
+
+How it was checked: the port was run against the reference code on this machine's Lua (a shim for
+the `bit` library and for LuaJIT's `%.14g` number printing) over the 72-patch conformance table
+and 300 random patches (2.8 million samples at 16 bits): **no sample differed**. What could not be
+checked is the reference's own host: its libm may round a `pow` or a `sin` differently, which could
+move a sample by one 16-bit step in a rare case (a period crossing a whole number by a few parts in
+10¹⁶). `core/test/classic-golden.json` holds the hashes of the exact samples and of the WAV for the
+72 patches (every parameter at both extremes, every wave, seeds); they come from this port.
+
+Pre-rendered WAVs and `export --format wav` of a classic sound quantise the doubles, not the float32
+the dashboard plays, so the file is exactly what the reference makes.
+
+### Measurements
+
+`core/src/analysis.ts` measures a render: FFT, a mel spectrogram, integrated loudness (ITU-R BS.1770
+K-weighting and gating) and true peak (4x oversampled), YIN pitch, spectral centroid, attack, tail,
+onsets. It has no native dependencies and is tested against synthetic signals with known answers. It
+is a *measurement*, not part of the render: it may use `Math.sin`, and the last digit may differ
+between platforms (numbers are printed rounded). `core/src/checks.ts` holds the five checks and the
+project style; `core/src/views.ts` draws the PNG views through `core/src/png.ts`, a small PNG
+encoder (its own deflate) with a 5×7 font. The dashboard measures with the same code in the
+browser, so a card's check badge and the CLI agree.
+
 A **content-hash render cache** (`server/src/cache.ts`) keeps samples under the SHA-256 of the
 document's audio-relevant text plus the renderer's version; it lives in memory and in
 `.cache/renders/` (ignored by git). A status mark does not change the key.
 
-**Export** is a 16-bit PCM WAV, mono, 44,100 Hz, rendered through the cache.
+**Export** is a 16-bit PCM WAV, mono, 44,100 Hz, rendered through the cache; the classic voice also
+exports as single-patch text and as a `synth.csv`.
 
 ## The server
 
@@ -101,6 +155,6 @@ listening (open waits, agents that called a tool lately), and a card says plainl
 
 ## Not yet
 
-The real synth voices, the views that let an agent "hear" (waveform and spectrogram images,
-loudness, checks), instruments, songs and sets, the editors in the dashboard, more export formats,
-and a headless worker that takes requests with no agent session.
+The enhanced voices, instruments, songs and sets, the classic voice's editor in the dashboard (a
+card shows the 25 parameters read-only), sets and loop checks, OGG export, and a headless worker
+that takes requests with no agent session.

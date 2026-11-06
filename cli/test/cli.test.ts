@@ -68,7 +68,7 @@ describe('run', () => {
     const before = readFileSync(join(proj, 'history.jsonl'), 'utf8');
     const r = sc(['run', proj, '-e', 'sound set a volume=0.2\nsound set a frequency=1\nsound frob a']);
     expect(r.code).toBe(1);
-    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, mark)\n2 errors; nothing was applied.\n");
+    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, mutate, mark)\n2 errors; nothing was applied.\n");
     expect(readFileSync(join(proj, 'history.jsonl'), 'utf8')).toBe(before);
   });
 
@@ -101,7 +101,8 @@ describe('list, history, render', () => {
     const r = sc(['list', proj]).out.split('\n');
     expect(r[0]).toBe('2 sounds:');
     expect(r[1]).toMatch(/^ {2}beep: tone 440 Hz, 0.5 s, volume 0.5, approved → 22050 samples/);
-    expect(r[2]).toMatch(/^ {2}boop: tone 220 Hz/);
+    expect(r[2]).toMatch(/^ {4}checks: \d\/5 pass/);
+    expect(r[3]).toMatch(/^ {2}boop: tone 220 Hz/);
   });
   it('history filters by sound, author and count', () => {
     expect(sc(['history', proj]).out.split('\n')[0]).toBe('4 commands in 2 groups');
@@ -112,10 +113,14 @@ describe('list, history, render', () => {
   });
   it('render prints the numbers and says when the cache served it', () => {
     // `run` rendered it for its numbers, so the cache is warm; with the cache gone the first render is fresh.
-    expect(sc(['render', proj, 'beep']).out).toMatch(/\(from the render cache\)\n$/);
+    expect(sc(['render', proj, 'beep']).out).toMatch(/\(from the render cache\)\n/);
     rmSync(join(proj, '.cache'), { recursive: true });
-    expect(sc(['render', proj, 'beep']).out).toMatch(/render key [0-9a-f]{12}\n$/);
-    expect(sc(['render', proj, 'beep']).out).toMatch(/\(from the render cache\)\n$/);
+    expect(sc(['render', proj, 'beep']).out).toMatch(/render key [0-9a-f]{12}\n/);
+    const again = sc(['render', proj, 'beep']).out;
+    expect(again).toMatch(/\(from the render cache\)\n/);
+    // the numbers, then a description, and the check summary is the last line
+    expect(again).toMatch(/duration 0\.500 s \(22050 samples\)\nloudness /);
+    expect(again.trim().split('\n').at(-1)).toMatch(/^checks: \d\/5 pass/);
     expect(sc(['render', proj, 'nope']).err).toMatch(/no sound 'nope'/);
   });
 });
@@ -146,7 +151,7 @@ describe('export', () => {
 describe('request, reply, cancel and work without a server', () => {
   beforeEach(() => {
     sc(['new', proj]);
-    sc(['run', proj, '-e', 'sound new beep']);
+    sc(['run', proj, '-e', 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15']);
   });
   it('a request, claim, progress, block, reply, claim and done', () => {
     expect(sc(['request', proj]).out).toBe('no open requests\n');
@@ -200,5 +205,90 @@ describe('the executable', () => {
     const r = spawnSync(process.execPath, [BIN, 'run', proj, '-'], { encoding: 'utf8', input: 'sound new piped\n' });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('applied 1 command as group g1');
+  });
+});
+
+describe('the classic voice, the ears, import and export', () => {
+  const GOOD = 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15';
+  beforeEach(() => {
+    sc(['new', proj]);
+    expect(sc(['run', proj, '-e', `${GOOD}; sound new zap voice=classic preset=laser seed=1`]).code).toBe(0);
+  });
+
+  it('run prints the classic sound and its check summary', () => {
+    const r = sc(['run', proj, '-e', 'sound new hit voice=classic preset=hit seed=4; sound mutate hit amount=0.1 seed=5 as=hit2']);
+    expect(r.out).toContain('#4 sound new hit voice=classic preset=hit seed=4');
+    expect(r.out).toContain('#5 sound mutate hit amount=0.1 seed=5 as=hit2');
+    expect(r.out).toMatch(/\nhit: classic wave=\w+ .* → \d+ samples, peak [\d.]+, rms [\d.]+, hash [0-9a-f]{12}\n {4}checks: \d\/5 pass/);
+    expect(r.out).toContain('hit2: classic');
+  });
+
+  it('render ends with the check summary; describe says it in words', () => {
+    const r = sc(['render', proj, 'zap']);
+    expect(r.out.trim().split('\n').at(-1)).toMatch(/^checks: \d\/5 pass; failing: /);
+    const d = sc(['describe', proj, 'beep']);
+    expect(d.code).toBe(0);
+    expect(d.out).toMatch(/^beep: 0\.\d\d s, tonal and /);
+    expect(d.out.trim().split('\n').at(-1)).toBe('checks: 5/5 pass');
+    expect(sc(['describe', proj, 'nope']).err).toMatch(/no sound 'nope'/);
+  });
+
+  it('check exits 0 when everything passes and 1 when something fails, listing where', () => {
+    const ok = sc(['check', proj, 'beep']);
+    expect(ok.code).toBe(0);
+    expect(ok.out).toMatch(/^beep: PASS \(5\/5 checks pass\)/);
+    const bad = sc(['check', proj]);
+    expect(bad.code).toBe(1);
+    expect(bad.out).toMatch(/^zap: FAIL/m);
+    expect(bad.out).toMatch(/flagged 0\.0000-0\.0010 s: starts at level/);
+    expect(bad.out).toMatch(/1 sound of 2 pass all of clip, loudness, dc, click, tail/);
+  });
+
+  it('view writes a PNG (under .cache/views, or --out) and prints the numbers', () => {
+    const w = sc(['view', proj, 'zap', 'wave']);
+    expect(w.code).toBe(0);
+    const file = /view saved to (\S+)/.exec(w.out)![1]!;
+    expect(file).toContain(join(proj, '.cache', 'views'));
+    expect(Array.from(readFileSync(file).subarray(1, 4))).toEqual([0x50, 0x4e, 0x47]);
+    expect(w.out).toContain('duration 0.');
+    const out = join(tmp, 'spec.png');
+    expect(sc(['view', proj, 'zap', 'spec', '--out', out]).code).toBe(0);
+    expect(existsSync(out)).toBe(true);
+    expect(sc(['view', proj, 'zap', 'pitch']).code).toBe(0);
+    const c = sc(['view', proj, 'beep', 'compare', 'zap']);
+    expect(c.out).toMatch(/zap compared with beep/);
+    expect(sc(['view', proj, 'beep', 'compare']).err).toMatch(/give the other sound/);
+    expect(sc(['view', proj, 'beep', 'bogus']).err).toMatch(/no view 'bogus'/);
+    expect(sc(['view', proj, 'beep']).code).toBe(2);
+  });
+
+  it('export --format wav|patch|csv; the wav is the pre-rendered form', () => {
+    const wav = sc(['export', proj, 'beep', '--out', join(tmp, 'o')]);
+    expect(wav.out).toContain('as wav');
+    expect(decodeWav(new Uint8Array(readFileSync(join(tmp, 'o', 'beep.wav')))).sampleRate).toBe(44100);
+    expect(sc(['export', proj, '--format', 'patch', '--out', join(tmp, 'p')]).out).toContain('as patch');
+    expect(readdirSync(join(tmp, 'p')).sort()).toEqual(['beep.sfxr', 'zap.sfxr']);
+    expect(sc(['export', proj, '--format', 'csv', '--out', join(tmp, 'c')]).out).toContain('as csv');
+    expect(readFileSync(join(tmp, 'c', 'synth.csv'), 'utf8').split('\n')[0]).toMatch(/^id,wave,attack,sustain,punch,decay,freq,minFreq/);
+    expect(sc(['export', proj, '--format', 'mp3']).code).toBe(2);
+  });
+
+  it('import sfxr reads a csv exported by export, a patch file, or patch text; one undo group', () => {
+    sc(['export', proj, '--format', 'csv', '--out', join(tmp, 'c')]);
+    const other = join(tmp, 'other.sclaw');
+    sc(['new', other]);
+    const r = sc(['import', other, 'sfxr', join(tmp, 'c', 'synth.csv')]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/^imported 2 sounds \(beep, zap\) as group g1/);
+    // the same samples, hash for hash
+    const hashOf = (dir: string, id: string) => /hash ([0-9a-f]{12})/.exec(sc(['list', dir]).out.split('\n').find((l) => l.includes(`${id}: classic`))!)![1];
+    expect(hashOf(other, 'zap')).toBe(hashOf(proj, 'zap'));
+    expect(hashOf(other, 'beep')).toBe(hashOf(proj, 'beep'));
+    const text = sc(['import', other, 'sfxr', '1\n2,0,0.1,0,0.3,0.5', '--id', 'tick']);
+    expect(text.err).toBe('');
+    expect(text.out).toContain('imported 1 sound (tick)');
+    expect(sc(['import', other, 'sfxr', 'wave=1,freq=0.4']).err).toMatch(/needs a sound id/);
+    expect(sc(['import', other, 'sfxr', join(tmp, 'c', 'synth.csv')]).err).toMatch(/exists already/);
+    expect(sc(['import', other, 'wav', 'x']).code).toBe(2);
   });
 });

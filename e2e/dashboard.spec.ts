@@ -134,7 +134,7 @@ test('the browser and Node render identical samples for a range of documents', a
 
 test('Ask for changes reaches a waiting agent; the card follows claim, progress, a question, the answer and done', async ({ page }) => {
   agent = await startAgent();
-  await agent.cli(['run', agent.dir, '-e', 'sound new beep; sound set beep frequency=880']);
+  await agent.cli(['run', agent.dir, '-e', 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.5 volume=0.15']);
   await page.goto(`${agent.url}&name=ana`);
   const card = page.getByTestId('card-beep');
   await expect(page.getByTestId('listener-chip')).toHaveAttribute('data-listening', 'false');
@@ -177,10 +177,10 @@ test('Ask for changes reaches a waiting agent; the card follows claim, progress,
   expect(second.out).toContain('reply r1 (beep) from human:ana');
   expect(second.out).toContain('an octave');
   expect((await agent.cli(['work', agent.dir, 'claim', 'r1'])).out).toContain('The person answered: "an octave"');
-  expect((await agent.cli(['run', agent.dir, '-e', 'sound set beep frequency=440 volume=0.3'])).code).toBe(0);
-  await expect(page.getByTestId('params-beep')).toContainText('440 Hz');
-  await agent.cli(['work', agent.dir, 'done', 'frequency 880 → 440, volume 0.5 → 0.3']);
-  await expect(card.getByTestId('done-r1')).toHaveText('✓ done: frequency 880 → 440, volume 0.5 → 0.3');
+  expect((await agent.cli(['run', agent.dir, '-e', 'sound set beep freq=0.3'])).code).toBe(0);
+  await expect(page.getByTestId('param-beep-freq')).toHaveText('freq 0.3');
+  await agent.cli(['work', agent.dir, 'done', 'freq 0.5 → 0.3']);
+  await expect(card.getByTestId('done-r1')).toHaveText('✓ done: freq 0.5 → 0.3');
   await expect(page.getByTestId('requests-count')).toHaveText('0 requests for the agent');
 });
 
@@ -242,4 +242,81 @@ test('a page writes as the name it is given, and refuses a bad one', async ({ pa
   await expect(page.getByTestId('status-beep')).toHaveText('draft');
   // A name that is not allowed leaves the previous one in force.
   expect((await commands(page))[0]).toMatchObject({ by: 'human:bo' });
+});
+
+const PASSING = 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15';
+
+test('a classic card shows its 25 parameters read-only, a waveform and a spectrogram, and a check badge that follows the sound', async ({ page }) => {
+  agent = await startAgent();
+  expect((await agent.cli(['run', agent.dir, '-e', `${PASSING}; sound new zap voice=classic preset=laser seed=1`])).code).toBe(0);
+  await page.goto(`${agent.url}&name=ana`);
+  const beep = page.getByTestId('card-beep');
+  await expect(page.getByTestId('sounds').locator('article')).toHaveCount(2);
+
+  // The parameters: all 25, as values, nothing to edit yet.
+  const params = beep.getByTestId('params-beep');
+  await expect(params).toHaveAttribute('data-voice', 'classic');
+  await expect(params.locator('[data-testid^="param-beep-"]')).toHaveCount(25);
+  await expect(beep.getByTestId('param-beep-wave')).toHaveText('wave sine');
+  await expect(beep.getByTestId('param-beep-freq')).toHaveText('freq 0.3');
+  await expect(beep.getByTestId('param-beep-volume')).toHaveText('volume 0.15');
+  await expect(beep.getByTestId('param-beep-attack')).toHaveText('attack 0.05');
+  await expect(params.locator('input, select, textarea, [contenteditable]')).toHaveCount(0);
+
+  // The thumbnails are drawn: the waveform has height, and the spectrogram has many colours.
+  await expect(beep.getByTestId('wave-beep')).toHaveAttribute('data-peak', /^0\.[3-9]/);
+  const colours = await beep.getByTestId('spec-beep').evaluate((c: HTMLCanvasElement) => {
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    const set = new Set<number>();
+    for (let i = 0; i < d.length; i += 4) set.add((d[i]! << 16) | (d[i + 1]! << 8) | d[i + 2]!);
+    return { n: set.size, w: c.width, h: c.height, alpha: d[3] };
+  });
+  expect(colours).toMatchObject({ w: 240, h: 48, alpha: 255 });
+  expect(colours.n).toBeGreaterThan(25);
+  await expect(beep.getByTestId('spec-beep')).toHaveAttribute('data-bands', '48');
+
+  // The badge says what the CLI says.
+  await expect(beep.getByTestId('check-beep')).toHaveAttribute('data-pass', 'true');
+  await expect(beep.getByTestId('check-beep')).toHaveText('✓ checks pass');
+  const zap = page.getByTestId('card-zap');
+  await expect(zap.getByTestId('check-zap')).toHaveAttribute('data-pass', 'false');
+  const cli = await agent.cli(['check', agent.dir, 'zap']);
+  const failing = [...cli.out.matchAll(/^ {2}(\w+) +FAIL/gm)].map((m) => m[1]).join(',');
+  expect(failing).not.toBe('');
+  await expect(zap.getByTestId('check-zap')).toHaveAttribute('data-failing', failing);
+  await expect(zap.getByTestId('check-zap')).toHaveAttribute('title', /^checks: \d\/5 pass; failing: /);
+
+  // The agent changes the sound: the card, the badge and the thumbnail follow.
+  await agent.cli(['run', agent.dir, '-e', 'sound set beep volume=0.6']);
+  await expect(beep.getByTestId('check-beep')).toHaveAttribute('data-pass', 'false');
+  await expect(beep.getByTestId('param-beep-volume')).toHaveText('volume 0.6');
+  await agent.cli(['run', agent.dir, '-e', 'sound set beep volume=0.15']);
+  await expect(beep.getByTestId('check-beep')).toHaveAttribute('data-pass', 'true');
+});
+
+test('the browser and Node render identical doubles for classic patches, noise and sine included', async ({ page }) => {
+  agent = await startAgent();
+  const patches: [string, string][] = [
+    ['sq', 'wave=0,freq=0.4,sustain=0.1,decay=0.1,duty=0.3,dutySweep=0.2'],
+    ['saw', 'wave=1,freq=0.5,sustain=0.1,decay=0.1,slide=-0.3,phaserOffset=0.5,phaserSweep=-0.1'],
+    ['sine', 'wave=2,freq=0.35,sustain=0.15,decay=0.1,slide=0.2,deltaSlide=-0.4,lowPass=0.6,resonance=0.5'],
+    ['vib', 'wave=2,freq=0.3,sustain=0.2,decay=0.1,vibratoDepth=0.6,vibratoSpeed=0.7,vibratoDelay=0.2'],
+    ['noise', 'wave=3,freq=0.45,sustain=0.15,decay=0.2,highPass=0.3,lowPassSweep=-0.3'],
+    ['seeded', 'wave=3,freq=0.45,sustain=0.15,decay=0.2,seed=4242'],
+    ['rep', 'wave=1,freq=0.5,sustain=0.3,decay=0.1,slide=0.3,repeatSpeed=0.6,changeAmount=0.5,changeSpeed=0.5'],
+  ];
+  const cmds = patches.map(([id, p]) => `sound new ${id} voice=classic; sound patch ${id} "${p}"`).join('; ');
+  expect((await agent.cli(['run', agent.dir, '-e', cmds])).code).toBe(0);
+  await page.goto(`${agent.url}&name=ana`);
+  await expect(page.getByTestId('sounds').locator('article')).toHaveCount(patches.length);
+  const fromPage = await page.evaluate(() => {
+    const s = (window as unknown as { soundclaw: { sounds: { id: string }[]; exact(s: unknown): Float64Array } }).soundclaw;
+    return s.sounds.map((doc) => { const f = s.exact(doc); return { id: doc.id, bytes: Array.from(new Uint8Array(f.buffer, f.byteOffset, f.byteLength)) }; });
+  });
+  expect(fromPage.map((x) => x.id).sort()).toEqual(patches.map(([id]) => id).sort());
+  for (const x of fromPage) {
+    const served = new Uint8Array(await (await fetch(`http://127.0.0.1:${agent.port}/api/render/${x.id}.f64?token=${agent.token}`)).arrayBuffer());
+    expect(served.length, x.id).toBeGreaterThan(1000);
+    expect(Buffer.compare(Buffer.from(x.bytes), Buffer.from(served)), x.id).toBe(0);
+  }
 });

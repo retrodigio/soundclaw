@@ -1,5 +1,6 @@
 // The single writer: batches are atomic, history is a tape with authors, undo and redo are
 // commands, and the project folder is plain files.
+import type { ToneSound } from '@soundclaw/core';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -53,7 +54,7 @@ describe('run', () => {
     const syntax = f.w.run({ commands: 'sound set beep volume=0.9\nsound set beep volume=loud', by: 'agent:claude' });
     expect(syntax.ok).toBe(false);
     expect(snapshot(f.dir)).toEqual(before);
-    expect(f.w.sound('beep').volume).toBe(0.5);
+    expect((f.w.sound('beep') as ToneSound).volume).toBe(0.5);
     expect(f.reopen().sounds().map((s) => s.id)).toEqual(['beep']);
   });
 
@@ -105,7 +106,7 @@ describe('undo and redo', () => {
     expect(f.w.tape()).toHaveLength(4);
     expect(readFileSync(join(f.dir, 'sounds', 'a.sfx'), 'utf8')).toContain('frequency 440');
     f.w.run({ commands: 'redo', by: 'agent:claude' });
-    expect(f.w.sound('a').frequency).toBe(220);
+    expect((f.w.sound('a') as ToneSound).frequency).toBe(220);
     expect(f.w.tape().at(-1)).toMatchObject({ cmd: 'redo group=g4' });
   });
 
@@ -116,7 +117,7 @@ describe('undo and redo', () => {
     f.w.run({ commands: 'undo group=g3', by: 'human:ana' });
     expect(f.w.sound('a')).toMatchObject({ volume: 0.5, frequency: 440 });
     f.w.run({ commands: 'redo group=g5', by: 'human:ana' });
-    expect(f.w.sound('a').frequency).toBe(220);
+    expect((f.w.sound('a') as ToneSound).frequency).toBe(220);
   });
 
   it('undoing the batch that made a sound removes its file; redo writes it again', () => {
@@ -143,7 +144,7 @@ describe('undo and redo', () => {
 
   it('survives a restart: the undone group is still undone', () => {
     f.w.run({ commands: 'undo', by: 'agent:claude' });
-    expect(f.reopen().sound('a').frequency).toBe(440);
+    expect((f.reopen().sound('a') as ToneSound).frequency).toBe(440);
   });
 });
 

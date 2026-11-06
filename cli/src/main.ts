@@ -1,13 +1,13 @@
-// soundclaw: new | run | list | history | render | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
+// soundclaw: new | run | list | history | render | view | describe | check | import | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
 
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AUTHOR_RE, openRequests } from '@soundclaw/core';
+import { AUTHOR_RE, openRequests, type ViewKind } from '@soundclaw/core';
 import {
-  ProjectError, Writer, agentName, agentWork, cliSteps, createProject, exportSounds, formatErrors, formatExport, formatRun, historyText, humanName, loadProject, lockHolder,
-  personRequest, plural, readRequests, requestBrief, requestLine, shellArg, soundSummary, toPersonRequest, type Project,
+  EXPORT_FORMATS, ProjectError, Writer, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
 
@@ -38,22 +38,46 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw run <project> (<script> | - | -e "<commands>") [--by <author>]
       Apply commands as one undo group; any error applies nothing. Commands, one per line or
       separated by ';' ('#' starts a comment):
-        sound new <id>                                      a sound (a placeholder sine tone for now)
-        sound set <id> frequency=<20-20000 Hz> duration=<0.01-10 s> volume=<0-1>
+        sound new <id>                                      a placeholder sine tone
+        sound new <id> voice=classic [preset=<category>] [seed=<n>]   the classic voice (25 sfxr-style
+                                                            parameters); presets: pickup laser explosion
+                                                            powerup hit jump blip, seeded
+        sound set <id> <param>=<value> ...                  tone: frequency duration volume; classic: the 25
+                                                            parameters (wave=square|saw|sine|noise) and seed
+        sound patch <id> "<single-patch text>"              all 25 values from sfxr patch text
+        sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change (also: mutate <id> ...)
         sound mark <id> approved|rejected|draft ["note"]
         undo [group=<g>] [by=<author>]    redo [group=<undo group>] [by=<author>]   (each alone in its batch)
       '-' reads the commands from standard input. --by is the author written on the history:
       agent:<name> or human:<name> (default agent:claude; a bare name means agent:<name>).
-      The result lists the commands as written and each changed sound's numbers.
+      The result lists the commands as written and each changed sound's numbers and checks.
   soundclaw list <project>
       The sounds, one line each: parameters, status, and the render's numbers (samples, peak, rms, hash).
   soundclaw history <project> [--sound <id>] [--by <author>] [--limit <n, default 50>]
       The history tape: command number, undo group, author, time, command; undone groups marked.
   soundclaw render <project> <id>
-      Render a sound through the content-hash cache and print its numbers.
-  soundclaw export <project> [<id>...] [--out <dir>]
-      Write WAV files (16-bit PCM, 44,100 Hz, mono). Without ids, all sounds. Default folder:
-      <project>/exports/.
+      Render a sound through the content-hash cache and print its numbers (duration, loudness,
+      peaks, attack, tail, brightness, pitch, onsets), a plain-words description, and the check
+      summary on the last line.
+  soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
+  soundclaw view <project> <id> compare <other> [--out <file.png>]
+      The agent's ears as a PNG (saved under <project>/.cache/views, or --out) and the numbers:
+      wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers),
+      pitch (YIN track over a note grid), compare (two spectrograms and their difference, with
+      distance numbers).
+  soundclaw describe <project> <id>
+      A plain-words summary built only from the measured numbers, then the numbers.
+  soundclaw check <project> [<id>...]
+      The checks (clip, loudness, dc, click, tail) with scores, thresholds and the exact time
+      ranges flagged. Exit 1 when any fails. Targets come from project.json "style" (default
+      -16 LUFS +-1, true peak at most -0.1 dBTP).
+  soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
+      Make classic sounds from an sfxr synth.csv (one per row; the key column is the id), or from
+      one single-patch text (a file or the text itself; --id names it). One undo group.
+  soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
+      Default wav: 16-bit PCM, 44,100 Hz, mono (classic sounds as pre-rendered WAVs, trunc(s*32000)).
+      patch: <id>.sfxr single-patch text; csv: one synth.csv. Without ids, all sounds. Default
+      folder: <project>/exports/.
   soundclaw request <project> [<id> --note "<what should change>"] [--by <author>]
       Ask for a change on a sound, as the dashboard's Ask for changes does (also writes
       sound mark <id> rejected "<note>" on the history). Without an id, lists the requests still
@@ -79,12 +103,12 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       background and restart it with --since <cursor> after each exit: its exit is what wakes an
       agent. Exit 0 with events, 3 on timeout, 1 if no server can be reached. Requests handed
       over are recorded as seen by --as (default agent:claude). Works with serve --no-mcp.
-  soundclaw serve --project <project> [--port 7418] [--no-mcp]
+  soundclaw serve --project <project> [--port 7427] [--no-mcp]
       Own the project: MCP on stdin/stdout for the agent, and the live dashboard on
       http://127.0.0.1:<port>/?token=... (printed to stderr). Creates the project if needed.
 
 While a server runs (soundclaw serve): commands that write (run, export, request, reply, cancel,
-work) are sent to it over HTTP, found through the project's lock and a token file only you can
+work, import) are sent to it over HTTP, found through the project's lock and a token file only you can
 read, so they go through its writer and a connected dashboard updates live. Read-only commands
 read the files. If the server cannot be reached the command runs directly.
 
@@ -153,7 +177,8 @@ export const one = (p: Parsed, k: string): string | undefined => p.flags.get(k)?
 /** The options of the commands that write (valued, bare): the CLI uses them to send a command to a running server. */
 export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
-  export: [['out'], []],
+  export: [['out', 'format'], []],
+  import: [['id', 'by'], []],
   request: [['note', 'by'], []],
   reply: [['by'], []],
   cancel: [['by'], []],
@@ -250,14 +275,58 @@ function cmdRender(io: Io, p: Parsed): number {
   if (!dir || !id || extra.length) throw new UsageError('render: give a project folder and a sound id');
   const w = wr(io, dir);
   const r = w.render(id); // first, so the line below does not warm the cache
-  io.out(`${soundSummary(w, id)}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}\n`);
+  const head = soundSummary(w, id).split('\n')[0]!;
+  io.out(`${renderText(w, id, `${head}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}`)}\n`);
+  return 0;
+}
+
+function cmdView(io: Io, p: Parsed): number {
+  const [dir, id, kind, other, ...extra] = p.pos;
+  if (!dir || !id || !kind) throw new UsageError('view: give a project folder, a sound id and wave, spec, pitch or compare <other>');
+  if (!['wave', 'spec', 'pitch', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, compare)`);
+  if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound' : `view ${kind}: unexpected '${other}'`);
+  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare', { other, out: one(p, 'out') });
+  io.out(v.text + '\n');
+  return 0;
+}
+
+function cmdDescribe(io: Io, p: Parsed): number {
+  const [dir, id, ...extra] = p.pos;
+  if (!dir || !id || extra.length) throw new UsageError('describe: give a project folder and a sound id');
+  io.out(describeText(wr(io, dir), id) + '\n');
+  return 0;
+}
+
+function cmdCheck(io: Io, p: Parsed): number {
+  const [dir, ...ids] = p.pos;
+  if (!dir) throw new UsageError('check: give a project folder');
+  const r = checkText(wr(io, dir), ids);
+  io.out(r.text + '\n');
+  return r.pass ? 0 : 1;
+}
+
+function cmdImport(io: Io, p: Parsed): number {
+  const [dir, what, source, ...extra] = p.pos;
+  if (!dir || what !== 'sfxr' || !source) throw new UsageError('import: soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>]');
+  if (extra.length) throw new UsageError(`import: put the patch text in quotes (unexpected '${extra[0]}')`);
+  assertNoServer(dir, io);
+  const w = wr(io, dir);
+  const { commands, ids } = importCommands(source, one(p, 'id') ?? null);
+  const r = w.run({ commands, by: author(p, 'agent:claude', (n) => `agent:${n}`) });
+  if (!r.ok) {
+    io.err(formatErrors('import', r.errors) + '\n');
+    return 1;
+  }
+  io.out(`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}\n${r.touched.map((id) => soundSummary(w, id)).join('\n')}\n`);
   return 0;
 }
 
 function cmdExport(io: Io, p: Parsed): number {
   const [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('export: give a project folder');
-  io.out(formatExport(exportSounds(wr(io, dir), ids, one(p, 'out'))) + '\n');
+  const format = (one(p, 'format') ?? 'wav') as ExportFormat;
+  if (!EXPORT_FORMATS.includes(format)) throw new UsageError(`export: --format is ${EXPORT_FORMATS.join(', ')} (not '${format}')`);
+  io.out(formatExportFiles(exportFormat(wr(io, dir), ids, format, one(p, 'out'))) + '\n');
   return 0;
 }
 
@@ -370,6 +439,10 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'list': return cmdList(io, parseArgs(rest, [], []));
       case 'history': return cmdHistory(io, parseArgs(rest, ['sound', 'by', 'limit'], []));
       case 'render': return cmdRender(io, parseArgs(rest, [], []));
+      case 'view': return cmdView(io, parseArgs(rest, ['out'], []));
+      case 'describe': return cmdDescribe(io, parseArgs(rest, [], []));
+      case 'check': return cmdCheck(io, parseArgs(rest, [], []));
+      case 'import': return cmdImport(io, parseArgs(rest, ...WRITE_OPTS.import!));
       case 'export': return cmdExport(io, parseArgs(rest, ...WRITE_OPTS.export!));
       case 'request': return cmdRequest(io, parseArgs(rest, ...WRITE_OPTS.request!));
       case 'reply': case 'cancel': return cmdAnswer(io, cmd, parseArgs(rest, ...WRITE_OPTS.reply!));

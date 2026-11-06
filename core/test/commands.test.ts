@@ -22,7 +22,7 @@ describe('the command language', () => {
     expect(r.errors.map((e) => `${e.line}:${e.col} ${e.message}`)).toEqual([
       expect.stringMatching(/^1:11 'Beep' is not a sound id/),
       '2:16 frequency must be between 20 and 20000 Hz (got 5)',
-      expect.stringMatching(/^3:16 no parameter 'pitch' \(parameters: frequency, duration, volume\)/),
+      expect.stringMatching(/^3:16 no parameter 'pitch' \(tone: frequency, duration, volume; classic: wave, attack/),
       "4:16 volume: 'loud' is not a number",
       expect.stringMatching(/^5:1 unknown command 'frobnicate'/),
       '6:27 frequency is set twice in one command',

@@ -8,6 +8,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AUTHOR_RE, foldRequests, nextRequestId, openRequests, quote, requestProblem, serializeSound, type RequestRecord, type WorkRequest } from '@soundclaw/core';
 import { unseenOpen, type AgentEvent } from './await.ts';
+import { checkLine, failingChecks } from './ears.ts';
 import { REQUESTS_FILE, ProjectError, type Project } from './project.ts';
 import type { PersonRequest } from './protocol.ts';
 import type { Writer } from './writer.ts';
@@ -173,6 +174,11 @@ export function agentWork(w: Writer, agent: string, q: AgentWork, steps: WorkSte
   if (q.action === 'done' && target && target.state === 'claimed' && target.claimedBy === agent && !w.has(target.sound)) {
     throw new ProjectError(`${id} is not done: sound '${target.sound}' no longer exists. Make it again, or ${steps.blocked(id)} if you cannot`);
   }
+  // done needs the sound's checks to pass: the person is handed something measured, not just claimed
+  if (q.action === 'done' && target && target.state === 'claimed' && target.claimedBy === agent && w.has(target.sound)) {
+    const failing = failingChecks(w, target.sound);
+    if (failing) throw new ProjectError(`${id} is not done: ${target.sound}'s checks fail (${failing}). Fix it (see \`check\`), or ${steps.blocked(id)} if you cannot`);
+  }
   const r = appendRequest(p, { type: q.action, id, by: agent, at, text: q.text });
   return { request: r, message: `${id}: ${q.action}` };
 }
@@ -210,6 +216,7 @@ export function requestBrief(w: Writer, q: WorkRequest, steps: WorkSteps = MCP_S
   const out = [requestLine(q)];
   if (w.has(q.sound)) out.push(`the sound now:\n${serializeSound(w.sound(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else out.push(`sound '${q.sound}' does not exist any more`);
+  if (w.has(q.sound)) out.push(`${checkLine(w.measure(q.sound))} (finishing the request needs every check to pass; \`check\` lists what fails and where, \`view\` and \`describe\` let you hear the change)`);
   out.push(`Change it as asked with \`sound set ${q.sound} …\` (the request is also a \`sound mark ${q.sound} rejected\` on the history${q.mark ? ` at #${q.mark}` : ''}; the history shows the person's own edits); then ${steps.done(q.id, 'what changed')}.`);
   if (q.events.some((x) => x.type === 'reply')) out.push(`The person answered: "${q.events.filter((x) => x.type === 'reply').at(-1)!.text}"`);
   out.push(`If you cannot go on without the person, ${steps.blocked(q.id)}.`);

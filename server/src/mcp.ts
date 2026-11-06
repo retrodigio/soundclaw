@@ -6,9 +6,9 @@ import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { openRequests } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
-import { exportSounds } from './export.ts';
+import { checkText, describeText, exportFormat, formatExportFiles, importCommands, renderText, viewSound } from './ears.ts';
 import { ProjectError } from './project.ts';
-import { formatErrors, formatExport, plural } from './report.ts';
+import { formatErrors, plural } from './report.ts';
 import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
 import { historyText, soundSummary } from './summary.ts';
 import type { Writer } from './writer.ts';
@@ -18,16 +18,21 @@ export const AGENT = 'agent:claude';
 
 export const SERVER_NAME = 'soundclaw';
 
-export const INSTRUCTIONS = `SoundClaw is a sound effects and music workbench you drive with a small command language. You cannot hear: every result ends with numbers for each sound it touched (length, peak, rms, a hash of the samples); a person listens in the dashboard.
+export const INSTRUCTIONS = `SoundClaw is a sound effects and music workbench you drive with a small command language. You cannot hear, so you have ears: every result ends with numbers for each sound it touched (duration, loudness, peaks, attack, tail, brightness, pitch, onsets) and a one-line check summary, \`view\` shows a picture (waveform, spectrogram, pitch track, A/B comparison), \`describe\` says it in words, \`check\` lists what fails and where. A person listens in the dashboard.
 
 Start with the \`project\` tool: it lists the sounds and gives a watch link (http://127.0.0.1:…/?token=…). Give the person that link so they can listen, and ask for changes or approve on each sound's card.
 
 Make sounds with \`run\` (one batch = one undo group; any error applies nothing). Commands, one per line or separated by ';' ('#' starts a comment):
-  sound new <id>                                   a new sound (ids: a-z, 0-9, _ and -; a placeholder sine tone for now)
-  sound set <id> <param>=<value> [<param>=<value>...]   frequency (20-20000 Hz), duration (0.01-10 s), volume (0-1)
+  sound new <id> voice=classic [preset=<category>] [seed=<n>]   the classic voice: 25 sfxr-style parameters; presets pickup, laser, explosion, powerup, hit, jump, blip (seeded: same seed, same sound)
+  sound new <id>                                   a placeholder sine tone (frequency 20-20000 Hz, duration 0.01-10 s, volume 0-1)
+  sound set <id> <param>=<value> [<param>=<value>...]   classic parameters (wave=square|saw|sine|noise, attack, sustain, punch, decay, freq, minFreq, slide, deltaSlide, vibratoDelay, vibratoDepth, vibratoSpeed, changeAmount, changeSpeed, duty, dutySweep, repeatSpeed, phaserOffset, phaserSweep, lowPass, lowPassSweep, resonance, highPass, highPassSweep, volume; seed) with their ranges in docs/commands.md
+  sound patch <id> "<single-patch text>"           all 25 values at once (sfxr text: numbers in order, or name=value pairs)
+  sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change to a classic sound
   sound mark <id> approved|rejected|draft ["note"]   a status mark (people use the buttons; the note says why)
   undo [group=<g>] [by=<author>]   |   redo [group=<undo group>] [by=<author>]      run alone, as the only command of the batch
-\`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers; \`export\` writes WAV files (16-bit, 44,100 Hz, mono).
+\`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers, description and checks; \`export\` writes wav (16-bit, 44,100 Hz, mono), patch (sfxr text) or csv (synth.csv) files; \`import\` makes classic sounds from an sfxr csv or patch.
+
+Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
 
 Requests: people ask for changes on a sound's card (Ask for changes, with a note). \`work\` claims the next open request and says what is asked; post progress with work(action="progress", text=…); finish with work(action="done", text=<what changed>) or, when you need the person, work(action="blocked", text=<one clear question>). While you are between tasks, keep \`soundclaw await <project>\` running in the background (its exit wakes you), or call await_requests.`;
 
@@ -43,7 +48,7 @@ export function projectSummary(w: Writer, url: string): string {
   const p = w.project;
   const lines = [`project: ${p.json.name} (${p.dir})`, `watch: ${url}`];
   const sounds = w.sounds();
-  lines.push('', sounds.length ? `sounds (${sounds.length}):` : 'sounds: none yet. Make one with run: "sound new beep; sound set beep frequency=880".');
+  lines.push('', sounds.length ? `sounds (${sounds.length}):` : 'sounds: none yet. Make one with run: "sound new zap voice=classic preset=laser seed=1".');
   for (const s of sounds) lines.push(`  ${soundSummary(w, s.id)}`);
   const open = openRequests(readRequests(p));
   if (open.length) lines.push('', `requests from people (${open.length}):`, ...open.map((q) => `  ${requestLine(q)}`));
@@ -115,28 +120,92 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('render', {
     title: 'Render a sound',
-    description: 'Render a sound (through the content-hash cache) and return its numbers: samples, duration, peak, rms and a hash of the samples. The same document always gives the same hash; the dashboard plays exactly these samples.',
+    description: 'Render a sound (through the content-hash cache) and return its numbers (samples, peak, rms, a hash of the samples; duration, loudness, true peak, attack, tail, brightness, pitch, onsets), a plain-words description, and the check summary as the last line. The same document always gives the same hash; the dashboard plays exactly these samples.',
     annotations: { readOnlyHint: true },
     inputSchema: z.object({ sound: z.string() }),
   }, (a) => w.enqueue(() => {
     try {
       const r = w.render(a.sound); // first, so the summary does not warm the cache
-      return { content: [text(`${soundSummary(w, a.sound)}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}`)] };
+      const head = soundSummary(w, a.sound).split('\n')[0]!;
+      return { content: [text(renderText(w, a.sound, `${head}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}`))] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('view', {
+    title: 'View a sound',
+    description: 'Your ears as a picture (PNG) with the numbers: wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers), pitch (YIN track over a note grid), compare (this sound and `other` stacked with a difference spectrogram, and distance numbers). The image is also saved under <project>/.cache/views.',
+    annotations: { readOnlyHint: true },
+    inputSchema: z.object({
+      sound: z.string(),
+      kind: z.enum(['wave', 'spec', 'pitch', 'compare']).optional().describe('Default spec'),
+      other: z.string().optional().describe('compare: the second sound'),
+    }),
+  }, (a) => w.enqueue((): CallToolResult => {
+    try {
+      const v = viewSound(w, a.sound, a.kind ?? 'spec', { other: a.other });
+      return { content: [{ type: 'image' as const, data: Buffer.from(v.png).toString('base64'), mimeType: 'image/png' }, text(v.text)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('describe', {
+    title: 'Describe a sound',
+    description: 'A plain-words summary built only from the measured numbers (length, tonal or noisy, brightness, pitch motion, attack, tail, peak, loudness, onsets), then the numbers and the check summary.',
+    annotations: { readOnlyHint: true },
+    inputSchema: z.object({ sound: z.string() }),
+  }, (a) => w.enqueue(() => {
+    try {
+      return { content: [text(describeText(w, a.sound))] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('check', {
+    title: 'Check sounds',
+    description: 'Run the checks (clip, loudness, dc, click, tail) on sounds (all when none are named): pass or fail with a score, the threshold from the project style, and the exact time ranges flagged. `work` done is refused while a sound fails.',
+    annotations: { readOnlyHint: true },
+    inputSchema: z.object({ sounds: z.array(z.string()).optional() }),
+  }, (a) => w.enqueue(() => {
+    try {
+      return { content: [text(checkText(w, a.sounds ?? []).text)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('import', {
+    title: 'Import sfxr patches',
+    description: 'Make classic sounds from an sfxr synth.csv (one sound per row, the key column is the id), a single-patch text, or a path to either. NA and missing cells take the defaults. One undo group; any error applies nothing.',
+    inputSchema: z.object({
+      source: z.string().describe('The csv or patch text, or a path to a file holding it'),
+      id: z.string().optional().describe('The sound id for a single patch'),
+    }),
+  }, (a) => w.enqueue(() => {
+    try {
+      const { commands, ids } = importCommands(a.source, a.id ?? null);
+      const r = w.run({ commands, by: AGENT });
+      if (!r.ok) return fail(formatErrors('import', r.errors));
+      return { content: [text([`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}`, ...r.touched.map((id) => soundSummary(w, id))].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }
   }));
 
   server.registerTool('export', {
-    title: 'Export WAV files',
-    description: 'Write sounds as WAV files (16-bit PCM, 44,100 Hz, mono) to a folder (default <project>/exports, which git ignores). Without sounds, all of them.',
+    title: 'Export sounds',
+    description: 'Write sounds to a folder (default <project>/exports, which git ignores). format wav (default): 16-bit PCM, 44,100 Hz, mono; classic sounds as the engine\'s pre-rendered WAVs (trunc(s x 32000)). patch: a single-patch text per classic sound. csv: one synth.csv for the classic sounds. Without sounds, all of them.',
     inputSchema: z.object({
       sounds: z.array(z.string()).optional().describe('The sounds to export (default all)'),
+      format: z.enum(['wav', 'patch', 'csv']).optional().describe('Default wav'),
       out: z.string().optional().describe('The folder to write into'),
     }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(formatExport(exportSounds(w, a.sounds ?? [], a.out)))] };
+      return { content: [text(formatExportFiles(exportFormat(w, a.sounds ?? [], a.format ?? 'wav', a.out)))] };
     } catch (e) {
       return errorResult(e);
     }

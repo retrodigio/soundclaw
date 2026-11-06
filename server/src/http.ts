@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
-import { HUMAN_RE, encodeWav, floatBytes } from '@soundclaw/core';
+import { HUMAN_RE, floatBytes, renderExact } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
 import type { ClientMessage, PersonRequest, ServerMessage } from './protocol.ts';
 import { awaitRequests, personRequest } from './requests.ts';
@@ -129,7 +129,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'request', 'reply', 'cancel', 'work'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'request', 'reply', 'cancel', 'work'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   const host = o.host ?? '127.0.0.1';
@@ -244,11 +244,12 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       return;
     }
     // A sound as the server renders it: raw little-endian float32 samples (what the browser must match), or a WAV.
-    const rm = /^\/api\/render\/([a-z][a-z0-9_-]*)\.(f32|wav)$/.exec(url.pathname);
+    const rm = /^\/api\/render\/([a-z][a-z0-9_-]*)\.(f32|f64|wav)$/.exec(url.pathname);
     if (rm) {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       void o.writer.enqueue(() => o.writer.render(rm[1]!)).then((r) => {
-        const body = rm[2] === 'wav' ? encodeWav(r.samples) : floatBytes(r.samples);
+        // f64: the exact doubles (the classic voice's reference samples); f32: what is played; wav: as exported.
+        const body = rm[2] === 'wav' ? o.writer.wavOf(rm[1]!) : rm[2] === 'f64' ? new Uint8Array(renderExact(o.writer.sound(rm[1]!)).buffer) : floatBytes(r.samples);
         res.writeHead(200, { ...HEADERS, 'Content-Type': rm[2] === 'wav' ? 'audio/wav' : 'application/octet-stream', 'Cache-Control': 'no-store', ETag: `"${r.key}"` });
         res.end(Buffer.from(body));
       }, (e: unknown) => json(res, e instanceof ProjectError ? 404 : 500, { error: (e as Error).message }));

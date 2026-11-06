@@ -13,12 +13,12 @@ import { removeTokenFile, writeTokenFile } from './runfile.ts';
 import { Writer } from './writer.ts';
 
 export const VERSION = '0.1.0';
-export const DEFAULT_PORT = 7418;
+export const DEFAULT_PORT = 7427;
 
 export interface ServeOptions {
   /** The project folder; created (empty) if it has no project.json. */
   project: string;
-  /** The port to try first (then the next 19); 0 picks a free one. Default 7418. */
+  /** The port to try first (then the next 19); 0 picks a free one. Default 7427. */
   port?: number;
   /** Speak MCP on stdin/stdout (default). Without it, serve only the dashboard. */
   mcp?: boolean;

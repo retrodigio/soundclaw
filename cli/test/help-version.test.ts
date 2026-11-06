@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { commandHelp, main, type Io } from '../src/main.ts';
 
 const BIN = join(import.meta.dirname, '..', 'bin', 'soundclaw.js');
-const COMMANDS = ['new', 'run', 'list', 'history', 'render', 'export', 'request', 'reply', 'cancel', 'work', 'skill', 'await', 'serve'];
+const COMMANDS = ['new', 'run', 'list', 'history', 'render', 'view', 'describe', 'check', 'import', 'export', 'request', 'reply', 'cancel', 'work', 'skill', 'await', 'serve'];
 
 function direct(args: string[]): { code: number; out: string; err: string } {
   let out = '', err = '';
@@ -40,9 +40,9 @@ describe('per-command help', () => {
     const h = direct(['await', '--help']).out;
     expect(h).toContain('soundclaw await <project-folder | watch-url>');
     expect(h).not.toContain('soundclaw history');
-    expect(direct(['export', '-h']).out).toContain('Write WAV files');
+    expect(direct(['export', '-h']).out).toContain('pre-rendered WAVs');
     expect(direct(['help', 'work']).out).toContain('claim');
-    expect(direct(['run', '--help']).out).toContain('sound set <id> frequency=');
+    expect(direct(['run', '--help']).out).toContain('sound set <id> <param>=<value>');
   });
   it('an unknown command is a usage error, and so is no command at all', () => {
     expect(direct(['help', 'frobnicate']).code).toBe(2);

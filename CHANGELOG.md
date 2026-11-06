@@ -6,6 +6,25 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### The classic voice and the agent's ears
+- The classic voice: sfxr's 25 parameters rendered sample-exactly (a port of a reference
+  synthesiser, with a platform-proof sine and cube), noise seeded by FNV-1a, `sound new <id>
+  voice=classic`, `sound set` with every parameter and `wave=` names, `sound patch`, and
+  seeded generators by category (`preset=pickup|laser|explosion|powerup|hit|jump|blip`) whose
+  ranges are data. `sound mutate` (or `mutate`) makes small seeded changes.
+- sfxr single-patch text and `synth.csv`: `import <project> sfxr …`, and `export --format
+  wav|patch|csv` (a classic WAV is the pre-rendered form, `trunc(s × 32000)`).
+- The ears: numbers with every render (duration, loudness in LUFS, true peak, crest factor, DC,
+  attack, tail, brightness, pitch, onsets), `view` (wave, spec, pitch, compare as PNG), `describe`,
+  and a check summary line at the end of every render result.
+- Checks (clip, loudness, dc, click, tail) with scores, thresholds and flagged time ranges:
+  `check`; the targets come from `style` in `project.json`. `work done` is refused while the
+  sound's checks fail.
+- The dashboard card shows the classic parameters read-only, a spectrogram thumbnail and a check
+  badge.
+- The default port is 7427.
+
+
 ### The first skeleton (early; nothing is released yet)
 - A project folder (`soundclaw new`): `sounds/`, `instruments/`, `songs/`, `sets/`, a history tape
   with authors (`agent:<name>`, `human:<name>`), `requests.jsonl`, and `exports/` ignored by git.

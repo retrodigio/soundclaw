@@ -3,8 +3,14 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { HUMAN_RE, activeGroups, renderKey, renderSound, samplesHash, type Diag, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, melSpectrogram, renderExact, renderKey, renderSound, runChecks, samplesHash, type Analysis, type CheckResult, type Diag, type MelSpec, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { ClientMessage, PersonRequest, Presence, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
+
+export interface Measured {
+  analysis: Analysis;
+  checks: CheckResult[];
+  spec: MelSpec;
+}
 
 export type Status = 'connecting' | 'open' | 'closed';
 export type Answer = { ok: boolean; error?: string; request?: WorkRequest };
@@ -37,6 +43,7 @@ export class Store {
   status: Status = 'connecting';
   project: Snapshot['project'] | null = null;
   sounds: Sound[] = [];
+  style: Style = DEFAULT_STYLE;
   tape: TapeEntry[] = [];
   requests: WorkRequest[] = [];
   presence: Presence | null = null;
@@ -54,6 +61,7 @@ export class Store {
   private waiting = new Map<number, (r: RunResult) => void>();
   private answers = new Map<number, (r: Answer) => void>();
   private renders = new Map<string, Float32Array>();
+  private measures = new Map<string, Measured>();
   private ctx: AudioContext | null = null;
   private source: AudioBufferSourceNode | null = null;
 
@@ -91,6 +99,7 @@ export class Store {
       case 'hello':
         this.project = m.snapshot.project;
         this.sounds = m.snapshot.sounds;
+        this.style = m.snapshot.style ?? DEFAULT_STYLE;
         this.tape = m.snapshot.tape;
         this.requests = m.snapshot.requests;
         this.presence = m.snapshot.presence;
@@ -192,6 +201,26 @@ export class Store {
       if (this.renders.size > 64) this.renders.delete(this.renders.keys().next().value!);
     }
     return r;
+  }
+
+  /** The sound's exact samples (doubles; for a classic sound, what the reference synth makes), for tests that compare the browser with Node bit for bit. */
+  exact(s: Sound): Float64Array {
+    return renderExact(s);
+  }
+
+  /** The sound's numbers, checks and a spectrogram, measured here with core (the same code the CLI uses), kept by the document's content key. */
+  measure(s: Sound): Measured {
+    const key = `${renderKey(s)}|${JSON.stringify(this.style)}`;
+    let m = this.measures.get(key);
+    if (!m) {
+      const x = this.render(s);
+      const analysis = analyze(x);
+      const hop = Math.max(256, Math.ceil(x.length / 240));
+      m = { analysis, checks: runChecks(x, analysis, this.style), spec: melSpectrogram(x, { bands: 48, hop }) };
+      this.measures.set(key, m);
+      if (this.measures.size > 64) this.measures.delete(this.measures.keys().next().value!);
+    }
+    return m;
   }
 
   hashOf(s: Sound): string {

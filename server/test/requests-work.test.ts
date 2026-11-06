@@ -11,7 +11,7 @@ let f: Fixture;
 const claude = 'agent:claude';
 beforeEach(() => {
   f = fixture();
-  f.w.run({ commands: 'sound new beep; sound set beep frequency=880', by: claude });
+  f.w.run({ commands: 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15', by: claude });
 });
 afterEach(() => f.clean());
 
@@ -49,9 +49,9 @@ describe('the agent\'s side', () => {
     personRequest(f.w, 'human:ana', { action: 'reply', id: 'r1', text: 'half' });
     expect(readRequests(f.w.project).get('r1')).toMatchObject({ state: 'open', seen: [] });
     agentWork(f.w, claude, { action: 'next', id: 'r1' });
-    f.w.run({ commands: 'sound set beep volume=0.25', by: claude });
-    const d = agentWork(f.w, claude, { action: 'done', text: 'volume 0.5 → 0.25' });
-    expect(d.request).toMatchObject({ state: 'done', latest: 'volume 0.5 → 0.25' });
+    f.w.run({ commands: 'sound set beep volume=0.16', by: claude });
+    const d = agentWork(f.w, claude, { action: 'done', text: 'volume 0.15 → 0.16' });
+    expect(d.request).toMatchObject({ state: 'done', latest: 'volume 0.15 → 0.16' });
     expect(records().map((r) => r.type)).toEqual(['request', 'seen', 'claim', 'progress', 'blocked', 'reply', 'claim', 'done']);
   });
 
@@ -80,7 +80,8 @@ describe('the agent\'s side', () => {
   it('a brief shows the sound and the next steps, as MCP tools or as CLI commands', () => {
     const q = ask('softer');
     const mcp = requestBrief(f.w, q);
-    expect(mcp).toContain('frequency 880');
+    expect(mcp).toContain('wave 2');
+    expect(mcp).toContain('checks: 5/5 pass');
     expect(mcp).toContain('sound mark beep rejected');
     expect(mcp).toContain('work(action="done"');
     expect(requestBrief(f.w, q, cliSteps('my proj'))).toContain("soundclaw work 'my proj' done r1");

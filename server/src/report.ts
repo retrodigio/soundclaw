@@ -1,7 +1,6 @@
 // Results as text, for the CLI and the MCP tools.
 
-import type { Sound, TapeEntry } from '@soundclaw/core';
-import type { ExportedSound } from './export.ts';
+import { CLASSIC_FIELDS, WAVE_NAMES, type Sound, type TapeEntry } from '@soundclaw/core';
 import type { RunOutcome } from './writer.ts';
 
 export const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -23,18 +22,15 @@ export function formatErrors(source: string, errors: { line: number; col: number
 
 /** One sound on a line. */
 export function soundLine(s: Sound): string {
-  return `${s.id}: ${s.voice} ${s.frequency} Hz, ${s.duration} s, volume ${s.volume}${s.status === 'draft' ? '' : `, ${s.status}`}`;
+  const status = s.status === 'draft' ? '' : `, ${s.status}`;
+  if (s.voice === 'tone') return `${s.id}: ${s.voice} ${s.frequency} Hz, ${s.duration} s, volume ${s.volume}${status}`;
+  const set = CLASSIC_FIELDS.filter((f) => s.patch[f.name] !== f.default).map((f) => `${f.name}=${f.name === 'wave' ? WAVE_NAMES[s.patch.wave] : s.patch[f.name]}`);
+  if (s.patch.seed !== undefined) set.push(`seed=${s.patch.seed}`);
+  return `${s.id}: classic${set.length ? ' ' + set.join(' ') : ' (all defaults)'}${status}`;
 }
 
 /** The tape: `#12 g5 agent:claude 2026-11-06T10:00:00Z  sound set beep volume=0.4`, undone groups marked. */
 export function formatHistory(entries: readonly TapeEntry[], active: ReadonlySet<string>): string {
   if (!entries.length) return 'the history is empty';
   return entries.map((e) => `#${e.seq} ${e.group} ${e.by}${e.at ? ' ' + e.at : ''}  ${e.cmd}${active.has(e.group) ? '' : '   (undone)'}`).join('\n');
-}
-
-export function formatExport(list: ExportedSound[]): string {
-  return [
-    `exported ${plural(list.length, 'sound')}`,
-    ...list.map((x) => `  ${x.id}: ${x.file} (${x.bytes} bytes, ${x.seconds.toFixed(3)} s, peak ${x.peak.toFixed(3)}, samples ${x.samples.slice(0, 12)}${x.cached ? ', from the render cache' : ''})`),
-  ].join('\n');
 }

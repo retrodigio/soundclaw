@@ -1,0 +1,434 @@
+{
+ "attack-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "attack-max": {
+  "patch": "wave=0,attack=1,sustain=0.02,punch=0,decay=0.02,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 100083,
+  "exact": "25433a8b50d6320b86df07ce2b0b0c9a27190308c178120abb2fc70228f4b007",
+  "wav": "7a0c082b012edd5d60f15696ad9fba381412eacb311050294e145a6929cd1b20"
+ },
+ "sustain-min": {
+  "patch": "wave=0,attack=0,sustain=0.01,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 2263,
+  "exact": "d235afa0d8d99e4b96bc4fcc4931dc105bd2a944441adc773c6bd0b2a9eb67c1",
+  "wav": "760be61b298d4e282c2b0e2cf5b802853f04140cbafbf8b00718eabc2df489ed"
+ },
+ "sustain-max": {
+  "patch": "wave=0,attack=0.02,sustain=1,punch=0,decay=0.02,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 100083,
+  "exact": "e84952bffcc472f70c526c799c8068b37d534769be7081e0ce0b91a9acea7b8f",
+  "wav": "ca8bda73bc9d93ebe0d1fce9893619121f363e4e24c4a8191683cfaff5d1f913"
+ },
+ "punch-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "punch-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=1,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "5399d3c57d67f21d4783b692bbea8428b6793b0af7a6091d33fee1c1b28cef68",
+  "wav": "ae737a3f5368c4f9a5b544c10da159013799d21f203d6e36437686a5dd73cbad"
+ },
+ "decay-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 1443,
+  "exact": "81a9ccd88b95262d923f507f1ea1a4a6fabbb38c0bd03a7cac3ec7897103db48",
+  "wav": "11ea71ec18191e338ee8ca7b4edcf34be70509316a31a9a81c6051a154d4299a"
+ },
+ "decay-max": {
+  "patch": "wave=0,attack=0.02,sustain=0.02,punch=0,decay=1,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 100083,
+  "exact": "e1275273ca5b8cf9b0e5c7d578da336a59ef29f9d3aeef7fff747c0b42a02533",
+  "wav": "1737178291cd7e354b20a8ee3833ebf890c7def8bb22a9ec45a4657a19b97e3f"
+ },
+ "freq-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "480eb6d24ff8c5291f799b1aacd70dfecaca98f57b9468ded3ab276454c2123c",
+  "wav": "627937ffb2a26661d54dbfac01dc8532ca390a5669567977b39bd3d31b185345"
+ },
+ "freq-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=1,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "57d0df900b6efce8b168ab698d8eec03b3bd06b17a1fae3331d1530d00020e6b",
+  "wav": "8c3af82bab154ebd856fa5c04385b17b84524818215f6ba56d41d3f20a5f35c2"
+ },
+ "minFreq-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=-0.3,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "2df881fca0009a9ccfbee50e19300b4a6d4bb207a1b76c46d7c95933a33ad805",
+  "wav": "84dc48a4caa82af886c698612d78ce247b15d828939e63e8ca58460992aa777e"
+ },
+ "minFreq-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=1,slide=-0.3,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 1,
+  "exact": "826482a105d0748b3a45dd0cd9169fe23e6681f085b9b8d386fde4e899527256",
+  "wav": "360068f902660eac84d87224ae51a57664e512d05b919c02e8db9a6edd7998d4"
+ },
+ "slide-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=-1,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "480eb6d24ff8c5291f799b1aacd70dfecaca98f57b9468ded3ab276454c2123c",
+  "wav": "627937ffb2a26661d54dbfac01dc8532ca390a5669567977b39bd3d31b185345"
+ },
+ "slide-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=1,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "a118a2fb9ea2a16b8f0ba9b1e15d714a82039bb9f51706bbf0a87961b74a23a9",
+  "wav": "c046e281744a5f0f84110be19bee9c875f077be9c1539da4419c1139f40f1195"
+ },
+ "deltaSlide-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=-1,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "3266ed15c9c23a69dc548f4786b4035f19371e1457c367c5d71759277426f727",
+  "wav": "d4f9bc811a73b40db6d45ca19af350ed0894c219c5fc021fca1dea961f9c1a94"
+ },
+ "deltaSlide-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=1,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "b07462eae8e6060fa496204cfa8c70bb0017ed230497947378bdc787c8096eb6",
+  "wav": "b19cb6fce2e2c744aa4f4d86dcf916ddd64e856e5f5884c5f1f9f9a2b16954b7"
+ },
+ "vibratoDelay-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "vibratoDelay-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=1,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "vibratoDepth-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=-1,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "vibratoDepth-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=1,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "vibratoSpeed-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "vibratoSpeed-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=1,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "changeAmount-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=-1,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "changeAmount-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=1,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "changeSpeed-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "changeSpeed-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=1,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "duty-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "duty-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=1,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "45120295e49ce2d0affcada7add4627aec28bf5fc9da503e63e36928010ba941",
+  "wav": "3dfb5d1f72dd70bce37480fd582b2a42630a0a1cec49387c3ad460d8667048a6"
+ },
+ "dutySweep-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=-1,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "dutySweep-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=1,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "b37efcd8348c12a6c10389b7dd31e9ebf4fe0f3352956607329d78b772fe9d26",
+  "wav": "2a288ed6464d5b1e06445076cd84e2fbd3b39fd7b92b9a2963908b6c769b90ee"
+ },
+ "repeatSpeed-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "repeatSpeed-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=1,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "phaserOffset-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=-1,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "893ad973288c5834eb06ec470193df5df7e3ad65224d459f743936c4e4865987",
+  "wav": "80c14672fb3e7d6bf595a2976c150e36e79bdf21b3b8efce418639d6a0babb33"
+ },
+ "phaserOffset-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=1,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "893ad973288c5834eb06ec470193df5df7e3ad65224d459f743936c4e4865987",
+  "wav": "80c14672fb3e7d6bf595a2976c150e36e79bdf21b3b8efce418639d6a0babb33"
+ },
+ "phaserSweep-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=-1,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "09829072d5c5a94b57bc54716454c73af901b19ae2ae162927ee0e674dce6363",
+  "wav": "c0f8790bac802f559b1b02d9ce1c36dea59a9ac3de09a38db870ee79f501367b"
+ },
+ "phaserSweep-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=1,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "09829072d5c5a94b57bc54716454c73af901b19ae2ae162927ee0e674dce6363",
+  "wav": "c0f8790bac802f559b1b02d9ce1c36dea59a9ac3de09a38db870ee79f501367b"
+ },
+ "lowPass-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=0,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "18e5fc6a2c2632dc42118e7f70f316f555c6dafc30e9938370f4a65ae6ff8e06",
+  "wav": "e3e66e71d7cdc772d2df24be1a1bc1aa9c9342bb382b7a16e3fc6ddf3a752047"
+ },
+ "lowPass-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "lowPassSweep-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=-1,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "lowPassSweep-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=1,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "resonance-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "resonance-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=1,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "highPass-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "highPass-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=1,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "32608406142ffc1a99fed01a520ff8c32c9afe596db4baf93184d7749dbcf33e",
+  "wav": "ec8760a5b0360423167fdc9a1366f5fa0d674c9309cf9df417cb25e70c7a1fe5"
+ },
+ "highPassSweep-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=-1,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "highPassSweep-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=1,volume=0.6",
+  "samples": 3693,
+  "exact": "4bf66a95aa0fb20df8371ecc3b9b4ff3a09d1f69dd2c70d37bbb11ff15d40054",
+  "wav": "b37450c2c0a94b2221baf41a775f4b85777ab2afabbe3acf080aa8a544bdb8b6"
+ },
+ "volume-min": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0",
+  "samples": 3693,
+  "exact": "09651edb801256477322980f0ad1f5b7b541a55783bb44a327fa50a76c5f19cf",
+  "wav": "e3e66e71d7cdc772d2df24be1a1bc1aa9c9342bb382b7a16e3fc6ddf3a752047"
+ },
+ "volume-max": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=1",
+  "samples": 3693,
+  "exact": "988f58e103757a722521980b3b8397e8f559ea2148f590721c4022ae6c8bb25e",
+  "wav": "eefb621f78e7e427be2f9ba573b620c53bdc53f6df52ca39b763cb37355e10d1"
+ },
+ "wave-square": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0.4,vibratoSpeed=0.5,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "84ef2ce758213e89f0cb29e7ef42d8c943a79c671f4b9d0ba4d8d1a8f8f67fd1",
+  "wav": "aa78ad61d188d14d25a388dea382ff91fb7493b68f1b46cd9fa27b2df1b98028"
+ },
+ "wave-square-filtered": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0.3,phaserSweep=-0.2,lowPass=0.5,lowPassSweep=0,resonance=0.7,highPass=0.2,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1edec01908bd06adbe309b96cfbe193274d597357a9ad705091601fc8dc65532",
+  "wav": "6861f5656aebe8a6700b0a1f605d86c1cb71d6a44df304408461e92935853f42"
+ },
+ "wave-saw": {
+  "patch": "wave=1,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0.4,vibratoSpeed=0.5,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "ffdd885d02c3e809e8d68da9d5365ed7358f50308277ccf4f3450a1e312dd993",
+  "wav": "5e6cb1a5c8dccc339b3289589f350fc50ac8964f92428fc99fb768d9958f1d80"
+ },
+ "wave-saw-filtered": {
+  "patch": "wave=1,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0.3,phaserSweep=-0.2,lowPass=0.5,lowPassSweep=0,resonance=0.7,highPass=0.2,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "a49affadff62d709baa2a112f6c49b8ed523b71c1b3ca48677b40c9f4bdef340",
+  "wav": "371cab060395fa99f09f117f18259b16c905bfbdd6535b98553b6bd2721eba3b"
+ },
+ "wave-sine": {
+  "patch": "wave=2,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0.4,vibratoSpeed=0.5,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "64cc4c34295591286a2c6328367c3256b52a9a7b26c72dafe61c81b5d995307c",
+  "wav": "9138d6216274df9a13354d2ad4913aeaf36519ede478f97f0c0178fb2f0895f4"
+ },
+ "wave-sine-filtered": {
+  "patch": "wave=2,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0.3,phaserSweep=-0.2,lowPass=0.5,lowPassSweep=0,resonance=0.7,highPass=0.2,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "c26b63e43d4714af18c1047eade826959282996566c0ea7dfa20b378d6f24936",
+  "wav": "74f40f76b2f709346a5868ae418baacfa853a3bb9229a36badae9e26ba7ebb94"
+ },
+ "wave-noise": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0.4,vibratoSpeed=0.5,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "8ce1042423b4ef68a352c82f696b3dbf7dbb0dcfc30fcc42b476dd6f9ae62773",
+  "wav": "72a643a5eaa357dbd7a2ee0d1586f25388f24aaebff7f74f8ff4c7ee1a8d5b20"
+ },
+ "wave-noise-filtered": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0.3,phaserSweep=-0.2,lowPass=0.5,lowPassSweep=0,resonance=0.7,highPass=0.2,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "cc81ce2ce9f56c5e634f6e56e8ee4e6de6d0cab28f2756417e8721b0f57c8255",
+  "wav": "112e1cbed589eab41aa6ccd7e5848d6e2e93011b312fd8ff1a25df659d90af30"
+ },
+ "wave-by-name": {
+  "patch": "wave=2,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.5,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "fafabbdd574e939869a11c9b564d314291701073c7d1fb45f568ac1c35f4cd61",
+  "wav": "2b6ca5b6fa9fe19774ec9efe7f9321073267f6c6cb26e615a81f4251aad4a880"
+ },
+ "noise-seed-0": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=0",
+  "samples": 3693,
+  "exact": "f817d4ebba2c7f4279568ae2529c652798aa9e2aa85fe4b42c0c694f7a29094c",
+  "wav": "05c93c8797c33d0a196dc3e9de54b748a5d52fbc3a40bd9298a873649057b0f7"
+ },
+ "noise-seed-1": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=1",
+  "samples": 3693,
+  "exact": "9271b97cfc198444ad325c1bc4902e52693f785fb768ff5e9300838561f37102",
+  "wav": "94a2114fa3b539690ba2509ca91809e7c82deacee8293c8d36fd2275ee6721f0"
+ },
+ "noise-seed-12345": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=12345",
+  "samples": 3693,
+  "exact": "43d145a1003632ccc3361c5a18ce806337092ea61343d5ad29cff59d666c36c6",
+  "wav": "43d27aa3a2b877464952903329ce20f762a77326e97f9eee71d7aeed4f43b023"
+ },
+ "noise-seed-4294967295": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=4294967295",
+  "samples": 3693,
+  "exact": "07fbbc96952c8946d10b3ef0c5893f2b6c8b8b7aa3a98ceb563b155793450e7a",
+  "wav": "c521fdb7754c4f0afaf2c8961532eaea3423b628f97880f64208dde83e8c4f7c"
+ },
+ "noise-seed--7": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=-7",
+  "samples": 3693,
+  "exact": "c6edd15ec34e3ce03051c40e9caaca4212ea7c2bcdc4c104c66d3987bfea1384",
+  "wav": "4c00d15923ba9df81f575aa520aa01d0b765624b686112c643fa668835bc8985"
+ },
+ "noise-seed-2.5": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=2.5",
+  "samples": 3693,
+  "exact": "b9b0442745d21fa21a21d07249ed334810a2758c1d658bc879bb79ed2121c605",
+  "wav": "1adc4adc7357bdbb5f6ffd4c408f31e249ec33b3658661799a477b423fc9c726"
+ },
+ "noise-default-seed": {
+  "patch": "wave=3,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.45,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "be70ce22ebe95001a589f4880ca4b64d041d55a8449bc00e97a2a2a2bd832cd4",
+  "wav": "77375af1da0429c257697dd3a94212abd6ce7662ca0cdbbef7c6a9c06947b839"
+ },
+ "square-seed-ignored": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6,seed=99",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "laser-like": {
+  "patch": "wave=1,attack=0,sustain=0.1,punch=0.4,decay=0.2,freq=0.7,minFreq=0.2,slide=0.35,deltaSlide=-0.1,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0.3,dutySweep=0.2,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.5",
+  "samples": 5003,
+  "exact": "e4d7810c5163184b7bab2116a6206ebf5d29b52088e8d3147c08400d999a5b24",
+  "wav": "3fd071b3a189ca931286e2d3f8387d897b04283e9015fab37005f769a19ba810"
+ },
+ "explosion-like": {
+  "patch": "wave=3,attack=0,sustain=0.25,punch=0.6,decay=0.45,freq=0.12,minFreq=0,slide=-0.2,deltaSlide=0.05,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0.7,phaserOffset=0,phaserSweep=0,lowPass=0.4,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.5",
+  "samples": 26503,
+  "exact": "f36140ef3f1a2dbf595335ee69081484026b960ba3c7ccedb294cb962775e9a6",
+  "wav": "b6abd08967aae352067ff2de92a7550ba42584f90a9d3ff3cd2ccb9e4ef31940"
+ },
+ "pickup-like": {
+  "patch": "wave=0,attack=0.02,sustain=0.04,punch=0.5,decay=0.2,freq=0.5,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0.4,changeSpeed=0.55,duty=0.5,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.5",
+  "samples": 4203,
+  "exact": "16a2646ce66210d4814c7930c4eb801cceaa6aee30c2512b92fb737fe48bc2b3",
+  "wav": "5c809f0e3d4316d0159ab3ba1a0fa82964ca8af3d8445906491826ac349da7ce"
+ },
+ "change-down": {
+  "patch": "wave=0,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=-0.6,changeSpeed=0.2,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "1c94b0fc7f9d6e52aa3a630636a41424cd36c3afbf2c42416d58a252a57d1e9c",
+  "wav": "a09795fec0db294136572281ff3cab8d79a121f8a4b9fb1e2c59b79364c7df19"
+ },
+ "phaser-negative-offset": {
+  "patch": "wave=1,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=-0.8,phaserSweep=0.4,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "38c90ed9d58044e3ab618a2e97d0151140f398aea4315c6d2855020970365d3a",
+  "wav": "83060f6e74ff52585c11df8ed2984eae58f5bc6db5fbbd85a5b358370944f552"
+ },
+ "vibrato-delayed": {
+  "patch": "wave=2,attack=0,sustain=0.12,punch=0,decay=0.15,freq=0.35,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0.5,vibratoDepth=-0.7,vibratoSpeed=0.8,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=0.6",
+  "samples": 3693,
+  "exact": "420e84640395261608d704787a5210ffd733d18d956cb58dfa4c472e952ef29d",
+  "wav": "e9d0b25014ad2dd78328b3873da668db23a060b6390790ec744bbcc03341de09"
+ },
+ "out-of-range-clamped": {
+  "patch": "wave=0,attack=0,sustain=0.01,punch=0,decay=1,freq=1,minFreq=0,slide=0,deltaSlide=0,vibratoDelay=0,vibratoDepth=0,vibratoSpeed=0,changeAmount=0,changeSpeed=0,duty=0,dutySweep=0,repeatSpeed=0,phaserOffset=0,phaserSweep=0,lowPass=1,lowPassSweep=0,resonance=0,highPass=0,highPassSweep=0,volume=1",
+  "samples": 100013,
+  "exact": "07b65cb1d3acc26af74f2b3d037ad4b955e6105cb3662c8c85cc3e65b30357ba",
+  "wav": "5eaf9bcdf27b9a7472dc8a072d48b1bab2abfd5195e5da42d0a74b375c000e72"
+ }
+}

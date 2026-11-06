@@ -1,18 +1,21 @@
 ---
 name: soundclaw
-description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, render, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
+description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, render, view, describe, check, import, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
 ---
 
 # SoundClaw
 
 You make sounds by writing commands. A sound is a small document of parameters, rendered the same
 way every time; every command goes on a history tape with its author, so what you did and what
-the person did can be read back. You cannot hear: every result ends with numbers for each sound it
-touched (samples, peak, rms, a hash of the samples). **A person listens** in the dashboard, which
-plays exactly the samples you rendered, and tells you what to change through requests.
+the person did can be read back. You cannot hear, so you have ears: every result ends with numbers
+for each sound it touched (samples, peak, rms, a hash, and a one-line check summary), `view` shows
+a picture, `describe` puts the numbers in words, `check` says what fails and where. **A person
+listens** in the dashboard, which plays exactly the samples you rendered, and tells you what to
+change through requests.
 
-At present a sound is a placeholder sine tone with `frequency`, `duration` and `volume`; the fuller
-synth arrives in later versions, and everything below stays the same.
+Make sounds with the **classic voice** (`voice=classic`: sfxr's 25 parameters). The plain sine tone
+(`sound new <id>`) is a placeholder with `frequency`, `duration` and `volume`; it has no fade, so it
+fails the tail check and cannot finish a request.
 
 If the tools are missing, the server is not connected:
 `claude mcp add soundclaw -- npx soundclaw serve --project <folder>.sclaw` (then restart Claude
@@ -37,21 +40,43 @@ Code). Without MCP, use the `soundclaw` command line, which does the same.
 `run` takes commands, one per line or separated by `;`:
 
 ```
-sound new beep
-sound set beep frequency=880 duration=0.3 volume=0.4
-sound mark beep approved "note"      # people do this with buttons
+sound new zap voice=classic preset=laser seed=3     # presets: pickup laser explosion powerup hit jump blip
+sound set zap wave=saw freq=0.6 slide=-0.3 decay=0.25 volume=0.2
+sound patch zap "wave=1,freq=0.6,slide=-0.3"       # or all 25 values from sfxr text
+sound mutate zap amount=0.05 as=zap2                 # a small seeded change, into a new sound
+sound mark zap approved "note"       # people do this with buttons
 undo                                  # run alone; also: undo group=g3, undo by=human:ana
 redo
 ```
 
 - A batch is **one undo group**, and any error applies **nothing**: read the error (line:column),
   fix the batch, and send it again.
-- Parameters: `frequency` 20-20000 Hz, `duration` 0.01-10 s, `volume` 0-1.
+- Classic parameters (all 0..1 unless noted): `wave` (square, saw, sine, noise), `attack`, `sustain`
+  (0.01..1), `punch`, `decay`, `freq` (start pitch), `minFreq` (the sound ends when the pitch falls
+  to it), `slide` and `deltaSlide` (-1..1), `vibratoDelay`, `vibratoDepth` (-1..1), `vibratoSpeed`,
+  `changeAmount` (-1..1), `changeSpeed`, `duty`, `dutySweep` (-1..1), `repeatSpeed`, `phaserOffset`
+  and `phaserSweep` (-1..1), `lowPass` (1 = off), `lowPassSweep` (-1..1), `resonance`, `highPass`,
+  `highPassSweep` (-1..1), `volume`. Ranges and formulas: docs/commands.md. Tone: `frequency`
+  20-20000 Hz, `duration` 0.01-10 s, `volume` 0-1.
 - Ids are lowercase: `a-z`, `0-9`, `_`, `-`.
-- `render <sound>` gives the numbers again; `export` writes WAV files (16-bit PCM, 44,100 Hz,
-  mono) to `<project>/exports/` or `out`.
+- `render <sound>` gives the numbers again; `export` writes `wav` (16-bit PCM, 44,100 Hz, mono),
+  `patch` (sfxr text) or `csv` (synth.csv) to `<project>/exports/` or `out`; `import` reads an
+  sfxr csv or patch.
 - The same document always renders the same hash, on every machine. If a number surprises you,
   trust the numbers, not your expectation of the sound.
+
+## Listening with numbers and pictures
+
+- Start with `check` (CLI: `soundclaw check <project> <sound>`): clip, loudness (target from the
+  project style, default -16 LUFS ±1, so `volume` is usually the fix), dc, click (a jump at the first
+  or last sample: use `attack` > 0 and let `decay` reach zero), tail (silence padding, or a sound cut
+  off while still loud: a `minFreq` cut or a short decay). It lists the exact time ranges.
+- `view <sound> spec` shows brightness, pitch motion and noise; `wave` the shape and the clipping;
+  `pitch` the note it actually sounds (slides, vibrato); `compare <sound> other=<sound>` stacks two
+  and shows the difference with distance numbers (use it for "more like that one" and to see what a
+  `mutate` changed). The image is a PNG; the tool also prints the numbers.
+- `describe <sound>` is the same measurements in plain words.
+- A request's `work done` is refused while the sound's checks fail; fix the sound, then finish.
 
 ## Requests from people
 

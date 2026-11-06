@@ -50,3 +50,12 @@ button.play { min-width: 84px; border-color: var(--accent); }
 .seq, .group { color: var(--dim); font: 11px ui-monospace, Menlo, monospace; }
 .by.human { color: var(--warn); } .by.agent { color: var(--accent); }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; } .history { position: static; max-height: none; } }
+
+/* classic parameters, the spectrogram and the check badge */
+.spec { display: block; width: 100%; height: 48px; image-rendering: pixelated; margin-top: 4px; border-radius: 2px; }
+.params.classic { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5em, 1fr)); gap: 1px 8px; font-size: 11px; }
+.params.classic .changed { font-weight: 600; color: #d8dbe0; }
+.params.classic .dim { opacity: 0.45; }
+.analysis { font-size: 11px; margin: 2px 0; }
+.chip.check-pass { color: #58c4a6; }
+.chip.check-fail { color: #f0a25a; }

@@ -2,6 +2,7 @@
 // Math.sin (a sine built from + - * / alone, which IEEE-754 fixes exactly), so Node and the
 // browser, now and in a year, produce the same samples bit for bit.
 
+import { renderClassic } from './classic.ts';
 import { RENDER_VERSION, SAMPLE_RATE, type Sound } from './sound.ts';
 
 const TAU = 6.283185307179586;
@@ -18,12 +19,23 @@ export function sineCycles(cycles: number): number {
 }
 
 /** Number of samples a sound lasts. */
-export function sampleCount(s: Pick<Sound, 'duration'>): number {
+export function sampleCount(s: { duration: number }): number {
   return Math.round(s.duration * SAMPLE_RATE);
 }
 
-/** The sound as 44,100 Hz mono samples. */
+/** The sound as 44,100 Hz mono doubles: for the classic voice exactly what the reference synth makes (the engine's WAVs quantise these). */
+export function renderExact(s: Sound): Float64Array {
+  if (s.voice === 'classic') return renderClassic(s.patch);
+  const n = sampleCount(s);
+  const out = new Float64Array(n);
+  const step = s.frequency / SAMPLE_RATE;
+  for (let i = 0; i < n; i++) out[i] = Math.fround(s.volume * sineCycles(i * step));
+  return out;
+}
+
+/** The sound as 44,100 Hz mono samples (what is played, cached and measured). */
 export function renderSound(s: Sound): Float32Array {
+  if (s.voice === 'classic') return Float32Array.from(renderClassic(s.patch));
   const n = sampleCount(s);
   const out = new Float32Array(n);
   const step = s.frequency / SAMPLE_RATE;

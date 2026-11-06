@@ -1,6 +1,8 @@
 // WAV (RIFF) encoding: 16-bit PCM, mono or any channel count, little-endian.
 
-import { SAMPLE_RATE } from './sound.ts';
+import { classicWav } from './classic.ts';
+import { renderExact, renderSound } from './render.ts';
+import { SAMPLE_RATE, type Sound } from './sound.ts';
 
 /** Float sample to 16-bit: clamped to [-1, 1], scaled by 32767, rounded to nearest (Math.round: ties toward +infinity). */
 export function toPcm16(x: number): number {
@@ -53,4 +55,10 @@ export function decodeWav(bytes: Uint8Array): WavInfo {
   for (let i = 0; i < n; i++) data[i] = v.getInt16(44 + i * 2, true);
   const channels = v.getUint16(22, true);
   return { format, channels, sampleRate: v.getUint32(24, true), bitsPerSample, frames: n / channels, data };
+}
+
+/** A sound's WAV file as exported: the classic voice as the engine's pre-rendered form (trunc(s × 32000)), others as 16-bit PCM scaled by 32767. */
+export function soundWav(s: Sound, samples?: Float32Array): Uint8Array {
+  if (s.voice === 'classic') return classicWav(renderExact(s));
+  return encodeWav(samples ?? renderSound(s));
 }

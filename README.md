@@ -5,10 +5,10 @@ A sound effects and music workbench for AI agents. An agent makes sounds by **te
 view. Sounds are made from parameters, so they cost nothing to render, reproduce exactly on every
 machine, and can be edited and checked by a person and an agent alike.
 
-> **Status: early.** This is the skeleton: the project folder, history, rendering, export, the
-> server and dashboard, and the request loop between a person and an agent. The only voice is a
-> placeholder sine tone. The real synth, the views an agent can "hear" with, the music tracker
-> and the editors come next. Expect the commands and documents to change.
+> **Status: early.** The project folder, history, rendering, the server and dashboard, the request
+> loop between a person and an agent, the classic (sfxr-style) voice, and the views and checks an
+> agent "hears" with are in. The sound editors, the enhanced voices and the music tracker come
+> next. Expect the commands and documents to change.
 
 ## What works today
 
@@ -17,11 +17,20 @@ machine, and can be edited and checked by a person and an agent alike.
   (ignored).
 - **One writer, one undo step per batch.** `soundclaw run` applies a batch of commands as one undo
   group; any error applies nothing. `undo`, `redo` and `history` are commands and a view of the tape.
-- **Deterministic rendering.** A sound renders to 44,100 Hz mono `Float32Array` by pure TypeScript,
-  the same samples in Node and in the browser (tested), cached by the content hash of the document,
-  and exported as 16-bit WAV.
+- **The classic voice.** sfxr's 25 parameters, rendered sample-exactly (the sine and the cube are
+  done in arithmetic that every platform agrees on), with generators by category (pickup, laser,
+  explosion, powerup, hit, jump, blip), seeded `mutate`, and import and export of sfxr patch text and
+  `synth.csv`.
+- **Ears for an agent that cannot listen.** Every result carries numbers (loudness in LUFS, true
+  peak, attack, tail, brightness, pitch, onsets) and a check summary; `view` draws the waveform, a
+  mel spectrogram, the pitch track, or two sounds compared; `describe` says it in words; `check`
+  flags clips, loudness, DC, clicks and cut tails with the exact time ranges, and `work done` waits
+  for them to pass.
+- **Deterministic rendering.** A sound renders to 44,100 Hz mono samples by pure TypeScript, the
+  same samples in Node and in the browser (tested), cached by the content hash of the document, and
+  exported as 16-bit WAV.
 - **A live dashboard.** `soundclaw serve` shows every sound as a card with a play button, a
-  waveform and the history. The browser renders with the same code as the agent, so what plays is
+  waveform, a spectrogram, its checks and the history. The browser renders with the same code as the agent, so what plays is
   what the agent rendered (the card and the CLI print the same hash).
 - **People and agents talk through requests.** "Ask for changes" and "Approve" on a card reach an
   agent that is waiting with `soundclaw await` (it exits with the events, which wakes the agent) or
@@ -34,19 +43,22 @@ You need Node.js 22.18 or later.
 ```sh
 npx soundclaw new demo.sclaw
 npx soundclaw serve --project demo.sclaw &      # prints the dashboard link, with its token
-npx soundclaw run demo.sclaw -e 'sound new beep; sound set beep frequency=880 volume=0.4'
+npx soundclaw run demo.sclaw -e 'sound new zap voice=classic preset=laser seed=1; sound set zap volume=0.2'
 ```
 
 ```
 applied 2 commands as group g1 by agent:claude
-  #1 sound new beep
-  #2 sound set beep frequency=880 volume=0.4
-beep: tone 880 Hz, 0.5 s, volume 0.4 → 22050 samples, peak 0.400, rms 0.283, hash f4c7b3408089
+  #1 sound new zap voice=classic preset=laser seed=1
+  #2 sound set zap volume=0.2
+zap: classic wave=sine sustain=0.225 punch=0.298 decay=0.001 freq=0.984 minFreq=0.228 slide=-0.227 highPass=0.042 volume=0.2 → 5065 samples, peak 0.633, rms 0.368, hash 254675a10aed
+    checks: 3/5 pass; failing: loudness -5.8 LUFS (10.2 LU too loud); click start 0.171, end 0.000
 warnings: none
 ```
 
 Open the link: the sound is a card. Press play. Ask for changes, and run `soundclaw await demo.sclaw`
-to receive the request. `soundclaw export demo.sclaw` writes `exports/beep.wav`.
+to receive the request. `soundclaw describe demo.sclaw zap` says what it sounds like in numbers and
+words, `soundclaw view demo.sclaw zap spec` draws its spectrogram, and `soundclaw export demo.sclaw`
+writes `exports/zap.wav`.
 
 ### With Claude Code
 

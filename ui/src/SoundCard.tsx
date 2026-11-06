@@ -4,9 +4,10 @@
 // (answer it here), done.
 
 import { useState } from 'react';
-import type { Sound, WorkRequest } from '@soundclaw/core';
+import { CLASSIC_FIELDS, WAVE_NAMES, checkSummary, checksPass, type Sound, type WorkRequest } from '@soundclaw/core';
 import { NoListener, unattended, useNow } from './Listening.tsx';
 import type { Store } from './store.ts';
+import { Spectrogram } from './Spectrogram.tsx';
 import { Waveform } from './Waveform.tsx';
 
 const fmt = (n: number) => String(n);
@@ -43,6 +44,9 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const samples = store.render(sound);
+  const measured = store.measure(sound);
+  const pass = checksPass(measured.checks);
+  const failing = measured.checks.filter((k) => !k.pass);
   const playing = store.playing === sound.id;
   const plays = store.played.filter((p) => p.id === sound.id).length;
   const mine = store.requests.filter((q) => q.sound === sound.id);
@@ -54,11 +58,29 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
     <article className="card" data-testid={`card-${sound.id}`} data-status={sound.status} data-hash={store.hashOf(sound)}>
       <header>
         <h2>{sound.id}</h2>
+        <span className={`chip check-${pass ? 'pass' : 'fail'}`} data-testid={`check-${sound.id}`} data-pass={pass} data-failing={failing.map((k) => k.name).join(',')} title={checkSummary(measured.checks)}>
+          {pass ? '✓ checks pass' : `✗ ${failing.map((k) => k.name).join(', ')}`}
+        </span>
         <span className={`chip status-${sound.status}`} data-testid={`status-${sound.id}`}>{sound.status}</span>
       </header>
       <Waveform samples={samples} id={sound.id} />
-      <div className="params" data-testid={`params-${sound.id}`}>
-        <span>{fmt(sound.frequency)} Hz</span><span>{fmt(sound.duration)} s</span><span>volume {fmt(sound.volume)}</span>
+      <Spectrogram spec={measured.spec} id={sound.id} />
+      {sound.voice === 'tone' ? (
+        <div className="params" data-testid={`params-${sound.id}`}>
+          <span>{fmt(sound.frequency)} Hz</span><span>{fmt(sound.duration)} s</span><span>volume {fmt(sound.volume)}</span>
+        </div>
+      ) : (
+        <div className="params classic" data-testid={`params-${sound.id}`} data-voice="classic" title="The classic voice's 25 parameters (read-only here; the editor comes next). Changed from the default in bold.">
+          {CLASSIC_FIELDS.map((f) => (
+            <span key={f.name} className={sound.patch[f.name] === f.default ? 'dim' : 'changed'} data-testid={`param-${sound.id}-${f.name}`} title={f.help}>
+              {f.name} {f.name === 'wave' ? WAVE_NAMES[sound.patch.wave] : fmt(sound.patch[f.name])}
+            </span>
+          ))}
+          {sound.patch.seed !== undefined && <span className="changed" data-testid={`param-${sound.id}-seed`}>seed {sound.patch.seed}</span>}
+        </div>
+      )}
+      <div className="dim analysis" data-testid={`numbers-${sound.id}`}>
+        {measured.analysis.duration.toFixed(2)} s · {Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · {Number.isFinite(measured.analysis.truePeakDb) ? measured.analysis.truePeakDb.toFixed(1) : '−∞'} dBTP
       </div>
       <div className="dim hash" title="Hash of the rendered samples; the CLI and MCP print the same first 12 digits">samples {store.hashOf(sound).slice(0, 12)}</div>
       <div className="card-actions">

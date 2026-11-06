@@ -1,6 +1,7 @@
 // A real `soundclaw serve`: MCP over stdio as an agent uses it, the HTTP API, a WebSocket client
 // standing in for a page, and other `soundclaw` processes (run, await, work) going through the
 // server's writer. Nothing is left running.
+import type { ClassicSound } from '@soundclaw/core';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { request } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -119,13 +120,13 @@ describe('the server process', () => {
     const messages: { type: string; [k: string]: unknown }[] = [];
     ws.onmessage = (ev) => messages.push(JSON.parse(String(ev.data)));
     await until(() => messages.some((m) => m.type === 'hello'), 'hello');
-    const run = await cli(['run', dir, '-e', 'sound new beep; sound set beep frequency=880', '--by', 'claude']);
+    const run = await cli(['run', dir, '-e', 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15', '--by', 'claude']);
     expect(run.code, run.err).toBe(0);
     await until(() => messages.some((m) => m.type === 'batch'), 'the batch');
     const batch = messages.find((m) => m.type === 'batch') as unknown as { by: string; group: string; entries: { cmd: string }[]; sounds: Sound[] };
     expect(batch).toMatchObject({ by: 'agent:claude', group: 'g1' });
-    expect(batch.entries.map((e) => e.cmd)).toEqual(['sound new beep', 'sound set beep frequency=880']);
-    expect(batch.sounds.map((x) => [x.id, x.frequency])).toEqual([['beep', 880]]);
+    expect(batch.entries.map((e) => e.cmd)).toEqual(['sound new beep voice=classic', 'sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15']);
+    expect(batch.sounds.map((x) => [x.id, (x as ClassicSound).patch.freq])).toEqual([['beep', 0.3]]);
     // A person's edit from the page is written as the page's human, then undone from the CLI.
     ws.send(JSON.stringify({ type: 'run', id: 1, commands: 'sound set beep volume=0.3', by: 'human:ana' }));
     await until(() => messages.some((m) => m.type === 'result' && m.id === 1), 'the result');
@@ -142,7 +143,7 @@ describe('the server process', () => {
 
   it('await exits with a person\'s request, the agent claims and finishes it through the server, and the page follows', async () => {
     const s = await startServe();
-    await cli(['run', dir, '-e', 'sound new beep']);
+    await cli(['run', dir, '-e', 'sound new beep voice=classic; sound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15']);
     const ws = new WebSocket(s.url.replace('http', 'ws').replace('/?token', '/ws?token'));
     const messages: { type: string; [k: string]: unknown }[] = [];
     ws.onmessage = (ev) => messages.push(JSON.parse(String(ev.data)));
@@ -162,8 +163,8 @@ describe('the server process', () => {
     expect((await cli(['await', dir, '--timeout', '1', '--since', cursor])).code).toBe(3);
     const claimed = await cli(['work', dir, 'claim']);
     expect(claimed.out).toMatch(/^claimed r1/);
-    expect((await cli(['run', dir, '-e', 'sound set beep frequency=400'])).code).toBe(0);
-    expect((await cli(['work', dir, 'done', 'frequency 440 → 400'])).out).toContain('No open requests left.');
+    { const rr = await cli(['run', dir, '-e', 'sound set beep freq=0.31']); expect(rr.err).toBe(''); expect(rr.code).toBe(0); }
+    expect((await cli(['work', dir, 'done', 'freq 0.3 → 0.31'])).out).toContain('No open requests left.');
     await until(() => messages.some((m) => m.type === 'requests' && (m.requests as { state: string }[]).some((q) => q.state === 'done')), 'the done card');
     // An approval is an event too.
     const waiting2 = cli(['await', dir, '--timeout', '30', '--since', cursor]);
@@ -207,7 +208,7 @@ describe('MCP over stdio', () => {
   it('lists the tools, runs commands, reports numbers, reads the history, renders and exports', async () => {
     const m = await connect();
     const tools = (await client!.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['await_requests', 'export', 'history', 'project', 'render', 'request', 'run', 'work']);
+    expect(tools).toEqual(['await_requests', 'check', 'describe', 'export', 'history', 'import', 'project', 'render', 'request', 'run', 'view', 'work']);
     expect((await m.call('project')).text).toMatch(/sounds: none yet/);
     const r = await m.call('run', { commands: 'sound new beep\nsound set beep frequency=880 volume=0.4' });
     expect(r.isError).toBe(false);
@@ -232,7 +233,7 @@ describe('MCP over stdio', () => {
 
   it('files, claims and finishes a request, and await_requests returns what people did', async () => {
     const m = await connect();
-    await m.call('run', { commands: 'sound new beep' });
+    await m.call('run', { commands: 'sound new beep voice=classic\nsound set beep wave=sine attack=0.05 sustain=0.3 decay=0.4 freq=0.3 volume=0.15' });
     const none = await m.call('await_requests', { timeout: 1 });
     expect(none.text).toMatch(/^no new events/);
     const ws = new WebSocket(m.url.replace('http', 'ws').replace('/?token', '/ws?token'));
@@ -249,8 +250,8 @@ describe('MCP over stdio', () => {
     ws.send(JSON.stringify({ type: 'request', id: 2, by: 'human:ana', body: { action: 'reply', id: 'r1', text: '0.2 s' } }));
     await until(async () => (await m.call('work', { action: 'list' })).text.includes('r1 change beep'), 'the reply');
     expect((await m.call('work', { id: 'r1' })).text).toContain('The person answered: "0.2 s"');
-    expect((await m.call('run', { commands: 'sound set beep duration=0.2' })).isError).toBe(false);
-    expect((await m.call('work', { action: 'done', text: 'duration 0.5 → 0.2' })).text).toContain('No open requests left.');
+    expect((await m.call('run', { commands: 'sound set beep freq=0.31' })).isError).toBe(false);
+    expect((await m.call('work', { action: 'done', text: 'freq 0.3 → 0.31' })).text).toContain('No open requests left.');
     expect((await m.call('request', { sound: 'beep', note: 'agent asks too' })).text).toContain('r2 change beep');
     ws.close();
   });
