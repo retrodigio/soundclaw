@@ -1,0 +1,20 @@
+{
+  "name": "@soundclaw/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SoundClaw server: the single writer for a project, the MCP server (stdio and HTTP), and HTTP + WebSocket for the dashboard.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./serve": "./src/serve.ts",
+    "./protocol": "./src/protocol.ts"
+  },
+  "dependencies": {
+    "@soundclaw/core": "workspace:*",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0"
+  }
+}

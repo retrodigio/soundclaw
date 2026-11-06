@@ -1,0 +1,41 @@
+{
+  "name": "soundclaw",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A sound effects and music workbench for AI agents: sounds made from parameters by command through an MCP server and a CLI, with a live browser view where people listen and edit.",
+  "license": "MIT",
+  "keywords": [
+    "sound-effects",
+    "sfx",
+    "music",
+    "audio",
+    "synth",
+    "game-audio",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "ai-agent",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "soundclaw": "dist/soundclaw.js"
+  },
+  "files": [
+    "dist/soundclaw.js",
+    "dist/ui/",
+    "dist/skill/",
+    "dist/LICENSE",
+    "dist/THIRD_PARTY_LICENSES.txt"
+  ],
+  "scripts": {
+    "prepack": "node -e \"require('node:fs').accessSync('dist/soundclaw.js')\" || (echo 'run pnpm build at the repo root first' && exit 1)"
+  },
+  "devDependencies": {
+    "@soundclaw/core": "workspace:*",
+    "@soundclaw/server": "workspace:*"
+  }
+}

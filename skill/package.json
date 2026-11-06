@@ -1,0 +1,7 @@
+{
+  "name": "@soundclaw/skill",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Claude Code skill that teaches an agent to drive SoundClaw (SKILL.md and the command reference)."
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@soundclaw/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SoundClaw core: sound documents, command language, history, deterministic renderer, WAV encoder, hashing. No DOM or Node APIs.",
+  "exports": { ".": "./src/index.ts" }
+}

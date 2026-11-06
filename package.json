@@ -1,0 +1,26 @@
+{
+  "name": "soundclaw-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.5.1",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "pnpm --filter @soundclaw/ui build && node scripts/build.ts",
+    "test": "pnpm build && vitest run && playwright test",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p core && tsc -p server && tsc -p cli && tsc -p ui && tsc -p e2e",
+    "soundclaw": "node cli/bin/soundclaw.js"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^22.20.5",
+    "esbuild": "0.28.2",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12"
+  }
+}

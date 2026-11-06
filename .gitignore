@@ -1,0 +1,18 @@
+node_modules/
+dist/
+logs/
+coverage/
+*.log
+.DS_Store
+/out/
+.claude/settings.local.json
+CLAUDE.local.md
+/test-results/
+/playwright-report/
+*.tgz
+
+# Local build notes; never committed
+/.dev/
+
+# A running server's lock, if a project lives inside the repo
+.soundclaw.lock
