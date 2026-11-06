@@ -250,7 +250,7 @@ function cmdRender(io: Io, p: Parsed): number {
   if (!dir || !id || extra.length) throw new UsageError('render: give a project folder and a sound id');
   const w = wr(io, dir);
   const r = w.render(id); // first, so the line below does not warm the cache
-  io.out(`${soundSummary(w, id)}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the cache)' : ''}\n`);
+  io.out(`${soundSummary(w, id)}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}\n`);
   return 0;
 }
 

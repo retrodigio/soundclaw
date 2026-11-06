@@ -173,7 +173,8 @@ export class Store {
 
   /** Whether an undo or a redo would do anything (the page's buttons). */
   canUndo(): boolean {
-    return this.tape.some((e) => activeGroups(this.tape).has(e.group) && !/^(undo|redo) /.test(e.cmd));
+    const active = activeGroups(this.tape);
+    return this.tape.some((e) => active.has(e.group) && !/^(undo|redo) /.test(e.cmd));
   }
 
   canRedo(): boolean {

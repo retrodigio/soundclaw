@@ -121,7 +121,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
   }, (a) => w.enqueue(() => {
     try {
       const r = w.render(a.sound); // first, so the summary does not warm the cache
-      return { content: [text(`${soundSummary(w, a.sound)}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the cache)' : ''}`)] };
+      return { content: [text(`${soundSummary(w, a.sound)}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}`)] };
     } catch (e) {
       return errorResult(e);
     }

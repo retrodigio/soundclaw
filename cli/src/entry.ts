@@ -85,7 +85,9 @@ export async function cli(argv: string[]): Promise<number> {
     const sent = await forwardToServer(args, out);
     if (sent !== null) return sent;
     const code = main(args);
-    if ((args[0] === 'list' || args[0] === 'request') && args[1] && code === 0 && (args[0] === 'list' || args.length === 2)) process.stdout.write(await listenerLine(args[1]));
+    // A listing of a project with open requests says whether anything is waiting for them.
+    const listing = args[0] === 'list' || (args[0] === 'request' && args.length === 2);
+    if (listing && args[1] && code === 0) process.stdout.write(await listenerLine(args[1]));
     return code;
   } catch (e) {
     if (e instanceof UsageError) {
