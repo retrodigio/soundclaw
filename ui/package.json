@@ -1,0 +1,21 @@
+{
+  "name": "@soundclaw/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SoundClaw dashboard: sound cards with play buttons and waveforms, the history, requests (Vite + React).",
+  "dependencies": {
+    "@soundclaw/core": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@soundclaw/server": "workspace:*",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc -p ."
+  }
+}

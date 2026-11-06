@@ -159,14 +159,17 @@ function parseLine(l: RawLine): Command {
   throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, undo, redo)`);
 }
 
+/** A command with the line it came from. */
+export type Parsed = Command & { line: number };
+
 /** Parse command text. Every problem is reported, with its line and column. */
-export function parse(text: string): { commands: Command[]; errors: Diag[] } {
+export function parse(text: string): { commands: Parsed[]; errors: Diag[] } {
   const t = tokenize(text);
   const errors = [...t.errors];
-  const commands: Command[] = [];
+  const commands: Parsed[] = [];
   for (const l of t.lines) {
     try {
-      commands.push(parseLine(l));
+      commands.push({ ...parseLine(l), line: l.line });
     } catch (e) {
       if (e instanceof DiagError) errors.push({ line: e.line, col: e.col, message: e.message });
       else throw e;
