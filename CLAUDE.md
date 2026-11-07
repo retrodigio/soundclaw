@@ -10,7 +10,7 @@ Start with [README.md](README.md), [docs/design.md](docs/design.md) and
 
 - `core/`: the sound document, command language, history tape (groups, undo, redo, replay), the
   request state machine, the deterministic renderers (the classic voice, the layered voice and the tone), generators,
-  the WAV encoder, SHA-256, and the measurements (analysis, checks, PNG views). Pure TypeScript, no
+  the WAV encoder, SHA-256, music (instruments, the pattern text, songs and their renderer, MIDI), and the measurements (analysis, checks, PNG views, the music checks and views). Pure TypeScript, no
   DOM or Node APIs.
 - `server/`: the project folder, the single writer, the render cache, requests and await, the MCP
   server (stdio and HTTP), the HTTP + WebSocket server for the dashboard, the token and lock files.
@@ -22,14 +22,14 @@ Start with [README.md](README.md), [docs/design.md](docs/design.md) and
 ## Conventions
 
 - **Core is deterministic.** No `Date`, `Math.random`, DOM or Node APIs in `core`. What *renders*
-  (`render.ts`, `classic.ts`, `mathx.ts`, `generators.ts`, `synth.ts`, `recipes.ts`) uses no `Math.sin`, `Math.pow`,
+  (`render.ts`, `classic.ts`, `mathx.ts`, `generators.ts`, `synth.ts`, `recipes.ts`, `instrument.ts`, `songrender.ts`) uses no `Math.sin`, `Math.pow`,
   `Math.exp`, `Math.log` or any other platform maths whose last digit may differ: the sine is fdlibm's, in
   `+ - * /` (`sinRad`), the cube is `cube`, the tone's and the layered oscillators' sine a polynomial
   (`sineCycles`), 2^x and log2 are `exp2` and `log2` (bits and series), the filter's tangent a ratio of fdlibm
   sines. A document renders to the same bytes on every machine; the
-  golden hashes in `core/test/determinism.test.ts`, `core/test/classic-golden.json` and `core/test/layered-golden.json` depend on it.
+  golden hashes in `core/test/determinism.test.ts`, `core/test/classic-golden.json`, `core/test/layered-golden.json` and `core/test/music-golden.json` depend on it.
   If the renderer's output must change, bump `RENDER_VERSION` and update the goldens with a reason.
-  What *measures* (`analysis.ts`, `checks.ts`, `views.ts`, `png.ts`) may use `Math.*`: its numbers are
+  What *measures* (`analysis.ts`, `checks.ts`, `views.ts`, `png.ts`, `musicchecks.ts`, `musicviews.ts`) may use `Math.*`: its numbers are
   printed rounded and the last digit may differ between platforms; nothing there feeds back into a
   render.
 - **Every edit is a command.** Changes to sounds are commands with a normal form, written to the
