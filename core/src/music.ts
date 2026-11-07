@@ -17,13 +17,36 @@ export function parseNote(s: string): number | null {
   return n < MIDI_LOW || n > MIDI_HIGH ? null : n;
 }
 
-/** The note as written in the normal form: sharps, octave after (`C#5`). */
-export function noteLabel(midi: number): string {
-  return `${NOTE_SHARPS[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
+export const NOTE_FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
+
+/** Is this a black key (a note with a sharp or flat name)? */
+export const isBlackKey = (midi: number): boolean => [1, 3, 6, 8, 10].includes(((midi % 12) + 12) % 12);
+
+/** The note as written in the normal form: sharps unless `flat` (`C#5`, `Db5`), octave after. */
+export function noteLabel(midi: number, flat = false): string {
+  const pc = ((midi % 12) + 12) % 12;
+  return `${(flat ? NOTE_FLATS : NOTE_SHARPS)[pc]}${Math.floor(midi / 12) - 1}`;
+}
+
+/** Does a note written as a black key take a flat in this key (F major, Bb major, D minor ...) or a sharp? */
+export function keyUsesFlats(key: string | null | undefined): boolean {
+  if (!key) return false;
+  try { return parseKey(key).flats; } catch { return false; }
+}
+
+/** Flats for a key: a tonic written with b or # decides; else the first major scale (C, the flat keys, the sharp keys) that holds every note of the scale does. */
+function scaleUsesFlats(tonicText: string, classes: readonly number[]): boolean {
+  if (tonicText.endsWith('b')) return true;
+  if (tonicText.endsWith('#')) return false;
+  for (const t of [0, 5, 10, 3, 8, 1, 7, 2, 9, 4, 11]) {
+    const major = [0, 2, 4, 5, 7, 9, 11].map((d) => (t + d) % 12);
+    if (classes.every((c) => major.includes(c))) return [5, 10, 3, 8, 1].includes(t);
+  }
+  return false;
 }
 
 /** Pitch class name without an octave. */
-export const pitchClassName = (midi: number): string => NOTE_SHARPS[((midi % 12) + 12) % 12]!;
+export const pitchClassName = (midi: number, flat = false): string => (flat ? NOTE_FLATS : NOTE_SHARPS)[((midi % 12) + 12) % 12]!;
 
 /** Equal temperament, A4 = 440 Hz, in + - * / and exp2 only. */
 export function midiFreq(midi: number): number {
@@ -77,6 +100,8 @@ export interface Key {
   mode: string;
   /** Pitch classes in the scale. */
   classes: readonly number[];
+  /** Black keys are spelled with flats in this key (F major, D minor, Eb major ...), else with sharps. */
+  flats: boolean;
 }
 
 /** `C:major`, `F#:dorian`, `Bb:pentatonic-minor`. Throws a plain Error. */
@@ -86,7 +111,8 @@ export function parseKey(s: string): Key {
   const mode = SCALES[m[2]!];
   if (!mode) throw new Error(`no mode '${m[2]}' (modes: ${Object.keys(SCALES).join(', ')})`);
   const tonic = parseNote(`${m[1]}4`)! % 12;
-  return { tonic, mode: m[2]!, classes: mode.map((d) => (tonic + d) % 12) };
+  const classes = mode.map((d) => (tonic + d) % 12);
+  return { tonic, mode: m[2]!, classes, flats: scaleUsesFlats(m[1]!, classes) };
 }
 
 export const inKey = (k: Key, midi: number): boolean => k.classes.includes(((midi % 12) + 12) % 12);

@@ -17,7 +17,7 @@
 import { DiagError, quote, type Command, type Token } from './commands.ts';
 import { DRUM_TEMPLATES, drumRows } from './drums.ts';
 import { lookupInstrument } from './music-commands.ts';
-import { MIDI_HIGH, MIDI_LOW, SCALE_NOTES, SCALES, inKey, noteLabel, parseKey, parseNote, parseRange, pitchClassName, type Key } from './music.ts';
+import { MIDI_HIGH, MIDI_LOW, SCALE_NOTES, isBlackKey, SCALES, inKey, noteLabel, parseKey, parseNote, parseRange, pitchClassName, type Key } from './music.ts';
 import { channelEvents, formatCell, formatPattern, parsePattern, PATTERN_NAME_RE, VEL_DEFAULT, type Cell, type PNote, type Pattern, type PatternChannel } from './pattern.ts';
 import type { Library } from './sets.ts';
 import { CHANNEL_NAME_RE } from './pattern.ts';
@@ -70,13 +70,15 @@ const OPTION: Record<string, [(v: string) => boolean, string]> = {
   around: [(v) => /^[A-G][#b]?-?\d$/.test(v), 'a note like E5'],
   factor: [(v) => intIn(v, 2, 4), '2, 3 or 4'],
   as: [(v) => MOTIF_NAME_RE.test(v), 'a motif name'],
+  gate: [(v) => numIn(v, 0, 1), 'a fraction from 0 to 1 of the time to the next note (kept to whole steps, at least one)'],
+  legato: [(v) => v === 'yes' || v === 'no', 'yes (each note holds right up to the next) or no'],
 };
 
 /** The options each helper takes, in the order its normal form writes them. */
 const ORDER: Record<string, string[]> = {
-  chords: ['bars', 'rhythm', 'voices', 'range', 'vel', 'tpb'],
-  bass: ['from', 'style', 'rate', 'bars', 'range', 'vel', 'tpb'],
-  arp: ['from', 'pattern', 'rate', 'octaves', 'bars', 'range', 'vel', 'tpb'],
+  chords: ['bars', 'rhythm', 'voices', 'range', 'vel', 'gate', 'legato', 'tpb'],
+  bass: ['from', 'style', 'rate', 'bars', 'range', 'vel', 'gate', 'legato', 'tpb'],
+  arp: ['from', 'pattern', 'rate', 'octaves', 'bars', 'range', 'vel', 'gate', 'legato', 'tpb'],
   drums: ['bars', 'fill', 'seed', 'vary'],
   humanise: ['timing', 'velocity', 'seed'],
   'motif-write': ['at', 'by', 'mode', 'vel', 'bars', 'tpb'],
@@ -399,6 +401,35 @@ function writeSpan(row: Cell[], span: { start: number; len: number }, notes: rea
   }
 }
 
+/**
+ * The gate: how long each note sounds, as a fraction of the time to the next note (or the end of its span). The grid
+ * holds a note for whole steps, so the length is rounded to a step and is at least one; the rest of the time is a rest.
+ * `legato=yes` is a gate of 1: every note holds right up to the next. Null: the helper's own rhythm decides.
+ */
+function gateOf(o: Map<string, string>): number | null {
+  const legato = o.get('legato') === 'yes';
+  if (legato && o.has('gate') && Number(o.get('gate')) !== 1) throw new Error(`legato=yes holds every note to the next (a gate of 1); gate=${o.get('gate')} shortens them: give one of the two`);
+  return legato ? 1 : o.has('gate') ? Number(o.get('gate')) : null;
+}
+
+function applyGate(row: Cell[], span: { start: number; len: number }, gate: number | null): void {
+  if (gate === null) return;
+  const at: number[] = [];
+  for (let i = span.start; i < span.start + span.len; i++) if (row[i]!.kind === 'notes') at.push(i);
+  at.forEach((i, k) => {
+    const end = k + 1 < at.length ? at[k + 1]! : span.start + span.len;
+    const keep = gate >= 1 ? end - i : Math.max(1, Math.round(gate * (end - i)));
+    for (let j = i + 1; j < end; j++) row[j] = j < i + keep ? { kind: 'hold' } : { kind: 'rest' };
+  });
+}
+
+/** The gate and legato the helper was given, for its normal form. */
+function withGate(resolved: Map<string, string>, o: Map<string, string>): Map<string, string> {
+  if (o.has('gate')) resolved.set('gate', o.get('gate')!);
+  if (o.get('legato') === 'yes') resolved.set('legato', 'yes');
+  return resolved;
+}
+
 /** Steps a rate stands for at a grid (null for `chord`). */
 function rateSteps(rate: string, tpb: number): number | null {
   if (rate === 'chord') return null;
@@ -445,6 +476,7 @@ function helperChords(lib: Library, song: SongDoc, c: Extract<ComposeCommand, { 
   const n = o.has('voices') ? Number(o.get('voices')) : Math.max(...spans.map((s) => new Set(chordClasses(s.chord)).size));
   const vel = Number(o.get('vel') ?? VEL_DEFAULT);
   const rhythm = o.get('rhythm') ?? 'hold';
+  const gate = gateOf(o);
   const row = rowOf(pat, ch.name);
   let prev: number[] | null = null;
   const names: string[] = [];
@@ -452,9 +484,11 @@ function helperChords(lib: Library, song: SongDoc, c: Extract<ComposeCommand, { 
     const v = voiceChord(prev, s.chord, n, range);
     prev = v;
     writeSpan(row, s, v, vel, rhythm, pat.tpb, bar);
+    applyGate(row, s, gate);
     names.push(chordName(s.chord));
   }
   const resolved = new Map([['bars', o.get('bars') ?? '1'], ['rhythm', rhythm], ['voices', String(n)], ['range', rangeText(range)], ['vel', String(vel)], ['tpb', String(pat.tpb)]]);
+  withGate(resolved, o);
   return { pat, rows: new Map([[ch.name, row]]), resolved, note: names.join(' ') };
 }
 
@@ -518,9 +552,11 @@ function helperBass(lib: Library, song: SongDoc, c: Extract<ComposeCommand, { op
       }
     }
     writeRun(row, s, notes, step, vel);
+    applyGate(row, s, gateOf(o));
     last = notes[notes.length - 1]!;
   });
   const resolved = new Map<string, string>([...(o.has('from') ? [['from', o.get('from')!]] as [string, string][] : []), ['style', style], ['rate', rate], ...(c.prog !== null ? [['bars', o.get('bars') ?? '1']] as [string, string][] : []), ['range', rangeText(range)], ['vel', String(vel)], ['tpb', String(pat.tpb)]]);
+  withGate(resolved, o);
   return { pat, rows: new Map([[ch.name, row]]), resolved };
 }
 
@@ -555,8 +591,10 @@ function helperArp(lib: Library, song: SongDoc, c: Extract<ComposeCommand, { op:
       } else notes.push(cycle[j % cycle.length]!);
     }
     writeRun(row, s, notes, every === Infinity ? s.len : every, vel);
+    applyGate(row, s, gateOf(o));
   }
   const resolved = new Map<string, string>([...(o.has('from') ? [['from', o.get('from')!]] as [string, string][] : []), ['pattern', order], ['rate', rate], ['octaves', String(octaves)], ...(c.prog !== null ? [['bars', o.get('bars') ?? '1']] as [string, string][] : []), ['range', rangeText(range)], ['vel', String(vel)], ['tpb', String(pat.tpb)]]);
+  withGate(resolved, o);
   return { pat, rows: new Map([[ch.name, row]]), resolved };
 }
 
@@ -647,6 +685,8 @@ function mapNotes(cell: Cell, f: (m: number) => number, key: Key | null): Cell {
     if (m < MIDI_LOW || m > MIDI_HIGH) throw new Error(`${noteLabel(n.midi)} would move outside the MIDI range`);
     const out: PNote = { ...n, midi: m };
     delete out.accidental;
+    delete out.flat;
+    if (isBlackKey(m) && (key ? key.flats : n.flat)) out.flat = true;
     if (key && !inKey(key, m)) out.accidental = true;
     else if (n.accidental && !key) out.accidental = true;
     return out;
@@ -866,6 +906,18 @@ export function applyCompose(lib: Library, c: ComposeCommand): string | undefine
       if (cell.kind === 'notes' && cell.notes.some((n) => !inKey(key, n.midi) && !n.accidental)) row[i] = { kind: 'notes', notes: cell.notes.map((n) => (inKey(key, n.midi) || n.accidental ? n : { ...n, accidental: true })) };
     });
   }
+  // the notes a helper wrote are spelled by the key: flats in a flat key, sharps elsewhere (a note the pattern already had keeps its spelling)
+  if (song.key && c.helper !== 'drums' && c.helper !== 'humanise') {
+    const flats = parseKey(song.key).flats;
+    const had = song.patterns.get(out.pat.name);
+    for (const [name, row] of out.rows) {
+      const old = had?.channels.find((x) => x.name === name)?.cells;
+      row.forEach((cell, i) => {
+        if (cell.kind !== 'notes' || JSON.stringify(cell) === JSON.stringify(old?.[i])) return;
+        row[i] = { kind: 'notes', notes: cell.notes.map((n) => { const s: PNote = { ...n }; delete s.flat; if (flats && isBlackKey(s.midi)) s.flat = true; return s; }) };
+      });
+    }
+  }
   const w = writtenPattern(out);
   mergeRows(song, w);
   lib.songs.set(song.id, song);
@@ -892,16 +944,16 @@ export function tapeLineLines(cmd: string): string[] {
 export function scaleText(keyText: string): string {
   if (keyText === 'list') return ['scales (use them as <tonic>:<scale>, like D:dorian):', ...Object.keys(SCALES).map((n) => `  ${n.padEnd(18)} ${SCALES[n]!.join(' ').padEnd(24)} ${SCALE_NOTES[n] ?? ''}`)].join('\n');
   const key = parseKey(keyText);
-  const lines = [`${keyText}: ${key.classes.map((c) => pitchClassName(c)).join(' ')}  (${SCALE_NOTES[key.mode] ?? key.mode})`];
+  const lines = [`${keyText}: ${key.classes.map((c) => pitchClassName(c, key.flats)).join(' ')}  (${SCALE_NOTES[key.mode] ?? key.mode})`];
   const chords = diatonicChords(key);
   if (chords.length) {
     lines.push('  degree  triad                 seventh');
     for (const ch of chords) {
       const tri = chordOfNotes(ch.triad.map((pc, i) => pc + 12 * (i > 0 && pc < ch.triad[0]! ? 1 : 0) + 48));
       const sev = chordOfNotes(ch.seventh.map((pc, i) => pc + 12 * (i > 0 && pc < ch.seventh[0]! ? 1 : 0) + 48));
-      lines.push(`  ${ch.numeral.padEnd(6)}  ${chordName(tri).padEnd(6)} ${ch.triad.map((x) => pitchClassName(x)).join(' ').padEnd(14)} ${chordName(sev).padEnd(8)} ${ch.seventh.map((x) => pitchClassName(x)).join(' ')}`);
+      lines.push(`  ${ch.numeral.padEnd(6)}  ${chordName(tri).padEnd(6)} ${ch.triad.map((x) => pitchClassName(x, key.flats)).join(' ').padEnd(14)} ${chordName(sev).padEnd(8)} ${ch.seventh.map((x) => pitchClassName(x, key.flats)).join(' ')}`);
     }
     lines.push('  chords outside the key: bVII, bVI, iv (borrowed), V/V, V7/vi (secondary); suffixes 7 maj7 sus2 sus4 add9 6 64 65 43 42');
-  } else lines.push(`  roman numerals count in ${key.classes.length === 7 ? 'this scale' : SCALES[key.mode]!.includes(4) ? 'the major scale' : 'the natural minor scale'} on ${pitchClassName(key.tonic)} (this scale has ${key.classes.length} notes)`);
+  } else lines.push(`  roman numerals count in ${key.classes.length === 7 ? 'this scale' : SCALES[key.mode]!.includes(4) ? 'the major scale' : 'the natural minor scale'} on ${pitchClassName(key.tonic, key.flats)} (this scale has ${key.classes.length} notes)`);
   return lines.join('\n');
 }

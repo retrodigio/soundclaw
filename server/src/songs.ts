@@ -268,6 +268,10 @@ export function songChecksText(w: Writer, id: string): { text: string; pass: boo
       lines.push(`       held to: ${c.threshold}`);
       for (const r of c.ranges.slice(0, 8)) lines.push(`       ${r.from.toFixed(2)}-${r.to.toFixed(2)} s  ${r.note}`);
       if (c.ranges.length > 8) lines.push(`       … and ${c.ranges.length - 8} more`);
+    } else if (c.advisory && !c.skipped && c.ranges.length) {
+      // an advisory check that passes still says where it would look
+      for (const r of c.ranges.slice(0, 3)) lines.push(`       ${r.from.toFixed(2)}-${r.to.toFixed(2)} s  ${r.note}`);
+      if (c.ranges.length > 3) lines.push(`       … and ${c.ranges.length - 3} more (view mix shows them; check --json lists them all)`);
     }
   }
   return { text: lines.join('\n'), pass: songPasses(m.checks) };

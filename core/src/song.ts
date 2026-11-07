@@ -217,6 +217,8 @@ export interface NoteEv {
   fx: NoteFx;
   slideFrom: number | null;
   accidental: boolean;
+  /** Written with a flat. */
+  flat: boolean;
   /** Where it is written: arrangement index, pattern, step. */
   at: { instance: number; pattern: string; section: string; step: number };
 }
@@ -232,8 +234,8 @@ export function channelNotes(song: SongDoc, arr: { instances: Instance[] }, chan
       const end = stepTime(inst, e.step + e.len, song.swing, inst.pattern.steps);
       const at = { instance: inst.index, pattern: inst.pattern.name, section: inst.section, step: e.step };
       // a nudge moves the whole note off the grid (its length is kept)
-      if (e.drum !== null) out.push({ t: t + e.nudge / 1000, grid: t, len: Math.max(0.01, end - t), midi: null, drum: e.drum, vel: e.vel, fx: {}, slideFrom: e.slideFrom, accidental: false, at });
-      else for (const n of e.notes!) out.push({ t: t + (n.nudge ?? 0) / 1000, grid: t, len: end - t, midi: n.midi, drum: null, vel: n.vel, fx: n.fx, slideFrom: e.slideFrom, accidental: !!n.accidental, at });
+      if (e.drum !== null) out.push({ t: t + e.nudge / 1000, grid: t, len: Math.max(0.01, end - t), midi: null, drum: e.drum, vel: e.vel, fx: {}, slideFrom: e.slideFrom, accidental: false, flat: false, at });
+      else for (const n of e.notes!) out.push({ t: t + (n.nudge ?? 0) / 1000, grid: t, len: end - t, midi: n.midi, drum: null, vel: n.vel, fx: n.fx, slideFrom: e.slideFrom, accidental: !!n.accidental, flat: !!n.flat, at });
     }
   }
   return out.sort((a, b) => a.t - b.t);

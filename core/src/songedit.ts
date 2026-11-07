@@ -20,7 +20,7 @@
 
 import { DiagError, applyCommand, parse, type Token } from './commands.ts';
 import { copyLibrary, type Library } from './sets.ts';
-import { noteLabel, parseNote } from './music.ts';
+import { isBlackKey, noteLabel, parseNote } from './music.ts';
 import {
   CHANNEL_NAME_RE, DRUM_RE, VEL_DEFAULT, channelEvents, clonePattern, formatCell, formatFx, formatNote, formatPattern, parseCellText, parseFxText,
   type Cell, type NoteFx, type PNote, type Pattern, type PatternChannel,
@@ -31,7 +31,7 @@ export type NoteVerb = 'add' | 'remove' | 'move' | 'len' | 'set';
 export const NOTE_VERBS: readonly NoteVerb[] = ['add', 'remove', 'move', 'len', 'set'];
 
 /** Which part of the cell at a step: one pitch, one drum word, or (null) all of it. */
-export type NoteSel = { midi: number } | { drum: string } | null;
+export type NoteSel = { midi: number; flat?: true } | { drum: string } | null;
 
 export interface NoteEdit {
   verb: NoteVerb;
@@ -45,13 +45,15 @@ export interface NoteEdit {
   /** move: where to. */
   toStep?: number | null;
   toNote?: number | string | null;
+  /** move: the target note is written with a flat. */
+  toFlat?: boolean;
   /** set. */
   vel?: number | null;
   fx?: NoteFx | null;
   accidental?: boolean | null;
 }
 
-const selText = (s: NoteSel | undefined): string => (!s ? '' : 'midi' in s ? ` ${noteLabel(s.midi)}` : ` ${s.drum}`);
+const selText = (s: NoteSel | undefined): string => (!s ? '' : 'midi' in s ? ` ${noteLabel(s.midi, s.flat === true)}` : ` ${s.drum}`);
 
 /** The normal form of a note edit (the line on the tape). */
 export function noteEditText(song: string, pattern: string, e: NoteEdit): string {
@@ -59,7 +61,7 @@ export function noteEditText(song: string, pattern: string, e: NoteEdit): string
   switch (e.verb) {
     case 'add': return `${head} ${formatCell(e.cell!)}${e.len ? ` len=${e.len}` : ''}`;
     case 'remove': return `${head}${selText(e.sel)}`;
-    case 'move': return `${head}${selText(e.sel)}${e.toStep !== null && e.toStep !== undefined ? ` step=${e.toStep}` : ''}${e.toNote !== null && e.toNote !== undefined ? ` note=${typeof e.toNote === 'number' ? noteLabel(e.toNote) : e.toNote}` : ''}`;
+    case 'move': return `${head}${selText(e.sel)}${e.toStep !== null && e.toStep !== undefined ? ` step=${e.toStep}` : ''}${e.toNote !== null && e.toNote !== undefined ? ` note=${typeof e.toNote === 'number' ? noteLabel(e.toNote, e.toFlat === true) : e.toNote}` : ''}`;
     case 'len': return `${head} ${e.len}`;
     case 'set': return `${head}${selText(e.sel)}${e.vel ? ` vel=${e.vel}` : ''}${e.fx ? ` fx=${formatFx(e.fx) || 'none'}` : ''}${e.accidental !== null && e.accidental !== undefined ? ` accidental=${e.accidental ? 'yes' : 'no'}` : ''}`;
   }
@@ -69,7 +71,7 @@ function parseSel(t: Token, line: number): NoteSel {
   if (DRUM_RE.test(t.v)) return { drum: t.v };
   const m = parseNote(t.v);
   if (m === null) throw new DiagError(line, t.col, `'${t.v}' is not a note (like C5) or a drum hit (like k)`);
-  return { midi: m };
+  return t.v[1] === 'b' ? { midi: m, flat: true } : { midi: m };
 }
 
 const intTok = (t: Token | undefined, line: number, what: string, lo: number, hi: number): number => {
@@ -123,7 +125,7 @@ export function parseNoteEdit(args: Token[], line: number, ref: (t: Token | unde
     e.toNote = null;
     if (nt) {
       if (DRUM_RE.test(nt.v)) e.toNote = nt.v;
-      else { const n = parseNote(nt.v); if (n === null) throw new DiagError(line, nt.col, `note= is a note like E5 or a drum hit like s (got '${nt.v}')`); e.toNote = n; }
+      else { const n = parseNote(nt.v); if (n === null) throw new DiagError(line, nt.col, `note= is a note like E5 or a drum hit like s (got '${nt.v}')`); e.toNote = n; e.toFlat = nt.v[1] === 'b'; }
     }
     if (e.toStep === null && e.toNote === null) throw new DiagError(line, verbT.col, 'pattern note move: give step=<to> and/or note=<to>');
   } else if (verb === 'len') {
@@ -262,7 +264,7 @@ export function applyNoteEdit(pattern: Pattern, e: NoteEdit, song: SongDoc | nul
           if (cell.kind !== 'notes') throw new Error(`note=${noteLabel(e.toNote)} is a note, but step ${e.step} of ${e.channel} is a drum hit`);
           // a chord moves as a whole: by the interval that takes its lowest note to note=
           const by = e.toNote - cell.notes[0]!.midi;
-          moved = { kind: 'notes', notes: cell.notes.map((n) => ({ ...cloneNote(n), midi: n.midi + by })) };
+          moved = { kind: 'notes', notes: cell.notes.map((n, i) => { const o = { ...cloneNote(n), midi: n.midi + by }; delete o.flat; if (isBlackKey(o.midi) && (i === 0 ? e.toFlat : n.flat)) o.flat = true; return o; }) };
           if (moved.notes.some((n) => n.midi < 0 || n.midi > 127)) throw new Error('the move takes a note outside the MIDI range');
         }
       }

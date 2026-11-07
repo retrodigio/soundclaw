@@ -36,6 +36,8 @@ export interface PNote {
   nudge?: number;
   /** Marked `!`: outside the key on purpose. */
   accidental?: true;
+  /** Written with a flat (`Eb4`), not a sharp: kept so the normal form and the messages spell it as it was written. */
+  flat?: true;
   fx: NoteFx;
 }
 
@@ -148,6 +150,7 @@ function parseOneNote(text: string, at: number): PNote {
   }
   const fxAt = at + text.length - m[6]!.length;
   const note: PNote = { midi, vel, fx: parseFx(m[6]!, fxAt) };
+  if (m[1]![1] === 'b') note.flat = true;
   const nudge = parseNudge(m[4], at + 1);
   if (nudge !== undefined) note.nudge = nudge;
   if (m[3] || m[5]) note.accidental = true;
@@ -335,7 +338,7 @@ export function formatFx(fx: NoteFx): string {
 const formatNudge = (n: number | undefined): string => (n ? `@${n}` : '');
 
 export function formatNote(n: PNote): string {
-  return `${noteLabel(n.midi)}${n.vel === VEL_DEFAULT ? '' : 'v' + n.vel}${formatNudge(n.nudge)}${n.accidental ? '!' : ''}${formatFx(n.fx)}`;
+  return `${noteLabel(n.midi, n.flat === true)}${n.vel === VEL_DEFAULT ? '' : 'v' + n.vel}${formatNudge(n.nudge)}${n.accidental ? '!' : ''}${formatFx(n.fx)}`;
 }
 
 export function formatCell(c: Cell): string {

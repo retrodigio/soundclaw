@@ -27,6 +27,9 @@ export const MUSIC_CHECK_NAMES: readonly MusicCheckName[] = ['clip', 'loudness',
 
 export interface MusicRange extends CheckRange {
   channel?: string;
+  /** Masking: the two channels, and the band they share. */
+  channels?: [string, string];
+  band?: string;
 }
 
 export interface MusicCheck {
@@ -117,8 +120,8 @@ export function keyCheck(song: SongDoc, arr: { instances: import('./song.ts').In
       if (e.midi === null) continue;
       total++;
       if (inKey(key, e.midi) || e.accidental) continue;
-      ranges.push({ from: r4(e.t), to: r4(e.t + e.len), channel: ch.name, note: `${noteLabel(e.midi)} in ${ch.name} (${describeAt(e)}) is not in ${song.key}; mark it ${noteLabel(e.midi)}! if it is meant` });
-      seen.add(pitchClassName(e.midi));
+      ranges.push({ from: r4(e.t), to: r4(e.t + e.len), channel: ch.name, note: `${noteLabel(e.midi, e.flat)} in ${ch.name} (${describeAt(e)}) is not in ${song.key}; mark it ${noteLabel(e.midi, e.flat)}! if it is meant` });
+      seen.add(pitchClassName(e.midi, e.flat));
     }
   }
   const pass = ranges.length === 0;
@@ -142,7 +145,7 @@ export function rangeCheck(song: SongDoc, arr: { instances: import('./song.ts').
       if (e.midi === null) continue;
       total++;
       if (e.midi >= lo && e.midi <= hi) continue;
-      ranges.push({ from: r4(e.t), to: r4(e.t + e.len), channel: ch.name, note: `${noteLabel(e.midi)} in ${ch.name} (${describeAt(e)}) is outside ${ch.inst}'s range ${noteLabel(lo)}-${noteLabel(hi)}` });
+      ranges.push({ from: r4(e.t), to: r4(e.t + e.len), channel: ch.name, note: `${noteLabel(e.midi, e.flat)} in ${ch.name} (${describeAt(e)}) is outside ${ch.inst}'s range ${noteLabel(lo)}-${noteLabel(hi)}` });
     }
   }
   const pass = ranges.length === 0;
@@ -474,8 +477,8 @@ function matchPart(part: ChannelAudio, events: readonly NoteEv[], chan: Channel,
           const until = Math.min(tw + len, Number.isFinite(nextT) ? nextT - 0.01 : Infinity, tw + 0.35);
           const w = Math.min(2048, Math.floor((until - from) * SR));
           if (soundsAs(x, Math.round(from * SR), w, pitchedGroup[0]!.midi!, octaves) !== true) {
-            const want = noteLabel(pitchedGroup[0]!.midi!);
-            const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)));
+            const want = noteLabel(pitchedGroup[0]!.midi!, pitchedGroup[0]!.flat);
+            const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)), pitchedGroup[0]!.flat);
             problem = Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES && oct !== 0
               ? `wrong octave: written ${want}, heard ${got} (${Math.abs(oct)} octave${Math.abs(oct) === 1 ? '' : 's'} ${oct > 0 ? 'high' : 'low'}); check the instrument's root`
               : `wrong pitch: written ${want}, heard ${got} (${best > 0 ? '+' : ''}${best.toFixed(1)} semitones)`;
@@ -534,7 +537,7 @@ export interface BandMap {
   hop: number;
   channels: { name: string; db: Float64Array[] }[];
   /** Per frame: the pair of channels and the band that mask each other, or null. */
-  masked: ({ a: string; b: string; band: string } | null)[];
+  masked: ({ a: string; b: string; band: string; gap: number } | null)[];
   frames: number;
 }
 
@@ -575,7 +578,7 @@ export function bandMap(parts: readonly ChannelAudio[], memo?: Memo): BandMap {
     if (best >= 0) {
       const ranked = per.filter((p) => f < p.frames).map((p) => ({ name: p.name, db: p.db[best]![f]! })).sort((x, y) => y.db - x.db);
       const a = ranked[0], b = ranked[1];
-      if (a && b && a.db >= top - 30 && b.db >= a.db - MASK_CLOSE_DB) found = { a: a.name, b: b.name, band: BANDS[best]!.name };
+      if (a && b && a.db >= top - 30 && b.db >= a.db - MASK_CLOSE_DB) found = { a: a.name, b: b.name, band: BANDS[best]!.name, gap: a.db - b.db };
     }
     masked.push(found);
   }
@@ -583,29 +586,37 @@ export function bandMap(parts: readonly ChannelAudio[], memo?: Memo): BandMap {
 }
 
 export function maskingCheck(map: BandMap): MusicCheck {
-  const ranges: MusicRange[] = [];
-  let run: { a: string; b: string; band: string; from: number; to: number } | null = null;
+  type Run = { a: string; b: string; band: string; from: number; to: number; gaps: number[] };
+  const runs: Run[] = [];
+  let run: Run | null = null;
   let maskedFrames = 0, active = 0;
   const flush = (): void => {
-    if (run && run.to - run.from >= MASK_MIN_SECONDS) ranges.push({ from: r4(run.from), to: r4(run.to), channel: `${run.a}+${run.b}`, note: `${run.a} and ${run.b} are the two loudest in the ${run.band} band and within ${MASK_CLOSE_DB} dB of each other` });
+    if (run && run.to - run.from >= MASK_MIN_SECONDS) runs.push(run);
     run = null;
   };
   for (let f = 0; f < map.frames; f++) {
     const m = map.masked[f]!;
     if (m) {
       maskedFrames++;
-      if (run && run.a === m.a && run.b === m.b && run.band === m.band) run.to = (f + 1) * map.hop;
-      else { flush(); run = { ...m, from: f * map.hop, to: (f + 1) * map.hop }; }
+      if (run && run.a === m.a && run.b === m.b && run.band === m.band) { run.to = (f + 1) * map.hop; run.gaps.push(m.gap); }
+      else { flush(); run = { a: m.a, b: m.b, band: m.band, from: f * map.hop, to: (f + 1) * map.hop, gaps: [m.gap] }; }
     } else flush();
     if (map.channels.some((c) => BANDS.some((_, i) => c.db[i]![f]! > -70))) active++;
   }
   flush();
   const frac = active ? maskedFrames / active : 0;
   const pass = frac <= MASK_MAX_FRACTION;
+  // the longest stretches first: where to look, which two channels, which band
+  const bandHz = (name: string): string => { const b = BANDS.find((x) => x.name === name)!; return `${b.lo}-${b.hi} Hz`; };
+  const ranges: MusicRange[] = runs.sort((x, y) => (y.to - y.from) - (x.to - x.from)).slice(0, 30).map((r) => ({
+    from: r4(r.from), to: r4(r.to), channel: `${r.a}+${r.b}`, channels: [r.a, r.b], band: r.band,
+    note: `${r.a} and ${r.b} share the ${r.band} band (${bandHz(r.band)}) for ${r4(r.to - r.from)} s, ${f1(median(r.gaps))} dB apart: ${r.a} is the louder; thin one of them, move one to another octave, or pan them apart`,
+  }));
+  const top = ranges.slice(0, 3).map((r) => `${r.from.toFixed(1)}-${r.to.toFixed(1)} s ${r.channels![0]}+${r.channels![1]} (${r.band})`).join(', ');
   return {
     name: 'masking', advisory: true, skipped: false, pass, score: clamp01(1 - Math.max(0, frac - MASK_MAX_FRACTION) / 0.4),
-    value: `${Math.round(frac * 100)} % of the time the two loudest channels in the main band are within ${MASK_CLOSE_DB} dB of each other${ranges.length ? ` (${ranges.length} stretch${ranges.length === 1 ? '' : 'es'} of ${MASK_MIN_SECONDS} s or more)` : ''}`,
-    threshold: `at most ${Math.round(MASK_MAX_FRACTION * 100)} % of the time (advisory: it never blocks work done)`, ranges: ranges.slice(0, 30),
+    value: `${Math.round(frac * 100)} % of the time the two loudest channels in the main band are within ${MASK_CLOSE_DB} dB of each other${runs.length ? ` (${runs.length} stretch${runs.length === 1 ? '' : 'es'} of ${MASK_MIN_SECONDS} s or more; longest: ${top})` : ''}`,
+    threshold: `at most ${Math.round(MASK_MAX_FRACTION * 100)} % of the time (advisory: it never blocks work done)`, ranges,
   };
 }
 

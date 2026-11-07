@@ -142,7 +142,7 @@ describe('masking', () => {
     const m = rep.checks.find((c) => c.name === 'masking')!;
     expect(m.advisory).toBe(true);
     expect(m.pass).toBe(false);
-    expect(m.ranges[0]!.note).toMatch(/a and b are the two loudest in the (mid|low) band/);
+    expect(m.ranges[0]!.note).toMatch(/a and b share the (mid|low) band/);
     // advisory: the song passes for work done on the checks that count
     const others = rep.checks.filter((c) => c.name !== 'loudness');
     expect(songPasses(others)).toBe(true);

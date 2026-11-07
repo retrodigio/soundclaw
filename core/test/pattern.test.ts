@@ -46,9 +46,10 @@ describe('the pattern text', () => {
     expect(formatPattern(p)).toContain('C5 E5v80~slide G#4!~vib(6,0.5) A3~arp(0,4,7)');
   });
 
-  it('~vib alone is the default vibrato and keeps its short form; flats read as sharps in the normal form', () => {
+  it('~vib alone is the default vibrato and keeps its short form; a flat stays a flat in the normal form, a sharp a sharp', () => {
     const p = ok('pattern x steps=2 tpb=4\n  lead: Db4~vib Bb3\n');
-    expect(formatPattern(p)).toContain('C#4~vib A#3');
+    expect(formatPattern(p)).toContain('Db4~vib Bb3');
+    expect(formatPattern(ok('pattern x steps=2 tpb=4\n  lead: C#4~vib A#3\n'))).toContain('C#4~vib A#3');
   });
 
   it('a chord joins notes with +, and a slide knows the note it comes from', () => {

@@ -70,8 +70,8 @@ function cellOf(tok: string, key: Key, octave: number): string {
   if (!t) return tok;
   const deg = Number(t[2]);
   const vel = t[3] ?? '';
-  if (t[1]) return [0, 2, 4].map((k) => noteLabel(degreeNote(key, deg + k, octave)) + vel).join('+');
-  return noteLabel(degreeNote(key, deg, octave)) + vel;
+  if (t[1]) return [0, 2, 4].map((k) => noteLabel(degreeNote(key, deg + k, octave), key.flats) + vel).join('+');
+  return noteLabel(degreeNote(key, deg, octave), key.flats) + vel;
 }
 
 /** The part's octave in a key: the template's, moved an octave when that keeps the part inside its instrument's range. */
