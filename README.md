@@ -7,8 +7,9 @@ machine, and can be edited and checked by a person and an agent alike.
 
 > **Status: early.** The project folder, history, rendering, the server and dashboard, the request
 > loop between a person and an agent, the classic (sfxr-style) voice, and the views and checks an
-> agent "hears" with are in, and so is the sound editor (sliders, A/B, feedback tags). The enhanced
-> voices and the music tracker come next. Expect the commands and documents to change.
+> agent "hears" with are in, and so is the sound editor (sliders, A/B, feedback tags) and the layered
+> voice (layers, FM, plucks, samples, envelopes, effects, stereo). Sets and variants, loops and the
+> music tracker come next. Expect the commands and documents to change.
 
 ## What works today
 
@@ -21,10 +22,14 @@ machine, and can be edited and checked by a person and an agent alike.
   done in arithmetic that every platform agrees on), with generators by category (pickup, laser,
   explosion, powerup, hit, jump, blip), seeded `mutate`, and import and export of sfxr patch text and
   `synth.csv`.
+- **The layered voice.** Up to 8 layers per sound (classic, oscillators, FM, Karplus-Strong plucks, imported
+  samples), breakpoint envelopes on any parameter, filters and effects per layer and on a master chain, stereo, a
+  limiter on export, recipes for footsteps, UI clicks, doors and magic, and an editor with a layer list, an envelope
+  graph and effect chains. The same deterministic renderer runs in Node and the browser.
 - **Ears for an agent that cannot listen.** Every result carries numbers (loudness in LUFS, true
   peak, attack, tail, brightness, pitch, onsets) and a check summary; `view` draws the waveform, a
   mel spectrogram, the pitch track, or two sounds compared; `describe` says it in words; `check`
-  flags clips, loudness, DC, clicks and cut tails with the exact time ranges, and `work done` waits
+  flags clips, loudness, DC, clicks, cut tails and harsh 2-5 kHz with the exact time ranges, and `work done` waits
   for them to pass.
 - **Deterministic rendering.** A sound renders to 44,100 Hz mono samples by pure TypeScript, the
   same samples in Node and in the browser (tested), cached by the content hash of the document, and

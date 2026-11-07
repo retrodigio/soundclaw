@@ -4,7 +4,7 @@
 // (answer it here), done.
 
 import { useState } from 'react';
-import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, tagsNote, checkSummary, checksPass, type Sound, type WorkRequest } from '@soundclaw/core';
+import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, isStereo, layerLabel, tagsNote, checkSummary, checksPass, type Sound, type WorkRequest } from '@soundclaw/core';
 import { NoListener, unattended, useNow } from './Listening.tsx';
 import type { Store } from './store.ts';
 import { Spectrogram } from './Spectrogram.tsx';
@@ -107,6 +107,15 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
       {sound.voice === 'tone' ? (
         <div className="params" data-testid={`params-${sound.id}`}>
           <span>{fmt(sound.frequency)} Hz</span><span>{fmt(sound.duration)} s</span><span>volume {fmt(sound.volume)}</span>
+        </div>
+      ) : sound.voice === 'layered' ? (
+        <div className="params layered" data-testid={`params-${sound.id}`} data-voice="layered" title="A layered sound: its layers and master effects. Edit opens the layer editor.">
+          {sound.layers.length === 0 && <span className="dim">no layers yet</span>}
+          {sound.layers.map((l, i) => (
+            <span key={l.salt} className={l.mute ? 'dim' : 'changed'} data-testid={`layer-${sound.id}-${i + 1}`}>{i + 1} {layerLabel(l)}{l.mute ? ' (muted)' : ''}{l.solo ? ' (solo)' : ''}{l.fx.length ? ` + ${l.fx.map((f) => f.kind).join(', ')}` : ''}</span>
+          ))}
+          {sound.master.length > 0 && <span className="changed" data-testid={`master-${sound.id}`}>master: {sound.master.map((f) => f.kind).join(', ')}</span>}
+          {isStereo(sound) && <span className="changed" data-testid={`stereo-${sound.id}`}>stereo</span>}
         </div>
       ) : (
         <div className="params classic" data-testid={`params-${sound.id}`} data-voice="classic" title="The classic voice's 25 parameters; Edit opens the sliders. Changed from the default in bold.">

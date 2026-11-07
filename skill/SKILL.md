@@ -1,6 +1,6 @@
 ---
 name: soundclaw
-description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, render, view, describe, check, import, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
+description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, changes, render, view, describe, check, import, sample, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
 ---
 
 # SoundClaw
@@ -13,7 +13,8 @@ a picture, `describe` puts the numbers in words, `check` says what fails and whe
 listens** in the dashboard, which plays exactly the samples you rendered, and tells you what to
 change through requests.
 
-Make sounds with the **classic voice** (`voice=classic`: sfxr's 25 parameters). The plain sine tone
+Make sounds with the **classic voice** (`voice=classic`: sfxr's 25 parameters) or the **layered
+voice** (`voice=layered`: up to 8 layers; see *Layered sounds*). The plain sine tone
 (`sound new <id>`) is a placeholder with `frequency`, `duration` and `volume`; it has no fade, so it
 fails the tail check and cannot finish a request.
 
@@ -64,20 +65,63 @@ redo
   `highPassSweep` (-1..1), `volume`. Ranges and formulas: docs/commands.md. Tone: `frequency`
   20-20000 Hz, `duration` 0.01-10 s, `volume` 0-1.
 - Ids are lowercase: `a-z`, `0-9`, `_`, `-`.
-- `render <sound>` gives the numbers again; `export` writes `wav` (16-bit PCM, 44,100 Hz, mono),
-  `patch` (sfxr text) or `csv` (synth.csv) to `<project>/exports/` or `out`; `import` reads an
+- `render <sound>` gives the numbers again; `export` writes `wav` (16-bit PCM, 44,100 Hz, mono; stereo for a layered sound with a panned layer),
+  `patch` (sfxr text) or `csv` (synth.csv: classic sounds only) to `<project>/exports/` or `out`; `import` reads an
   sfxr csv or patch.
 - The same document always renders the same hash, on every machine. If a number surprises you,
   trust the numbers, not your expectation of the sound.
 
+## Layered sounds
+
+**Classic or layered?** Use the classic voice for a blip, a coin, a laser, a jump: one sfxr voice,
+exportable as a `synth.csv` row for an engine that reads them, and quick to explore with `random`
+and `mutate`. Use a **layered** sound when it needs a body and a top, or sound sources sfxr does not
+have: impacts, doors, footsteps, UI clicks, magic, plucked and bell tones, a recorded sample. A layered
+sound exports as a WAV only (said by `export`). Keep a classic sound classic with `sound classic <id> on`
+(it then refuses `layer-up`); `sound layer-up <id>` turns a classic one into layer 1 of a layered one, same samples.
+
+```
+sound new impact voice=layered seed=4
+layer add impact osc wave=sine freq=140 dur=0.5 gain=0.9     # sources: classic osc fm ks sample
+env impact 1.freq "0:140 0.25:42@exp"                         # an envelope replaces a fixed value
+env impact 1.amp adsr(0.002,0.28,0,0)                         # writes breakpoints
+layer add impact osc wave=brown dur=0.2 filter=lp cutoff=2500 gain=0.8
+env impact 2.cutoff "0:5000 0.15:300@exp"
+layer add impact osc wave=square freq=3200 dur=0.012 gain=0.3
+fx add impact reverb size=0.25 mix=0.12                       # no layer= : the master chain
+layer mute impact 3; layer solo impact 1 on; layer move impact 3 to=1
+sound new door voice=layered preset=door seed=2               # recipes: footstep ui-click door magic
+```
+
+- **The impact recipe** (a low sine thump that falls in pitch, a short burst of low-passed noise, a
+  few-millisecond click): thump `osc sine freq≈140 → 42 @exp, dur 0.5`, amplitude `adsr(0.002,0.28,0,0)`;
+  noise `osc brown` (or white) with `filter=lp` whose `cutoff` envelope falls `5000 → 300 @exp` over 0.15 s and
+  an amplitude that decays in 0.18 s; click `osc square freq≈3200 dur 0.012`. Add a soft `distort` and a short
+  `reverb` on the master chain; then raise `sound set <id> gain=` until `loudness` passes (distortion before the
+  level holds the peak down). docs/examples/layered-demo.txt has this and two more that pass every check.
+- Order: source → filter → amplitude envelope → effects (list order) → gain → pan; then sum → master gain → master
+  effects; export adds a limiter at the style's true-peak ceiling. Without an amplitude envelope a layer fades 2 ms at
+  both ends; with one, make it reach 0 before `dur` ends or the `tail` check will say the sound is cut.
+- Envelope targets: `N.amp`, `N.<param>` (those marked in docs/commands.md), `N.fxK.<param>`, `master.fxK.<param>`. Curves
+  are for the segment arriving at a point: `lin exp hold ease`. A fixed value set later removes the envelope.
+- Any layer off centre in `pan` makes the sound **stereo**; the checks count both channels and `describe` says stereo.
+- `sample import <project> <file.wav> as=<name>` (CLI `soundclaw sample import …`, MCP `sample`) before a `sample` layer;
+  a batch naming a missing sample is refused.
+- `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
+  problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
+  sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower
+  that layer's `gain`, or add `filter=lp` to it.
+- A person edits layers, envelopes and effects in the dashboard as `human:<name>` (`layer set`, `env`, `fx …`): read
+  `changes` before editing a sound they touched, as with classic sounds.
+
 ## Listening with numbers and pictures
 
-- Start with `check` (CLI: `soundclaw check <project> <sound>`): clip, loudness (target from the
+- Start with `check` (CLI: `soundclaw check <project> <sound>`): six checks (with `harsh`): clip, loudness (target from the
   project style, default -16 LUFS ±1, so `volume` is usually the fix), dc, click (a jump at the first
   or last sample: use `attack` > 0 and let `decay` reach zero), tail (silence padding, or a sound cut
-  off while still loud: a `minFreq` cut or a short decay). It lists the exact time ranges.
+  off while still loud: a `minFreq` cut or a short decay), harsh (sustained 2–5 kHz energy). It lists the exact time ranges.
 - `view <sound> spec` shows brightness, pitch motion and noise; `wave` the shape and the clipping;
-  `pitch` the note it actually sounds (slides, vibrato); `compare <sound> other=<sound>` stacks two
+  `pitch` the note it actually sounds (slides, vibrato); `layers` (layered sounds) each layer on its own; `compare <sound> other=<sound>` stacks two
   and shows the difference with distance numbers (use it for "more like that one" and to see what a
   `mutate` changed). The image is a PNG; the tool also prints the numbers.
 - `describe <sound>` is the same measurements in plain words.

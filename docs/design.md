@@ -47,8 +47,8 @@ command in its normal form. A batch is one group. The sounds are the tape replay
   CLI takes `--by`. An agent that wants to know what a person did reads the history.
 - **Text on disk.** Everything is plain text and git-friendly. The history is append-only.
 
-The only document today is a **sound**, with one of two voices: the **classic voice** (sfxr's 25
-parameters; below) or the S0 placeholder, a sine tone with `frequency`, `duration` and `volume`.
+The only document today is a **sound**, with one of three voices: the **classic voice** (sfxr's 25
+parameters; below), the **layered voice** (below), or the S0 placeholder, a sine tone with `frequency`, `duration` and `volume`.
 The folder already has places (`instruments/`, `songs/`, `sets/`) for the documents the fuller tool
 will add.
 
@@ -107,7 +107,7 @@ the dashboard plays, so the file is exactly what the reference makes.
 K-weighting and gating) and true peak (4x oversampled), YIN pitch, spectral centroid, attack, tail,
 onsets. It has no native dependencies and is tested against synthetic signals with known answers. It
 is a *measurement*, not part of the render: it may use `Math.sin`, and the last digit may differ
-between platforms (numbers are printed rounded). `core/src/checks.ts` holds the five checks and the
+between platforms (numbers are printed rounded). `core/src/checks.ts` holds the six checks and the
 project style; `core/src/views.ts` draws the PNG views through `core/src/png.ts`, a small PNG
 encoder (its own deflate) with a 5×7 font. The dashboard measures with the same code in the
 browser, so a card's check badge and the CLI agree.
@@ -116,8 +116,38 @@ A **content-hash render cache** (`server/src/cache.ts`) keeps samples under the 
 document's audio-relevant text plus the renderer's version; it lives in memory and in
 `.cache/renders/` (ignored by git). A status mark does not change the key.
 
-**Export** is a 16-bit PCM WAV, mono, 44,100 Hz, rendered through the cache; the classic voice also
-exports as single-patch text and as a `synth.csv`.
+**Export** is a 16-bit PCM WAV, 44,100 Hz, rendered through the cache (mono, or stereo for a layered sound with a panned layer, through the limiter); the classic voice also
+exports as single-patch text and as a `synth.csv`; a layered sound is WAV only.
+
+## The layered voice
+
+A layered sound is plain data: sound-wide values (`duration`, `gain`, `seed`), up to 8 layers and a master
+chain. A layer is a source, its parameters (all filled in), the envelopes that replace some of them, an
+amplitude envelope and a chain of effects. Everything about a parameter (range, default, whether it takes an
+envelope) is a table in `core/src/layered.ts`; the command parser, the editor and the reference read it.
+
+**Rendering** is in `core/src/synth.ts`, in doubles, with the same rule as the classic voice: nothing that may
+differ in the last digit between platforms. The sine is `sineCycles` (a polynomial); 2^x and log2 are built from bits
+and a series (`mathx.ts`); the filter's tangent is a ratio of fdlibm sines; the rest is `+ - * /`, `sqrt`, `floor` and
+`round`. The noise is xorshift, seeded by the sound's seed and the layer's salt (a number that stays with a layer through
+moves), so it does not change when layers are reordered or other parameters edited. A layer is built
+(source, filter, amplitude envelope, effects, gain), placed at its offset, panned (constant power) and summed;
+the sound has the master gain and chain. A sound with a panned layer has two channels. The render cache keeps the channels one after
+the other; `renderSound` is the channel (mono) or the mix of two, which is what the spectrum, pitch and views use, while peaks,
+clipping, loudness and clicks count each channel (`analyze` and `runChecks` take the channel list).
+
+**Samples** are files in `<project>/samples/`, not part of the tape: a sample layer names one and the render key contains the SHA-256
+of its bytes. `core` never reads files: it gets a `SampleBank`. The server's bank reads the folder; the page fetches each sample
+once (`/api/samples/<name>.wav`) and renders sample layers as silence, without caching, until it has the bytes. The writer refuses a
+batch that names a sample that is not in the project.
+
+**The limiter** is applied by `soundWav` / `export` / the page's download, so all three give the same bytes. It looks 48 samples ahead,
+finds the needed gain per sample from a 4x oversampled peak (the same Blackman-windowed sinc as the true-peak measurement) and
+averages the minimum over the window, so the gain is at most what each sample needs and exactly 1 under the ceiling.
+
+**An automatic length** is the end of the last layer (and the master effects' worst-case tails), cut where the sound has died away
+(60.3 dB under its peak, with a 3 ms fade when an effect's tail was cut), never inside a layer's own source, so a classic voice in a layer
+keeps its length and `layer-up` keeps the samples.
 
 ## The server
 
@@ -187,6 +217,5 @@ request: no mark, no checks to pass before the agent closes it.
 
 ## Not yet
 
-The enhanced voices, instruments, songs and sets, a time range on feedback ("0.4–0.7 s too harsh"),
-sets and loop checks, OGG export, and a headless worker
+Instruments, songs, sets and variants, loops and families for ambience, the batch audition page, bfxr/jsfxr import, OGG export, a time range on feedback ("0.4–0.7 s too harsh"), and a headless worker
 that takes requests with no agent session.

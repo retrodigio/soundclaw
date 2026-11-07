@@ -419,8 +419,8 @@ export function audibleLayers(s: LayeredSound): Layer[] {
 export function layerLabel(l: Layer): string {
   switch (l.kind) {
     case 'classic': return `classic ${['square', 'saw', 'sine', 'noise'][l.p.wave as number] ?? ''}`;
-    case 'osc': return `osc ${l.p.wave}${['white', 'pink', 'brown'].includes(l.p.wave as string) ? '' : ` ${l.p.freq} Hz`}`;
-    case 'fm': return `fm ${l.p.ops} ops ${l.p.algo} ${l.p.freq} Hz`;
+    case 'osc': return `osc ${l.p.wave}${['white', 'pink', 'brown'].includes(l.p.wave as string) ? '' : l.envs.freq ? ' (pitch envelope)' : ` ${l.p.freq} Hz`}`;
+    case 'fm': return `fm ${l.p.ops} ops ${l.p.algo} ${l.envs.freq ? '(pitch envelope)' : `${l.p.freq} Hz`}`;
     case 'ks': return `pluck ${l.p.freq} Hz`;
     case 'sample': return `sample ${l.p.sample || '(none)'}`;
   }
@@ -428,3 +428,12 @@ export function layerLabel(l: Layer): string {
 
 /** The classic patch text of a layer, for the docs and errors. */
 export const classicPatchText = (l: Layer): string => formatPatchNamed(layerPatch(l));
+
+/** A markdown table of parameters (for the command reference; a test keeps docs/commands.md in step). */
+export function specsTable(specs: readonly PSpec[]): string {
+  const range = (s: PSpec): string => (s.choices ? s.choices.map((c) => `\`${c}\``).join(', ') : s.text ? 'text' : `${s.min} to ${s.max}${s.unit ? ' ' + s.unit : ''}${s.integer ? ' (whole)' : ''}`);
+  const def = (s: PSpec): string => (s.optional ? (s.name === 'duration' ? 'auto' : 'from the sound') : s.default === '' ? 'none' : String(s.default));
+  const lines = ['| Parameter | Range | Default | Envelope | Meaning |', '|---|---|---|---|---|'];
+  for (const s of specs) lines.push(`| \`${s.name}\` | ${range(s)} | ${def(s)} | ${s.env ? 'yes' : '-'} | ${s.help} |`);
+  return lines.join('\n');
+}

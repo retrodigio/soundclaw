@@ -103,8 +103,8 @@
  },
  "master-chain": {
   "channels": 1,
-  "samples": 52789,
-  "hash": "d46b25cdbf0c8b787816917246a8a8909f1c8746e4028f19bc8410f5dbef50f0",
+  "samples": 51319,
+  "hash": "488cfd7a9871954b4fa8be2d7320a7902b4e65d94c82258370db14417c89b7a7",
   "renderVersion": 1
  },
  "layer-and-sound-duration": {
@@ -301,8 +301,8 @@
  },
  "fx-reverb": {
   "channels": 1,
-  "samples": 71829,
-  "hash": "e691f71d6e211c49f0717327139a1a95f10f07b0278ae602d27d7100cc61eb96",
+  "samples": 68361,
+  "hash": "fb3bf6db191f9d6191f5da0ade8730ad83fa733537f2f497f4be12c69550a9a6",
   "renderVersion": 1
  },
  "fx-envelope-mix": {
@@ -349,38 +349,38 @@
  },
  "recipe-door-1": {
   "channels": 1,
-  "samples": 50522,
-  "hash": "b980c223e7659a8d48a0bb5ff35b2d1a998a4757c67da67452237b0ed3dd82d0",
+  "samples": 48334,
+  "hash": "008fd6540bfc4934860c2e74a6b5f922c12b33766cc7b208578e190d7ab5e81e",
   "renderVersion": 1
  },
  "recipe-door-2": {
   "channels": 1,
-  "samples": 56249,
-  "hash": "2041631903ca7693f65727ce580a641efb4cc9808f711b2e763961f049bbf162",
+  "samples": 56024,
+  "hash": "94e8ee7101ca2e5e0e07976a699ef5070bc1df0423f5058361763c380a606424",
   "renderVersion": 1
  },
  "recipe-door-3": {
   "channels": 1,
-  "samples": 46847,
-  "hash": "d0c6f6095a0f862a045464f4bc402c2dbef1c505a45f6af42d0bdfd752c7bf36",
+  "samples": 44950,
+  "hash": "3fc83b404007bd942f22c0755d5d8b751bc84e58a188469dfab647ca114bcad3",
   "renderVersion": 1
  },
  "recipe-magic-1": {
   "channels": 2,
-  "samples": 71597,
-  "hash": "1801e5093f64eeed4781612a51ae57bca10551a5851fd9573ee22725b5e6ad96",
+  "samples": 70054,
+  "hash": "b4c18d4224e620298532545ad7af8472bdf3b7befa2ad06692b983ab206e7c83",
   "renderVersion": 1
  },
  "recipe-magic-2": {
   "channels": 2,
-  "samples": 102418,
-  "hash": "bce6b7b43cb4423a988ef4ffdaf538612d6e73e447fe3535002666a6b1b2ebf8",
+  "samples": 96701,
+  "hash": "038916b0142d05d112502a5b92151e2ac1e4433a71e185160ba1ab73b71ee0bc",
   "renderVersion": 1
  },
  "recipe-magic-3": {
   "channels": 2,
-  "samples": 77904,
-  "hash": "d82ca9796b432eee7eaf82f1b488c37e4fdcad5b5f86a1b7a67abdc7c8f259ca",
+  "samples": 76178,
+  "hash": "af8d4fc5f9b4ba5fb05b2bacdc1918cb03a01f1440698164c95ad0851c589349",
   "renderVersion": 1
  }
 }

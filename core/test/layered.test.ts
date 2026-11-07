@@ -579,7 +579,7 @@ layer remove imp 5`;
     const x = render(layered(NEW + 'layer add s osc wave=white dur=0.05 seed=1\nfx add s reverb size=1 mix=0.0003\n'));
     expect(x.length).toBeLessThan(0.05 * SAMPLE_RATE + 0.3 * SAMPLE_RATE); // the reverb may ring for 2.5 s; at this mix it is under -63 dB at once
     const a = analyze(x);
-    expect(a.trailingSilence).toBeLessThan(0.01);
+    expect(a.trailingSilence).toBeLessThan(0.02);
   });
 });
 

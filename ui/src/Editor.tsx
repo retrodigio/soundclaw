@@ -6,11 +6,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Coalescer, EDITOR_GROUPS, GENERATOR_NAMES, MUTATE_AMOUNT, WAVE_NAMES, classicField, csvFileText, diffPatch, patchFileText, renderKey, resetCommand, restoreCommand, roundParam, setCommand, soundWav,
+  Coalescer, EDITOR_GROUPS, GENERATOR_NAMES, MUTATE_AMOUNT, WAVE_NAMES, classicField, csvFileText, diffPatch, patchFileText, resetCommand, restoreCommand, roundParam, setCommand,
   type ClassicKey, type ClassicPatch, type Edits, type Scheduler, type Sound,
 } from '@soundclaw/core';
 import { Spectrogram } from './Spectrogram.tsx';
 import type { Store } from './store.ts';
+import { download } from './download.ts';
+import { LayeredEditor } from './LayeredEditor.tsx';
 import { Waveform } from './Waveform.tsx';
 
 const sched: Scheduler = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
@@ -29,17 +31,6 @@ function withEdits(p: ClassicPatch, e: Edits): ClassicPatch {
     if (k === 'seed') { if (v === 'auto') delete out.seed; else out.seed = v as number; } else (out as unknown as Record<string, number>)[k] = v as number;
   }
   return out;
-}
-
-export function download(name: string, body: Uint8Array | string, type: string): void {
-  const url = URL.createObjectURL(new Blob([body as BlobPart], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 interface SliderProps {
@@ -117,7 +108,7 @@ function AB({ store, sound }: { store: Store; sound: Sound }) {
   );
 }
 
-export function Editor({ store, id }: { store: Store; id: string }) {
+function ClassicEditor({ store, id }: { store: Store; id: string }) {
   const sound = store.sounds.find((s) => s.id === id);
   const [draft, setDraft] = useState<Edits>({});
   const [amount, setAmount] = useState(MUTATE_AMOUNT);
@@ -139,7 +130,7 @@ export function Editor({ store, id }: { store: Store; id: string }) {
   }, sched, PAUSE_MS), []);
   useEffect(() => () => { co.cancel(); if (release.current) clearTimeout(release.current); }, [co]);
 
-  const key = sound ? renderKey(sound) : '';
+  const key = sound ? store.keyOf(sound) : '';
   const prevKey = useRef(key);
   useEffect(() => {
     const was = prevKey.current;
@@ -262,7 +253,7 @@ export function Editor({ store, id }: { store: Store; id: string }) {
           <section className="panel" data-testid="export" aria-label="Export">
             <h3>Export</h3>
             <div className="row wrap">
-              <button data-testid="export-wav" onClick={() => download(`${id}.wav`, soundWav(sound, store.render(sound)), 'audio/wav')}>WAV</button>
+              <button data-testid="export-wav" onClick={() => download(`${id}.wav`, store.wavOf(sound), 'audio/wav')}>WAV</button>
               <button data-testid="export-patch" onClick={() => download(`${id}.sfxr`, patchFileText(sound.patch), 'text/plain')}>Patch text</button>
               <button data-testid="export-csv" onClick={() => download(`${id}.csv`, csvFileText(id, sound.patch), 'text/csv')}>CSV row</button>
             </div>
@@ -274,3 +265,10 @@ export function Editor({ store, id }: { store: Store; id: string }) {
   );
 }
 
+
+/** The editor page of a sound: the layer editor for layered sounds, the sliders of the classic voice for the rest. */
+export function Editor({ store, id }: { store: Store; id: string }) {
+  const sound = store.sounds.find((s) => s.id === id);
+  if (sound?.voice === 'layered') return <LayeredEditor store={store} id={id} />;
+  return <ClassicEditor store={store} id={id} />;
+}

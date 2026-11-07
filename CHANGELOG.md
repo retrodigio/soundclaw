@@ -6,6 +6,30 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### The layered voice
+- `voice=layered`: a sound of up to 8 layers, each with a start offset, gain, pan, its own state-variable
+  filter, an amplitude envelope, effects and one source: the classic voice (sample for sample),
+  an oscillator (sine, square with duty, saw, triangle, pulse, wavetable, white / pink / brown noise,
+  periodic "metal" noise), FM (2 to 4 operators, four algorithms), a Karplus-Strong pluck, or an
+  imported sample (trimmed, pitched, reversed). Deterministic and identical in Node and the browser
+  (no platform `sin`, `exp`, `log` or `pow` in the render path), with goldens.
+- Breakpoint envelopes (`lin`, `exp`, `hold`, `ease`) on any numeric parameter that allows one, and
+  `adsr(a,d,s,r)` as a shorthand that writes breakpoints; a state-variable filter, distortion,
+  bitcrush and sample-rate reduction, chorus, delay and a small reverb per layer and on a master chain, in a stated
+  order; a limiter on export at the project style's true-peak ceiling.
+- Commands: `sound new <id> voice=layered`, `layer add|set|remove|move|mute|solo`, `env`, `fx add|set|remove|move`,
+  `sound layer-up` (a classic sound becomes layer 1, same samples), `sound classic <id> on|off` (keeps a sound one
+  classic voice so it exports as a `synth.csv` row); `sample import|list` (CLI and MCP); a layered sound exports as WAV only.
+- Stereo: a sound is stereo when a layer is panned (constant power); WAV export, the numbers and every check count
+  both channels.
+- Generators: layered recipes `footstep`, `ui-click`, `door`, `magic` (seeded, ranges as data) through `sound generate`
+  and `preset=`.
+- The `layers` view (each layer's waveform and spectrogram with offsets) and the `harsh` check (sustained 2-5 kHz
+  energy above `harshLimitDb` for `harshMinMs`, both in the project style).
+- The editor for layered sounds: a layer list (add, remove, reorder, mute, solo, gain, pan, offset), each source's
+  controls, an envelope editor (drag a breakpoint, one command per drag), and the effect chains. Edits are
+  commands written as `human:<name>`.
+
 ### The SFX editor
 - A sound's page in the dashboard (`#/sound/<id>`, "Edit" on its card): the classic voice's 25
   parameters as sliders in sfxr's groups, each showing its value and range, double-click or ↺ for the

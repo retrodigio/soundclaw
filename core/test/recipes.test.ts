@@ -86,3 +86,17 @@ describe('layered recipes', () => {
     expect(serializeSound(r.library.get('s')!)).toBe(serializeSound(make('door', 4)));
   });
 });
+
+describe('the command reference', () => {
+  it('holds the generated tables of the layered voice, word for word (they come from the data)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { LAYER_SPECS, SOURCE_SPECS, FX_SPECS, SOUND_SPECS, FX_KINDS, specsTable } = await import('../src/index.ts');
+    const docs = readFileSync(join(import.meta.dirname, '..', '..', 'docs', 'commands.md'), 'utf8');
+    expect(docs).toContain(recipesTable());
+    expect(docs).toContain(specsTable(LAYER_SPECS));
+    expect(docs).toContain(specsTable(SOUND_SPECS));
+    for (const k of Object.keys(SOURCE_SPECS) as (keyof typeof SOURCE_SPECS)[]) expect(docs, k).toContain(specsTable(SOURCE_SPECS[k]));
+    for (const k of FX_KINDS) expect(docs, k).toContain(specsTable(FX_SPECS[k]));
+  });
+});

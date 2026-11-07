@@ -115,6 +115,12 @@ function paramLines(a: Sound | undefined, b: Sound | undefined): string[] {
       out.push(`${f.name} ${show(a.patch[f.name])} → ${show(b.patch[f.name])}`);
     }
     if (a.patch.seed !== b.patch.seed) out.push(`seed ${a.patch.seed ?? 'auto'} → ${b.patch.seed ?? 'auto'}`);
+  } else if (a && b && a.voice === 'layered' && b.voice === 'layered') {
+    // The document's lines that differ (a layer is one line, with its envelopes and effects under it): what went, then what came.
+    const la = serializeSound(a).split('\n'), lb = serializeSound(b).split('\n');
+    const had = new Set(la), has = new Set(lb);
+    const lines = [...la.filter((l) => !has.has(l)).map((l) => `− ${l.trim()}`), ...lb.filter((l) => !had.has(l)).map((l) => `+ ${l.trim()}`)];
+    out.push(...lines.slice(0, 14), ...(lines.length > 14 ? [`… ${lines.length - 14} more lines differ`] : []));
   } else if (a && b && a.voice === 'tone' && b.voice === 'tone') {
     for (const p of TONE_PARAMS) {
       const k = p.name as 'frequency' | 'duration' | 'volume';

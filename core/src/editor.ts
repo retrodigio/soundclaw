@@ -4,6 +4,7 @@
 // page and the tests use the same code.
 
 import { CLASSIC_FIELDS, WAVE_NAMES, classicField, formatCsv, formatPatch, formatPatchNamed, type ClassicKey, type ClassicPatch } from './classic.ts';
+import { FX_SPECS, formatEnv, layerSpecs, showValue, type Env, type FxKind, type PSpec, type SourceKind, type Value } from './layered.ts';
 import { fmtNumber } from './sound.ts';
 
 export interface EditorGroup {
@@ -147,4 +148,111 @@ export function patchFileText(p: ClassicPatch): string {
 /** A synth.csv with one row for the sound. */
 export function csvFileText(id: string, p: ClassicPatch): string {
   return formatCsv([{ id, patch: p }]);
+}
+
+// ---- the layered editor ---------------------------------------------------------------------------
+
+
+/** A slider for a parameter runs on a log scale when it is a frequency or a time whose range spans a factor of 50 or more (pitches, cutoffs, lengths). */
+export const isLogScale = (s: Pick<PSpec, 'min' | 'max' | 'unit' | 'choices' | 'text'>): boolean => !s.choices && !s.text && s.min > 0 && s.max / s.min >= 50 && (s.unit === 'Hz' || s.unit === 's');
+
+/** A slider position in 0..1 to the parameter's value (log or linear), rounded the way the generators round. */
+export function sliderValue(s: PSpec, t: number): number {
+  const c = Math.min(1, Math.max(0, t));
+  const v = isLogScale(s) ? s.min * (s.max / s.min) ** c : s.min + (s.max - s.min) * c;
+  return roundSpec(s, v);
+}
+
+/** The inverse: the position of a value on its slider. */
+export function sliderPosition(s: PSpec, v: number): number {
+  const c = isLogScale(s) ? Math.log(v / s.min) / Math.log(s.max / s.min) : (v - s.min) / (s.max - s.min);
+  return Math.min(1, Math.max(0, c));
+}
+
+/** A value kept in range and rounded: whole numbers for integer parameters, 3 significant digits on a log scale, 3 decimals otherwise. */
+export function roundSpec(s: PSpec, v: number): number {
+  const c = Math.min(s.max, Math.max(s.min, v));
+  if (s.integer) return Math.round(c);
+  if (isLogScale(s)) return Number(c.toPrecision(3));
+  return Math.round(c * 1000) / 1000;
+}
+
+const pairs = (specs: readonly PSpec[], kind: string, p: Record<string, Value>, names: readonly string[]): string =>
+  specs.filter((sp) => names.includes(sp.name)).map((sp) => `${sp.name}=${showValue(kind, sp.name, p[sp.name]!)}`).join(' ');
+
+/** `layer set <id> <n> …` in its normal form (values in the order of the layer's parameter table). */
+export function layerSetCommand(id: string, n: number, kind: SourceKind, values: Record<string, Value>): string {
+  return `layer set ${id} ${n} ${pairs(layerSpecs(kind), kind, values, Object.keys(values))}`;
+}
+
+/** `fx set <id> [layer=<n>] <k> …` in its normal form. */
+export function fxSetCommand(id: string, layer: number | null, k: number, kind: FxKind, values: Record<string, Value>): string {
+  return `fx set ${id}${layer === null ? '' : ` layer=${layer}`} ${k} ${pairs(FX_SPECS[kind], '', values, Object.keys(values))}`;
+}
+
+/** `env <id> <target> "<breakpoints>"` (or `clear`) in its normal form. */
+export function envCommand(id: string, target: string, env: Env | null): string {
+  return `env ${id} ${target} ${env ? `"${formatEnv(env)}"` : 'clear'}`;
+}
+
+/** Where a breakpoint can go: times rise (a drag cannot cross its neighbours), rounded to a millisecond; the value is kept in range and rounded. */
+export function movePoint(env: Env, i: number, t: number, v: number, spec: Pick<PSpec, 'min' | 'max' | 'unit'>): Env {
+  const lo = i === 0 ? 0 : env[i - 1]!.t + 0.001;
+  const hi = i === env.length - 1 ? Infinity : env[i + 1]!.t - 0.001;
+  const time = Math.round(Math.min(hi, Math.max(lo, t)) * 1000) / 1000;
+  const val = Math.min(spec.max, Math.max(spec.min, v));
+  const rounded = isLogScale(spec) ? Number(val.toPrecision(3)) : Math.round(val * 1000) / 1000;
+  return env.map((p, k) => (k === i ? { ...p, t: time, v: rounded } : p));
+}
+
+/** A new breakpoint at a time (value read off the curve by the caller), keeping times rising. Null when the time is taken. */
+export function addPoint(env: Env, t: number, v: number): Env | null {
+  const time = Math.round(t * 1000) / 1000;
+  if (time < 0 || env.some((p) => Math.abs(p.t - time) < 0.001)) return null;
+  return [...env, { t: time, v, curve: 'lin' as const }].sort((a, b) => a.t - b.t);
+}
+
+/** An envelope that holds a value: two flat points, the start of an edit. */
+export function flatEnv(v: number, span: number): Env {
+  return [{ t: 0, v, curve: 'lin' }, { t: Math.round(span * 1000) / 1000, v, curve: 'lin' }];
+}
+
+/**
+ * The rule that keeps a drag from writing one command per pixel, for any named control: values
+ * pushed while a control moves are kept (the latest per key) and `send` is called ONCE with them
+ * when the control is released (`flush`), or when it has not moved for `pauseMs`.
+ */
+export class KeyedCoalescer<V> {
+  private pending = new Map<string, V>();
+  private timer: unknown = null;
+  private readonly send: (edits: Map<string, V>) => void;
+  private readonly sched: Scheduler;
+  readonly pauseMs: number;
+  constructor(send: (edits: Map<string, V>) => void, sched: Scheduler, pauseMs = 700) {
+    this.send = send;
+    this.sched = sched;
+    this.pauseMs = pauseMs;
+  }
+  get active(): boolean {
+    return this.pending.size > 0;
+  }
+  push(key: string, value: V): void {
+    this.pending.set(key, value);
+    if (this.timer !== null) this.sched.clear(this.timer);
+    this.timer = this.sched.set(() => { this.timer = null; this.flush(); }, this.pauseMs);
+  }
+  flush(): void {
+    if (this.timer !== null) { this.sched.clear(this.timer); this.timer = null; }
+    if (!this.pending.size) return;
+    const edits = this.pending;
+    this.pending = new Map();
+    this.send(edits);
+  }
+  value(key: string): V | undefined {
+    return this.pending.get(key);
+  }
+  cancel(): void {
+    if (this.timer !== null) { this.sched.clear(this.timer); this.timer = null; }
+    this.pending = new Map();
+  }
 }

@@ -3,8 +3,8 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, melSpectrogram, renderExact, renderKey, renderSound, runChecks, samplesHash, type Analysis, type CheckResult, type Diag, type MelSpec, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
-import type { ClientMessage, PersonRequest, Presence, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
+import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import type { ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
 
 export interface Measured {
   analysis: Analysis;
@@ -76,7 +76,11 @@ export class Store {
   private nextId = 0;
   private waiting = new Map<number, (r: RunResult) => void>();
   private answers = new Map<number, (r: Answer) => void>();
-  private renders = new Map<string, Float32Array>();
+  /** The project's samples as the server lists them (name and the SHA-256 of the bytes). */
+  samples: SampleInfo[] = [];
+  private sampleData = new Map<string, { sha: string; data: SampleData }>();
+  private fetching = new Set<string>();
+  private renders = new Map<string, Float32Array[]>();
   private measures = new Map<string, Measured>();
   private ctx: AudioContext | null = null;
   private source: AudioBufferSourceNode | null = null;
@@ -116,6 +120,8 @@ export class Store {
       case 'hello':
         this.project = m.snapshot.project;
         this.sounds = m.snapshot.sounds;
+        this.samples = m.snapshot.samples ?? [];
+        this.loadSamples();
         this.style = m.snapshot.style ?? DEFAULT_STYLE;
         this.tape = m.snapshot.tape;
         this.requests = m.snapshot.requests;
@@ -127,6 +133,10 @@ export class Store {
         break;
       case 'requests':
         this.requests = m.requests;
+        break;
+      case 'samples':
+        this.samples = m.samples;
+        this.loadSamples();
         break;
       case 'presence':
         this.presence = m.presence;
@@ -206,7 +216,7 @@ export class Store {
   pinSnapshot(id: string): void {
     const s = this.sounds.find((x) => x.id === id);
     if (!s) return;
-    this.pins.set(id, { kind: 'snapshot', sound: s.voice === 'classic' ? { ...s, patch: { ...s.patch } } : { ...s }, label: `${id} as it was at #${this.tape.at(-1)?.seq ?? 0}` });
+    this.pins.set(id, { kind: 'snapshot', sound: cloneSound(s), label: `${id} as it was at #${this.tape.at(-1)?.seq ?? 0}` });
     this.changed();
   }
 
@@ -239,40 +249,91 @@ export class Store {
     return this.tape.some((e) => active.has(e.group) && e.cmd.startsWith('undo '));
   }
 
-  /** The sound's samples, rendered by core here in the browser (kept by the document's content key). */
-  render(s: Sound): Float32Array {
-    const key = renderKey(s);
+  /** The samples sample layers can use: the page fetches each one's bytes once and renders with them. */
+  readonly sampleBank: SampleBank = {
+    get: (name) => {
+      const info = this.samples.find((x) => x.name === name);
+      const have = this.sampleData.get(name);
+      return info && have && have.sha === info.sha256 ? have.data : undefined;
+    },
+    hash: (name) => this.samples.find((x) => x.name === name)?.sha256,
+  };
+
+  private loadSamples(): void {
+    for (const info of this.samples) {
+      const have = this.sampleData.get(info.name);
+      if ((have && have.sha === info.sha256) || this.fetching.has(`${info.name}:${info.sha256}`)) continue;
+      const key = `${info.name}:${info.sha256}`;
+      this.fetching.add(key);
+      void fetch(`/api/samples/${info.name}.wav?token=${encodeURIComponent(this.token)}`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
+        .then((buf) => {
+          const w = readSampleWav(new Uint8Array(buf));
+          this.sampleData.set(info.name, { sha: info.sha256, data: { rate: w.rate, data: w.data } });
+        })
+        .catch(() => undefined)
+        .finally(() => { this.fetching.delete(key); this.renders.clear(); this.measures.clear(); this.changed(); });
+    }
+  }
+
+  /** The key a sound's render is kept by: its document and the bytes of the samples it names (as the server's cache keys it). */
+  keyOf(s: Sound): string {
+    return renderKey(s, (n) => this.sampleBank.hash(n) ?? 'missing');
+  }
+
+  /** Are the samples the sound names here yet? (Until then it renders its sample layers as silence, and the render is not kept.) */
+  private ready(s: Sound): boolean {
+    return s.voice !== 'layered' || s.layers.every((l) => l.kind !== 'sample' || !l.p.sample || !!this.sampleBank.get(String(l.p.sample)));
+  }
+
+  /** The sound's channels (one, or two when a layer is panned), rendered by core here in the browser (kept by the document's content key). */
+  channels(s: Sound): Float32Array[] {
+    const key = this.keyOf(s);
     let r = this.renders.get(key);
     if (!r) {
-      r = renderSound(s);
+      r = renderChannels(s, this.sampleBank);
+      if (!this.ready(s)) return r;
       this.renders.set(key, r);
       if (this.renders.size > 64) this.renders.delete(this.renders.keys().next().value!);
     }
     return r;
   }
 
+  /** The sound's samples: the channel itself, or the mix of two. */
+  render(s: Sound): Float32Array {
+    return mixdown(this.channels(s));
+  }
+
   /** The sound's exact samples (doubles; for a classic sound, what the reference synth makes), for tests that compare the browser with Node bit for bit. */
   exact(s: Sound): Float64Array {
-    return renderExact(s);
+    return renderExact(s, this.sampleBank);
+  }
+
+  /** The WAV a person downloads: as the CLI exports it (a layered sound through the limiter at the style's true-peak ceiling). */
+  wavOf(s: Sound): Uint8Array {
+    return soundExport(s, this.render(s), { ceilingDb: this.style.truePeakMax, channels: this.channels(s), bank: this.sampleBank }).wav;
   }
 
   /** The sound's numbers, checks and a spectrogram, measured here with core (the same code the CLI uses), kept by the document's content key. */
   measure(s: Sound): Measured {
-    const key = `${renderKey(s)}|${JSON.stringify(this.style)}`;
+    const key = `${this.keyOf(s)}|${JSON.stringify(this.style)}`;
     let m = this.measures.get(key);
     if (!m) {
-      const x = this.render(s);
-      const analysis = analyze(x);
+      const ch = this.channels(s);
+      const x = mixdown(ch);
+      const analysis = analyze(ch);
       const hop = Math.max(256, Math.ceil(x.length / 240));
-      m = { analysis, checks: runChecks(x, analysis, this.style), spec: melSpectrogram(x, { bands: 48, hop }) };
-      this.measures.set(key, m);
-      if (this.measures.size > 64) this.measures.delete(this.measures.keys().next().value!);
+      m = { analysis, checks: runChecks(ch, analysis, this.style), spec: melSpectrogram(x, { bands: 48, hop }) };
+      if (this.ready(s)) {
+        this.measures.set(key, m);
+        if (this.measures.size > 64) this.measures.delete(this.measures.keys().next().value!);
+      }
     }
     return m;
   }
 
   hashOf(s: Sound): string {
-    return samplesHash(this.render(s));
+    return samplesHash(joinChannels(this.channels(s)));
   }
 
   stop(): void {
@@ -304,15 +365,16 @@ export class Store {
   async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false): Promise<void> {
     if (this.playing === key && !restart) { this.stop(); return; }
     this.stop();
-    const samples = this.render(s);
-    this.played.push({ id, ...(slot ? { slot } : {}), hash: samplesHash(samples), samples: samples.length, key: renderKey(s) });
+    const chans = this.channels(s);
+    const samples = chans[0]!;
+    this.played.push({ id, ...(slot ? { slot } : {}), hash: samplesHash(joinChannels(chans)), samples: samples.length, key: this.keyOf(s) });
     this.playing = key;
     this.changed();
     try {
       this.ctx ??= new AudioContext({ sampleRate: 44100 });
       if (this.ctx.state === 'suspended') await this.ctx.resume();
-      const buf = this.ctx.createBuffer(1, samples.length, 44100);
-      buf.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+      const buf = this.ctx.createBuffer(chans.length, samples.length, 44100);
+      chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.connect(this.ctx.destination);

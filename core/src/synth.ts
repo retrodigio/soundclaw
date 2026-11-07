@@ -574,15 +574,20 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
   });
   let end = n;
   if (s.duration === null) {
-    // An automatic length ends where the sound has died away: the last sample within 63 dB of the peak, but never inside a layer's own source. (The effects' tails only said how much room to leave.)
+    // An automatic length ends where the sound has died away: the last sample within 60.3 dB of the peak, but never inside a layer's own source. (The effects' tails only said how much room to leave.)
     let peak = 0;
     for (const ch of mix) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(ch[i]!));
-    const floor = peak * 0.0007079457843841379;
+    const floor = peak * 0.0009660508789898133;
     let last = 0;
     for (const ch of mix) for (let i = n - 1; i > last; i--) if (Math.abs(ch[i]!) >= floor) { last = i; break; }
     let floorEnd = 1;
     for (const b of built) floorEnd = Math.max(floorEnd, b.offset + b.src);
     end = Math.max(1, Math.min(n, Math.max(last + 1, floorEnd)));
+    if (end < n && end > floorEnd) {
+      // the sound was cut where an effect's tail was still just audible: close it with a 3 ms fade, so it ends at zero
+      const fade = Math.min(132, end - floorEnd);
+      for (const ch of mix) for (let i = 0; i < fade; i++) ch[end - 1 - i] = ch[end - 1 - i]! * (i / fade);
+    }
   }
   return mix.map((ch) => Float32Array.from(ch.subarray(0, end)));
 }
