@@ -3,6 +3,9 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
+import { BIBLE_FILE, STYLE_FILE, musicGuide, type MusicGuide } from '@soundclaw/core';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
@@ -181,6 +184,25 @@ export class Writer {
     return songProblems(this.song(id), (i) => !!this.lookupInstrument(i));
   }
 
+  private guideStamp = '';
+  private guideCache: { guide: MusicGuide; text: string } | null = null;
+
+  /**
+   * The project's music style guide and bible (music-style.md, music-bible.md), read again when a
+   * file changes: people edit them by hand.
+   */
+  musicGuide(): { guide: MusicGuide; text: string } {
+    const files = [STYLE_FILE, BIBLE_FILE].map((f) => join(this.project.dir, f));
+    const stamp = files.map((f) => { try { const st = statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return '-'; } }).join('|');
+    if (stamp !== this.guideStamp || !this.guideCache) {
+      const read = (f: string): string | null => (existsSync(f) ? readFileSync(f, 'utf8') : null);
+      const [a, b] = files.map(read);
+      this.guideCache = { guide: musicGuide(a!, b!), text: `${a ?? ''}\u0000${b ?? ''}` };
+      this.guideStamp = stamp;
+    }
+    return this.guideCache;
+  }
+
   /** A song's numbers and checks, measured once for each distinct document. */
   measureSong(id: string): SongMeasured {
     return this.bench.measure(this.song(id));
@@ -355,6 +377,7 @@ export class Writer {
       next = trial.library;
     } else {
       next = copyLibrary(this.library);
+      next.guide = this.musicGuide().guide;
       for (const c of parsed.commands) {
         try {
           const before = c.op === 'set' ? next.get(c.id) : undefined;
@@ -372,7 +395,8 @@ export class Writer {
             }
           }
           if (c.op === 'set' && before && serializeSound(before) === serializeSound(next.get(c.id)!)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
-          added.push({ seq: ++seq, by: req.by, at, group, cmd: normal ?? c.text });
+          // a command that stands for several (song new from-bible=, template=) goes on the tape as those commands
+          for (const line of (normal ?? c.text).split('\n')) added.push({ seq: ++seq, by: req.by, at, group, cmd: line });
           // Loudness matching measures a render; the result goes on the tape as plain `sound set … gain=` commands, so a replay never measures.
           const match = this.matchAfter(next, c);
           for (const text of match.commands) {

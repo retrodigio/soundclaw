@@ -44,6 +44,32 @@ export const SCALES: Readonly<Record<string, readonly number[]>> = {
   'pentatonic-minor': [0, 3, 5, 7, 10],
   blues: [0, 3, 5, 6, 7, 10],
   chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  // the same scales under their other names
+  ionian: [0, 2, 4, 5, 7, 9, 11],
+  aeolian: [0, 2, 3, 5, 7, 8, 10],
+  'natural-minor': [0, 2, 3, 5, 7, 8, 10],
+  // more colours, common in games
+  'major-blues': [0, 2, 3, 4, 7, 9],
+  'whole-tone': [0, 2, 4, 6, 8, 10],
+  'phrygian-dominant': [0, 1, 4, 5, 7, 8, 10],
+  'hungarian-minor': [0, 2, 3, 6, 7, 8, 11],
+  'double-harmonic': [0, 1, 4, 5, 7, 8, 11],
+  'harmonic-major': [0, 2, 4, 5, 7, 8, 11],
+  'lydian-dominant': [0, 2, 4, 6, 7, 9, 10],
+  hirajoshi: [0, 2, 3, 7, 8],
+  octatonic: [0, 2, 3, 5, 6, 8, 9, 11],
+};
+
+/** What each scale is, in a few words (for `scale list`). */
+export const SCALE_NOTES: Readonly<Record<string, string>> = {
+  major: 'bright, settled (= ionian)', minor: 'natural minor (= aeolian, natural-minor)', dorian: 'minor with a raised 6th: folk, adventure',
+  phrygian: 'minor with a flat 2nd: dark, Spanish', lydian: 'major with a raised 4th: wonder, floating', mixolydian: 'major with a flat 7th: heroic, rock',
+  locrian: 'diminished tonic: unstable, eerie', 'harmonic-minor': 'minor with a raised 7th: drama, the dominant leads home', 'melodic-minor': 'minor with a raised 6th and 7th',
+  'pentatonic-major': 'five notes, no half steps: open, cheerful', 'pentatonic-minor': 'five notes: bluesy, open', blues: 'minor pentatonic and the flat 5th',
+  chromatic: 'all twelve (no key check to speak of)', ionian: 'the major scale', aeolian: 'the natural minor scale', 'natural-minor': 'the natural minor scale',
+  'major-blues': 'major pentatonic and the flat 3rd', 'whole-tone': 'whole steps only: dreams, magic, unresolved', 'phrygian-dominant': 'phrygian with a major 3rd: desert, ancient',
+  'hungarian-minor': 'harmonic minor with a raised 4th: exotic, villainous', 'double-harmonic': 'two augmented seconds: ornate, mysterious', 'harmonic-major': 'major with a flat 6th: bittersweet',
+  'lydian-dominant': 'lydian with a flat 7th: playful, sci-fi', hirajoshi: 'five notes with half steps: East Asian colour', octatonic: 'half and whole steps: tension, horror',
 };
 
 export interface Key {

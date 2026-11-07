@@ -8,8 +8,10 @@
 // `.` is a rest, `-` holds the note before it for one more step, `|` only splits the row into bars
 // (every group has `bar` steps). A note is a name and an octave (`C5`, `C#5`, `Db3`), then optionally
 // `v1`..`v127` (velocity, default 100), `!` (an accidental outside the key, on purpose) and effects
-// `~slide` (glide in from the note before), `~vib` or `~vib(rate,depth)`, `~arp(0,4,7)`. A chord joins
-// notes with `+` (`C4+E4+G4`). A lower-case word is a drum hit (`k`, `s`, `hat`), with its own `v80`.
+// `~slide` (glide in from the note before), `~vib` or `~vib(rate,depth)`, `~arp(0,4,7)`. `@8` or `@-5`
+// after the velocity moves a note off the grid by whole milliseconds (late, or early with -; up to 50 either way: what
+// `humanise` writes). A chord joins notes with `+` (`C4+E4+G4`). A lower-case word is a drum hit
+// (`k`, `s`, `hat`), with its own `v80` and `@-4`.
 // A row can also be a note list: `lead= 0:C5*2 4:E5v90*4` (step, note, `*` length in steps).
 // The normal form is the grid, aligned, with `bar` written in the header when there are bars.
 
@@ -30,6 +32,8 @@ export interface NoteFx {
 export interface PNote {
   midi: number;
   vel: number;
+  /** Milliseconds off the grid (late when positive); left out when 0. */
+  nudge?: number;
   /** Marked `!`: outside the key on purpose. */
   accidental?: true;
   fx: NoteFx;
@@ -39,7 +43,7 @@ export type Cell =
   | { kind: 'rest' }
   | { kind: 'hold' }
   | { kind: 'notes'; notes: PNote[] }
-  | { kind: 'drum'; drum: string; vel: number };
+  | { kind: 'drum'; drum: string; vel: number; nudge?: number };
 
 export interface PatternChannel {
   name: string;
@@ -57,6 +61,8 @@ export interface Pattern {
 }
 
 export const VEL_DEFAULT = 100;
+/** The most a note may sit off the grid, ms. */
+export const NUDGE_MAX = 50;
 export const VIB_DEFAULT = { rate: 5, depth: 0.4 } as const;
 export const MAX_STEPS = 256;
 export const MAX_PATTERN_CHANNELS = 16;
@@ -123,9 +129,16 @@ function parseFx(body: string, at: number): NoteFx {
   return fx;
 }
 
+function parseNudge(v: string | undefined, col: number): number | undefined {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (Math.abs(n) > NUDGE_MAX) throw new Fail(col, `@${v}: a note moves at most ${NUDGE_MAX} ms off the grid`);
+  return n === 0 ? undefined : n;
+}
+
 function parseOneNote(text: string, at: number): PNote {
-  const m = /^([A-G][#b]?-?\d)(?:v(\d{1,3}))?(!)?((?:~.*)?)$/.exec(text);
-  if (!m) throw new Fail(at + 1, `'${text}' is not a note (like C5, C#5, Db3, C5v80, E5~slide, G4!)`);
+  const m = /^([A-G][#b]?-?\d)(?:v(\d{1,3}))?(!)?(?:@(-?\d{1,3}))?(!)?((?:~.*)?)$/.exec(text);
+  if (!m) throw new Fail(at + 1, `'${text}' is not a note (like C5, C#5, Db3, C5v80, C5@-6, E5~slide, G4!)`);
   const midi = parseNote(m[1]!);
   if (midi === null) throw new Fail(at + 1, `'${m[1]}' is outside the MIDI range C-1 to G9`);
   let vel = VEL_DEFAULT;
@@ -133,9 +146,11 @@ function parseOneNote(text: string, at: number): PNote {
     vel = Number(m[2]);
     if (vel < 1 || vel > 127) throw new Fail(at + 1 + m[1]!.length, `velocity is 1 to 127 (got ${vel}; use . for a rest)`);
   }
-  const fxAt = at + text.length - m[4]!.length;
-  const note: PNote = { midi, vel, fx: parseFx(m[4]!, fxAt) };
-  if (m[3]) note.accidental = true;
+  const fxAt = at + text.length - m[6]!.length;
+  const note: PNote = { midi, vel, fx: parseFx(m[6]!, fxAt) };
+  const nudge = parseNudge(m[4], at + 1);
+  if (nudge !== undefined) note.nudge = nudge;
+  if (m[3] || m[5]) note.accidental = true;
   return note;
 }
 
@@ -144,11 +159,12 @@ function parseCell(tok: string, at: number): Cell {
   if (tok === '.') return { kind: 'rest' };
   if (tok === '-') return { kind: 'hold' };
   if (/^[a-z]/.test(tok)) {
-    const m = /^([a-z][a-z0-9_]*?)(?:v(\d{1,3}))?$/.exec(tok);
-    if (!m || !DRUM_RE.test(m[1]!)) throw new Fail(at + 1, `'${tok}' is not a drum hit (a lower-case name of up to 12 letters like k, s, hat, then optionally v80)`);
+    const m = /^([a-z][a-z0-9_]*?)(?:v(\d{1,3}))?(?:@(-?\d{1,3}))?$/.exec(tok);
+    if (!m || !DRUM_RE.test(m[1]!)) throw new Fail(at + 1, `'${tok}' is not a drum hit (a lower-case name of up to 12 letters like k, s, hat, then optionally v80 and @-4)`);
     const vel = m[2] === undefined ? VEL_DEFAULT : Number(m[2]);
     if (vel < 1 || vel > 127) throw new Fail(at + 1 + m[1]!.length, `velocity is 1 to 127 (got ${vel})`);
-    return { kind: 'drum', drum: m[1]!, vel };
+    const nudge = parseNudge(m[3], at + 1);
+    return nudge === undefined ? { kind: 'drum', drum: m[1]!, vel } : { kind: 'drum', drum: m[1]!, vel, nudge };
   }
   const notes = splitOutside(tok, '+').map((p) => parseOneNote(p.text, at + p.at));
   const seen = new Set<number>();
@@ -306,15 +322,17 @@ export function formatFx(fx: NoteFx): string {
   return s;
 }
 
+const formatNudge = (n: number | undefined): string => (n ? `@${n}` : '');
+
 export function formatNote(n: PNote): string {
-  return `${noteLabel(n.midi)}${n.vel === VEL_DEFAULT ? '' : 'v' + n.vel}${n.accidental ? '!' : ''}${formatFx(n.fx)}`;
+  return `${noteLabel(n.midi)}${n.vel === VEL_DEFAULT ? '' : 'v' + n.vel}${formatNudge(n.nudge)}${n.accidental ? '!' : ''}${formatFx(n.fx)}`;
 }
 
 export function formatCell(c: Cell): string {
   switch (c.kind) {
     case 'rest': return '.';
     case 'hold': return '-';
-    case 'drum': return `${c.drum}${c.vel === VEL_DEFAULT ? '' : 'v' + c.vel}`;
+    case 'drum': return `${c.drum}${c.vel === VEL_DEFAULT ? '' : 'v' + c.vel}${formatNudge(c.nudge)}`;
     default: return c.notes.map(formatNote).join('+');
   }
 }
@@ -345,6 +363,8 @@ export interface StepEvent {
   notes: PNote[] | null;
   drum: string | null;
   vel: number;
+  /** A drum hit's milliseconds off the grid (a note's are on the note). */
+  nudge: number;
   /** For a note with ~slide: the pitch of the note sounding just before it in the channel, if one ended at this step. */
   slideFrom: number | null;
 }
@@ -360,7 +380,7 @@ export function channelEvents(ch: PatternChannel): StepEvent[] {
     if (c.kind === 'notes') while (s + len < cells.length && cells[s + len]!.kind === 'hold') len++;
     const prev = out[out.length - 1];
     const slideFrom = c.kind === 'notes' && c.notes.some((n) => n.fx.slide) && prev && prev.notes && prev.step + prev.len === s ? prev.notes[prev.notes.length - 1]!.midi : null;
-    out.push({ step: s, len, notes: c.kind === 'notes' ? c.notes : null, drum: c.kind === 'drum' ? c.drum : null, vel: c.kind === 'drum' ? c.vel : c.notes[0]!.vel, slideFrom });
+    out.push({ step: s, len, notes: c.kind === 'notes' ? c.notes : null, drum: c.kind === 'drum' ? c.drum : null, vel: c.kind === 'drum' ? c.vel : c.notes[0]!.vel, nudge: c.kind === 'drum' ? c.nudge ?? 0 : 0, slideFrom });
   }
   return out;
 }

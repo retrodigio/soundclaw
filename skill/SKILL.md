@@ -154,41 +154,63 @@ Use these instead of making sounds one at a time whenever a game plays the same 
 
 A song is **instruments** (a voice at a pitch), **patterns** (a grid of notes per channel) and a **song** (tempo,
 channels bound to instruments, the order of the patterns, the loop). The full reference is docs/commands.md
-("Music"); `docs/examples/chip-exploration.txt` is a complete 16-bar loop in two game layers to copy from.
+("Music"); `docs/examples/chip-exploration.txt` is a 16-bar loop written by hand, `docs/examples/compose-demo.txt` a
+town theme, a layered battle loop and a stinger written with the helpers.
 You cannot hear a song, so you work in passes and run `check <song>` after each: the failure is then in the
 pass you just made.
 
-1. **Structure.** `song new <id> tempo=<bpm> key=<tonic:mode> time=4/4 class=music` (`class=stinger` for a short fanfare:
-   -14 LUFS instead of -16). Decide the sections and their length in bars first (a loop: 4 bars of A, 4 of B ...), the
-   game layers (`base`, `tension`, `combat`: the channels that fade in and out together), and the channels with
-   `song channel add <song> <name> inst=<instrument>|kit=default layer=<layer>`. Patterns are 1 to 4 bars: `steps=16 tpb=4`
-   is one bar of sixteenth notes in 4/4. Use the built-in instruments first (square_lead, pulse_lead, triangle_bass, saw_pad,
-   fm_bell, fm_bass, pluck, kick, snare, hat, hat_open); `instrument new <id> from=<built-in>` then `instrument set` to change one.
-2. **Harmony.** Write the chords as a `pad` or arpeggio channel (`C4+E4+G4`, or `C4~arp(0,4,7)` for the chip shimmer),
-   one chord per bar or two. `check` runs `key`: every written note must be in the song's key; a note you mean to be out
-   of it is written `G#5!`. Notes made by `~arp` are not checked, so write the arp's root in key.
-3. **Bass.** Roots and fifths in the bass instrument's range (triangle_bass is C1-C4; `range` flags anything outside).
-   The bass pitches lock to the chord roots of pass 2. Under C2 the `render-match` pitch check cannot hear the note.
-4. **Melody.** Hold notes with `-`, rest with `.`, slide with `~slide`, vibrato with `~vib`, velocity with `v80`. Keep the lead in
-   the instrument's range. `view <song> notes` draws the written notes against what the render plays: a red note differs
-   (an instrument whose `root` is wrong plays an octave off, and `render-match` says `wrong octave ... check the instrument's root`).
-5. **Drums.** A drum channel is `kit=default` and rows of `k`, `s`, `h`, `oh`; a kick and a hat at once need two channels
-   (a row holds one hit per step). Put the drums in the `base` layer.
-6. **Arrangement.** `song section add <song> <name> <patterns...> x<n>`, `song intro`/`song ending` for a part that plays once,
-   `song loop <song> <from>..<to>` for the repeating region (`off` for a jingle). `loop-music` checks the seam: a loop whose
-   loud last beat runs into a quiet first beat, or a cut note, is flagged. The loop render folds the tail of the last
-   notes onto the start, so a reverb tail is not a seam.
-7. **Mix.** `normalize <project> <song>` writes `song set <id> gain=...` to the class target; then `view <song> mix`: channels
-   sharing the main band at the same time are amber, and `masking` warns (advisory: it never blocks `work done`). Fix it by
+0. **The brief.** `soundclaw style <project>` prints the project's music style guide (`music-style.md`: tempo range, scales,
+   instrument palette, forbidden things, rules per tag) and music bible (`music-bible.md`: an entry per track with its mood,
+   tempo, key, instruments and motif). Read it before you write a note; `style <project> --init` writes a starter pair.
+   A track the bible names starts as `song new <id> from-bible=<entry>`: the tempo, key, tags, channels and motifs from the
+   entry, written to the tape as plain commands. The `style` check holds the song to the guide and to its entry.
+1. **Structure.** `song new <id> tempo=<bpm> key=<tonic:mode> time=4/4 tags=<tag>` (`soundclaw scale D:major` prints the
+   key's chords by roman numeral; `scale list` every scale). Decide the sections and their length in bars first (a loop:
+   8 bars of A, 8 of B ...), and the channels: `song channel add <song> <name> inst=<instrument>|kit=default`. Use the
+   built-in instruments first (square_lead, pulse_lead, triangle_bass, saw_pad, fm_bell, fm_bass, pluck, kick, snare, hat,
+   hat_open); `instrument new <id> from=<built-in>` then `instrument set` to change one. A fanfare or jingle is a stinger:
+   `song new win kind=stinger template=victory|game-over|level-up|item-get` writes a whole one in the project's key to edit.
+2. **Harmony.** `chords <song> <pattern> pad "I vi ii65 V7" bars=1 rhythm=beats` writes the chords with smooth voice leading
+   into the `pad` row (making the pattern when it is new: as long as the progression). Inversions (`I6`, `V65`), sevenths,
+   `sus4`, borrowed (`bVII`, `iv`) and secondary (`V/V`) chords are written as they sound and marked `!` where they leave the
+   key. `song channel set <song> pad harmony=yes` and the advisory `voice-leading` check warns about parallel fifths and octaves.
+   One chord a bar is a good start; a progression shorter than the pattern repeats.
+3. **Bass and motion.** `bass <song> <pattern> bass from=pad style=root-fifth|walking|octave|root` follows the chords you wrote;
+   `arp <song> <pattern> arp from=pad pattern=updown rate=1/16` adds an arpeggio. Both stay in the instrument's range. Under C2 the
+   `render-match` pitch check cannot hear the note.
+4. **Melody.** Put the tune in a motif: `motif set <song> theme "D5 - F#5 A5 B5 - A5 -"` (or the bible's), then
+   `motif write <song> <pattern> lead theme at=0`, and develop it: `motif transpose ... by=2 mode=diatonic as=answer`,
+   `invert`, `retrograde`, `augment`, `diminish`, and `motif sequence <song> theme <pattern> lead "I IV V I"` (the motif on each
+   chord). A motif is notes you can read on the tape, never a seed. Then edit by hand where the line needs it (`pattern set`):
+   hold with `-`, rest with `.`, `~slide`, `~vib`, `v80`. Keep the lead in the instrument's range (a sequence climbs: check it).
+   `view <song> notes` draws the written notes against what the render plays: a red note differs.
+5. **Drums.** `drums <song> <pattern> drums rock|rock-16|halftime|shuffle|march|waltz|pulse|chip|... fill=4 seed=1` writes a
+   template into every bar with a fill every 4th and seeded variation; `drums,hats` gives the hats their own channel. Then
+   `humanise <song> <pattern> all timing=6 velocity=6 seed=1` writes small timing nudges (`C5@-4`) and velocity changes into
+   the notes. Both are seeded: the same command writes the same notes.
+6. **Arrangement and layers.** `song section add <song> <name> <patterns...> x<n>`, `song intro`/`song ending` for a part that
+   plays once, `song loop <song> <from>..<to>` for the repeating region (a stinger has `loop off`). For a game's adaptive
+   music, `layer-plan <song> base=pad,bass tension=arp combat=drums,lead` names the layers in the order they stack; the `layers`
+   check then plays the base with every mix of the others (as a game sums the stems, with no limiter) and holds each to the
+   loudness class, the true-peak limit and a clean seam, and each layer alone to the key. `loop-music` checks the seam.
+7. **Mix.** `normalize <project> <song>` writes `song set <id> gain=...` to the class target; with a layer plan, lower the
+   channel gains of the loudest layers until every mix sits inside the class (the check prints each mix's LUFS). Then
+   `view <song> mix`: channels sharing the main band at the same time are amber, and `masking` warns (advisory). Fix it by
    moving a part to another octave, thinning its notes, or panning it, not by turning it down.
 
-What the checks hold the song to: `clip`, `loudness` (class `music` -16 ±2 LUFS), `dc` (a pulse wave off 50 % duty needs a
-high-pass), `key`, `range`, `render-match` (every note's onset within 20 ms and its pitch right), `loop-music`, `masking`.
-`work done` on a request about a song needs all of them but `masking` to pass. `export <song> --loop` is the seamless loop,
-`--stems` one aligned file per game layer (before the master chain: they sum to the mix), `--format midi` a MIDI file;
-`midi import` brings a MIDI file in as a song. People mute and solo channels on the song card for listening; that is
-not stored, and a request from a person on a song is a `song mark <id> rejected` with their note. Change a pattern with `pattern set
-<song>.<name> "<text>"` (or the block form in a script); the history shows a person's edits like any other.
+Every helper goes on the tape with every option resolved and the rows it wrote (`run` and `history` print them), so the
+song replays to the same notes and you can see and edit what it did. `chords`, `bass`, `arp` and
+`drums` rewrite the whole row of the channel they name in that pattern (`motif write` only the steps it covers): run them
+before hand edits to that row, not after.
+
+What the checks hold the song to: `clip`, `loudness` (class `music` -16 ±2 LUFS, `stinger` -14 ±2), `dc` (a pulse wave off 50 %
+duty needs a high-pass), `key`, `range`, `render-match` (every note's onset within 20 ms and its pitch right), `loop-music`,
+`masking` (advisory), `voice-leading` (advisory), `style`, `layers`. `work done` on a request about a song needs all but the two
+advisory ones to pass. `export <song> --loop` is the seamless loop, `--stems` one aligned file per game layer (before the master
+chain: they sum to the mix), `--format ogg|midi`; `midi import` brings a MIDI file in as a song. People mute and solo channels on
+the song card for listening; that is not stored, and a request from a person on a song is a `song mark <id> rejected` with their
+note. Change a pattern with `pattern set <song>.<name> "<text>"` (or the block form in a script); the history shows a person's edits
+like any other.
 
 ## Loudness classes: one target does not fit a whole game
 

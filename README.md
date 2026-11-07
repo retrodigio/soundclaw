@@ -9,8 +9,8 @@ machine, and can be edited and checked by a person and an agent alike.
 > loop between a person and an agent, the classic (sfxr-style) voice, and the views and checks an
 > agent "hears" with are in, and so is the sound editor (sliders, A/B, feedback tags) and the layered
 > voice (layers, FM, plucks, samples, envelopes, effects, stereo), sets and loops, and the music core
-> (instruments, a text pattern grid, songs with game layers, MIDI, and the views and checks for music).
-> The music editor (piano roll) and the composition helpers come next. Expect the commands and documents to change.
+> (instruments, a text pattern grid, songs with game layers, MIDI, and the views and checks for music),
+> with composition helpers that write notes on the tape. The music editor (piano roll) comes next. Expect the commands and documents to change.
 
 ## What works today
 
@@ -37,6 +37,11 @@ machine, and can be edited and checked by a person and an agent alike.
   WAV or OGG, as a seamless loop, as aligned stems per layer, and as MIDI; MIDI files import as songs. The `notes` view puts the
   written notes against what the render plays, the `mix` view shows channels fighting over a band, and the checks `key`, `range`,
   `render-match`, `loop-music` and `masking` hold a song to what was written. `docs/examples/chip-exploration.txt` is a 16-bar loop.
+- **Composition helpers that write notes, not black boxes.** `chords "I vi ii65 V7/V"` with smooth voice leading, `bass`
+  (root, root-fifth, walking, octave), `arp`, motifs and their transforms (transpose, invert, retrograde, augment, diminish,
+  sequence), drum templates with fills, and seeded `humanise`; each goes on the history tape with the rows it wrote. A style
+  guide and a music bible per project (`song new <id> from-bible=<entry>`), stinger templates, and `layer-plan` with a check
+  over every mix of game layers. `docs/examples/compose-demo.txt` writes a town theme, a layered battle loop and a stinger.
 - **Ears for an agent that cannot listen.** Every result carries numbers (loudness in LUFS, true
   peak, attack, tail, brightness, pitch, onsets) and a check summary; `view` draws the waveform, a
   mel spectrogram, the pitch track, or two sounds compared; `describe` says it in words; `check`

@@ -29,6 +29,10 @@ import {
   MAX_CHANNELS, DEFAULT_LAYER, LAYER_NAME_RE, SECTION_RE, SONG_ID_RE, SWING, TEMPO, cloneSong, newSong, songProblems, type Channel, type SongDoc,
 } from './song.ts';
 import { applyLayerCommand } from './layer-ops.ts';
+import { applyCommand, parse } from './commands.ts';
+import { bibleCommands, projectKey } from './musicstyle.ts';
+import { STINGER_TEMPLATES, stingerCommands } from './stingers.ts';
+import { SONG_KINDS, TAG_RE, type SongKind } from './song.ts';
 import { idClash } from './sound.ts';
 import { newLayeredSound, type LayeredSound } from './layered.ts';
 
@@ -44,9 +48,9 @@ export type MusicCommand =
   | { op: 'pattern-set'; song: string; name: string; pattern: Pattern; text: string }
   | { op: 'pattern-remove'; song: string; name: string; text: string }
   | { op: 'pattern-copy' | 'pattern-rename'; song: string; name: string; to: string; text: string }
-  | { op: 'song-new'; id: string; values: [string, SongValue][]; text: string }
+  | { op: 'song-new'; id: string; values: [string, SongValue][]; fromBible: string | null; template: string | null; text: string }
   | { op: 'song-set'; id: string; values: [string, SongValue][]; text: string }
-  | { op: 'song-channel'; verb: 'add' | 'set'; id: string; name: string; inst: string | null; kit: Record<string, string> | null; gain: number | null; pan: number | null; layer: string | null; text: string }
+  | { op: 'song-channel'; verb: 'add' | 'set'; id: string; name: string; inst: string | null; kit: Record<string, string> | null; gain: number | null; pan: number | null; layer: string | null; harmony: boolean | null; text: string }
   | { op: 'song-channel-remove'; id: string; name: string; text: string }
   | { op: 'song-section'; verb: 'add' | 'set'; id: string; name: string; patterns: string[]; repeat: number; text: string }
   | { op: 'song-section-remove'; id: string; name: string; text: string }
@@ -265,13 +269,28 @@ const songValue = (key: string, v: string): [string, SongValue] => {
       if (!CLASS_NAME_RE.test(v)) throw new Error(`class is a loudness class name (like music, stinger) or none (got '${v}')`);
       return [key, v];
     }
+    case 'tags': {
+      if (v === 'none') return [key, null];
+      const xs = v.split(',');
+      for (const x of xs) if (!TAG_RE.test(x)) throw new Error(`tags are words like town,night (a-z, 0-9, _ and -), or none (got '${x}')`);
+      return [key, [...new Set(xs)].join(',')];
+    }
+    case 'kind': {
+      if (!(SONG_KINDS as readonly string[]).includes(v)) throw new Error(`kind is ${SONG_KINDS.join(' or ')} (got '${v}')`);
+      return [key, v];
+    }
+    case 'bible': {
+      if (v === 'none') return [key, null];
+      if (!SONG_ID_RE.test(v)) throw new Error(`bible names an entry of the music bible (got '${v}')`);
+      return [key, v];
+    }
     case 'loudness': {
       if (v === 'auto' || v === 'none') return [key, null];
       const m = /^(-?(?:\d+\.?\d*|\.\d+))(?:lufs)?$/i.exec(v);
       if (!m || Number(m[1]) < -60 || Number(m[1]) > 0) throw new Error(`loudness is LUFS from -60 to 0 (got '${v}'), or auto`);
       return [key, Number(m[1])];
     }
-    default: throw new Error(`no song setting '${key}' (tempo, swing, time, key, gain, class, loudness)`);
+    default: throw new Error(`no song setting '${key}' (tempo, swing, time, key, gain, class, loudness, tags, kind, bible)`);
   }
 };
 
@@ -284,11 +303,23 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
   if (verb.v === 'new' || verb.v === 'set') {
     const id = sid(`song ${verb.v}`);
     const values: [string, SongValue][] = [];
+    let fromBible: string | null = null, template: string | null = null;
     for (const p of pairs(args.slice(1), line, `song ${verb.v} ${id}`)) {
+      if (verb.v === 'new' && p.key === 'from-bible') {
+        if (!SONG_ID_RE.test(p.value)) throw new DiagError(line, p.t.col, `from-bible names an entry of the music bible (got '${p.value}')`);
+        fromBible = p.value;
+        continue;
+      }
+      if (verb.v === 'new' && p.key === 'template') {
+        if (!STINGER_TEMPLATES[p.value]) throw new DiagError(line, p.t.col, `no stinger template '${p.value}' (${Object.keys(STINGER_TEMPLATES).join(', ')})`);
+        template = p.value;
+        continue;
+      }
       try { values.push(songValue(p.key, p.value)); } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
     }
-    if (verb.v === 'set' && !values.length) throw new DiagError(line, verb.col, `song set ${id}: give at least one <key>=<value> (tempo, swing, time, key, gain, class, loudness)`);
-    return { op: verb.v === 'new' ? 'song-new' : 'song-set', id, values, text: `song ${verb.v} ${id}${values.map(([k, v]) => ' ' + showSongValue(k, v)).join('')}` } as MusicCommand;
+    if (verb.v === 'set' && !values.length) throw new DiagError(line, verb.col, `song set ${id}: give at least one <key>=<value> (tempo, swing, time, key, gain, class, loudness, tags, kind, bible)`);
+    if (template && values.some(([k, v]) => k === 'kind' && v !== 'stinger')) throw new DiagError(line, verb.col, 'template= makes a stinger (kind=stinger)');
+    return { op: verb.v === 'new' ? 'song-new' : 'song-set', id, values, fromBible, template, text: `song ${verb.v} ${id}${values.map(([k, v]) => ' ' + showSongValue(k, v)).join('')}${fromBible ? ` from-bible=${fromBible}` : ''}${template ? ` template=${template}` : ''}` } as MusicCommand;
   }
   if (verb.v === 'channel') {
     const [sub, ...a] = args;
@@ -297,7 +328,7 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
     const name = a[1];
     if (!name || !/^[A-Za-z][A-Za-z0-9_]{0,23}$/.test(name.v)) throw new DiagError(line, (name ?? sub).col, `song channel ${sub.v} ${id}: give the channel's name (letters, digits and _, like lead or bass)`);
     if (sub.v === 'remove') return { op: 'song-channel-remove', id, name: name.v, text: `song channel remove ${id} ${name.v}` };
-    let inst: string | null = null, kit: Record<string, string> | null = null, gain: number | null = null, pan: number | null = null, layer: string | null = null;
+    let inst: string | null = null, kit: Record<string, string> | null = null, gain: number | null = null, pan: number | null = null, layer: string | null = null, harmony: boolean | null = null;
     for (const p of pairs(a.slice(2), line, `song channel ${sub.v} ${id} ${name.v}`)) {
       try {
         if (p.key === 'inst') { if (!INSTRUMENT_ID_RE.test(p.value)) throw new Error(`'${p.value}' is not an instrument id`); inst = p.value; }
@@ -311,13 +342,15 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
         } else if (p.key === 'gain') gain = numIn('gain', p.value, 0, 4);
         else if (p.key === 'pan') pan = numIn('pan', p.value, -1, 1);
         else if (p.key === 'layer') { if (!LAYER_NAME_RE.test(p.value)) throw new Error(`layer is a name like base, tension or combat (a-z, 0-9, _ and -), got '${p.value}'`); layer = p.value; }
-        else throw new Error(`song channel: unexpected '${p.key}' (inst=<instrument> or kit=<…>, gain=, pan=, layer=)`);
+        else if (p.key === 'harmony') { harmony = yesNo(p.value); if (harmony === null) throw new Error(`harmony is yes or no (a harmony part is what the voice-leading check reads), got '${p.value}'`); }
+        else throw new Error(`song channel: unexpected '${p.key}' (inst=<instrument> or kit=<…>, gain=, pan=, layer=, harmony=)`);
       } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
     }
     if (inst && kit) throw new DiagError(line, name.col, 'song channel: give inst= (a pitched channel) or kit= (a drum channel), not both');
     if (sub.v === 'add' && !inst && !kit) throw new DiagError(line, name.col, `song channel add ${id} ${name.v}: give inst=<instrument> (or kit=default for drums)`);
-    const words = [inst ? `inst=${inst}` : kit ? `kit=${Object.entries(kit).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : ''].filter(Boolean);
-    return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, inst, kit, gain, pan, layer, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
+    const words = [inst ? `inst=${inst}` : kit ? `kit=${Object.entries(kit).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : ''].filter(Boolean);
+    if (sub.v === 'set' && !words.length) throw new DiagError(line, name.col, `song channel set ${id} ${name.v}: give what changes (inst=, kit=, gain=, pan=, layer=, harmony=)`);
+    return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, inst, kit, gain, pan, layer, harmony, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
   }
   if (verb.v === 'section') {
     const [sub, ...a] = args;
@@ -552,6 +585,16 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
     }
     case 'song-new': {
       freeSong(lib, c.id);
+      if (c.fromBible || c.template) {
+        // written out as the plain commands it stands for, so the tape never needs the bible again
+        const lines = songNewLines(lib, c);
+        for (const l of lines) {
+          const p = parse(l);
+          if (p.errors.length) throw new Error(`${l.slice(0, 80)}: ${p.errors[0]!.message}`);
+          for (const x of p.commands) applyCommand(lib, x);
+        }
+        return lines.join('\n');
+      }
       const s = newSong(c.id);
       applySongValues(s, c.values);
       lib.songs.set(c.id, s);
@@ -570,6 +613,7 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (at >= 0) throw new Error(`song ${c.id} has a channel ${c.name} already (song channel set changes it)`);
         if (s.channels.length >= MAX_CHANNELS) throw new Error(`a song has at most ${MAX_CHANNELS} channels`);
         const ch: Channel = { name: c.name, inst: c.inst, kit: c.kit, gain: c.gain ?? 1, pan: c.pan ?? 0, layer: c.layer ?? DEFAULT_LAYER };
+        if (c.harmony) ch.harmony = true;
         s.channels.push(ch);
       } else {
         if (at < 0) throw new Error(`song ${c.id} has no channel ${c.name} (channels: ${s.channels.map((x) => x.name).join(', ') || 'none'})`);
@@ -579,6 +623,8 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (c.gain !== null) ch.gain = c.gain;
         if (c.pan !== null) ch.pan = c.pan;
         if (c.layer) ch.layer = c.layer;
+        if (c.harmony === true) ch.harmony = true;
+        else if (c.harmony === false) delete ch.harmony;
         s.channels[at] = ch;
       }
       lib.songs.set(c.id, s);
@@ -645,6 +691,7 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
     }
     case 'song-loop': {
       const s = songOf(lib, c.id);
+      if (s.kind === 'stinger' && c.loop !== false) throw new Error(`${c.id} is a stinger: it ends on its ending and does not loop (song set ${c.id} kind=song to make it a song)`);
       if (c.loop && typeof c.loop === 'object') {
         const body = s.sections.filter((x) => x.name !== s.intro && x.name !== s.ending).map((x) => x.name);
         const a = body.indexOf(c.loop.from), b = body.indexOf(c.loop.to);
@@ -700,7 +747,33 @@ function applySongValues(s: SongDoc, values: [string, SongValue][]): void {
     else if (k === 'key') s.key = v as string | null;
     else if (k === 'class') { if (v === null) delete s.loudClass; else s.loudClass = v as string; }
     else if (k === 'loudness') { if (v === null) delete s.loudness; else s.loudness = v as number; }
+    else if (k === 'tags') s.tags = v === null ? [] : (v as string).split(',');
+    else if (k === 'bible') s.bible = v as string | null;
+    else if (k === 'kind') {
+      s.kind = v as SongKind;
+      // a stinger never loops, and is as loud as a stinger unless the song says otherwise
+      if (s.kind === 'stinger') { s.loop = false; if (!s.loudClass && !values.some(([x]) => x === 'class')) s.loudClass = 'stinger'; }
+    }
   }
+}
+
+/** The plain commands `song new … from-bible= | template=` stands for. */
+function songNewLines(lib: Library, c: Extract<MusicCommand, { op: 'song-new' }>): string[] {
+  const given = new Map(c.values.map(([k, v]) => [k, showSongValue(k, v).slice(k.length + 1)] as [string, string]));
+  const entry = c.fromBible ? lib.guide?.bible.get(c.fromBible) : undefined;
+  if (c.fromBible && !entry) throw new Error(`no music bible entry '${c.fromBible}'${lib.guide?.bible.size ? ` (entries: ${[...lib.guide.bible.keys()].join(', ')})` : ' (write music-bible.md in the project folder: a ## <entry> heading, then tempo:, key:, instruments:, motif: lines)'}`);
+  if (!c.template) return bibleCommands(c.id, entry!, given);
+  const from = new Map<string, string>();
+  if (entry) {
+    if (entry.tempo) from.set('tempo', String(Math.round((entry.tempo[0] + entry.tempo[1]) / 2)));
+    if (entry.key) from.set('key', entry.key);
+    if (entry.tags.length) from.set('tags', [...new Set(['stinger', ...entry.tags])].join(','));
+    from.set('bible', entry.id);
+  }
+  for (const [k, v] of given) from.set(k, v);
+  const key = from.get('key') ?? projectKey(lib.guide) ?? 'C:major';
+  from.delete('key');
+  return stingerCommands(c.id, c.template, key, from);
 }
 
 export function isMusicOp(op: string): boolean {

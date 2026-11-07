@@ -36,3 +36,8 @@ export * from './music-commands.ts';
 export * from './musicchecks.ts';
 export * from './midi.ts';
 export * from './musicviews.ts';
+export * from './theory.ts';
+export * from './drums.ts';
+export * from './compose.ts';
+export * from './stingers.ts';
+export * from './musicstyle.ts';

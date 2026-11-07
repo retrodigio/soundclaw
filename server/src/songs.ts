@@ -113,7 +113,7 @@ export class SongBench {
     for (const c of song.channels) { if (c.inst) used.add(c.inst); for (const v of Object.values(c.kit ?? {})) used.add(v); }
     for (const d of ['kick', 'snare', 'hat', 'hat_open']) if (song.channels.some((c) => c.kit)) used.add(d);
     const insts = [...used].sort().map((id) => { const i = this.w.lookupInstrument(id); return i ? `${id}:${instrumentKey(i, (n) => this.w.samples.hash(n) ?? 'missing')}:${i.range?.join('-') ?? ''}` : `${id}:missing`; });
-    return sha256Text(`${songText(song)}|${insts.join(',')}|${JSON.stringify(this.w.style)}`);
+    return sha256Text(`${songText(song)}|${insts.join(',')}|${JSON.stringify(this.w.style)}|${this.w.musicGuide().text}`);
   }
 
   /** The numbers and checks of a song document, measured once for each distinct document. */
@@ -124,7 +124,7 @@ export class SongBench {
       const full = this.render(song, { mode: 'full' });
       const hasLoop = arrange(song).loop !== null;
       const loop = hasLoop ? this.render(song, { mode: 'loop' }) : null;
-      const report = songReport({ song, full, loop, style: this.w.style, instruments: (id) => this.w.lookupInstrument(id) });
+      const report = songReport({ song, full, loop, style: this.w.style, instruments: (id) => this.w.lookupInstrument(id), guide: this.w.musicGuide().guide });
       m = { report, key };
       this.measured.set(key, m);
       if (this.measured.size > 32) this.measured.delete(this.measured.keys().next().value!);

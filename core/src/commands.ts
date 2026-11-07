@@ -34,6 +34,7 @@ import { LOOP_FADE, LOOP_LENGTH, MAX_DURATION, type FamilyKind, type LoopSpec } 
 import { Library, MAX_SET_MEMBERS, checkMemberIds, checkSpread, defaultSetSeed, formatSpread, makeMember, memberId, parseSpread, spreadPositions, type SpreadRule } from './sets.ts';
 import { hashText } from './generators.ts';
 import { BLOCK_MARK, applyMusic, isMusicOp, parseMusic, type MusicCommand } from './music-commands.ts';
+import { COMPOSE_HEADS, applyCompose, isComposeOp, parseCompose, type ComposeCommand } from './compose.ts';
 import { SOUND_ID_RE, TONE_PARAMS, cloneSound, idClash, fmtNumber, isParamName, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
 
 export interface Diag {
@@ -98,8 +99,9 @@ export function tokenize(text: string): { lines: RawLine[]; errors: Diag[] } {
         tokens.push({ v, quoted: true, col });
         continue;
       }
+      // inside a word # is part of it (key=F#:dorian, range=F#3-C5); a comment starts at a word's start
       let v = '';
-      while (k < src.length && !' \t;#'.includes(src[k]!)) {
+      while (k < src.length && !' \t;'.includes(src[k]!)) {
         if (src[k] === '"' && v.endsWith('=')) {
           // name="a quoted value": spaces, ; and # inside the quotes belong to the value
           let q = '';
@@ -660,7 +662,8 @@ function parseLine(l: RawLine): Command {
   if (head!.v === 'fx') return parseFx(rest, head!, line);
   if (head!.v === 'env') return parseEnvCommand(rest, head!, line);
   if (head!.v === 'instrument' || head!.v === 'pattern' || head!.v === 'song') return parseMusic(head!, rest, line, (tokens, ln) => parseLine({ line: ln, tokens }));
-  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, instrument, pattern, song, undo, redo)`);
+  if ((COMPOSE_HEADS as readonly string[]).includes(head!.v)) return parseCompose(head!, rest, line);
+  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, instrument, pattern, song, chords, bass, arp, drums, humanise, motif, layer-plan, undo, redo)`);
 }
 
 /** A command with the line it came from. */
@@ -943,6 +946,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       throw new Error(`${c.op} is applied by the history, not to a sound`);
     default:
       if (isMusicOp(c.op)) return applyMusic(lib, c as MusicCommand);
+      if (isComposeOp(c.op)) return applyCompose(lib, c as unknown as ComposeCommand);
       return applyLayerCommand(lib, c);
   }
 }

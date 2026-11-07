@@ -7,6 +7,9 @@
 //   render-match  each written note against the channel rendered alone: onset within 20 ms, the right pitch
 //   loop-music    the loop's seam: a click, or a step in level
 //   masking       two channels with most of their energy in the same band at the same time (advisory)
+//   voice-leading parallel fifths and octaves between the voices of the harmony parts (advisory)
+//   style         the project's music style guide and the song's music bible entry
+//   layers        each game layer alone and the base with each mix of the others: in key, loudness, seams
 //   clip, loudness, dc   the mix
 
 import { SAMPLE_RATE } from './sound.ts';
@@ -14,11 +17,13 @@ import { integratedLoudness, stft, truePeak, yinPitch, type PitchFrame } from '.
 import { SEAM_STEP_FACTOR, classTable, seamNumbers, type CheckRange, type Style } from './checks.ts';
 import { builtinInstruments, type Instrument } from './instrument.ts';
 import { inKey, midiFreq, noteLabel, parseKey, pitchClassName } from './music.ts';
-import { arrange, channelNotes, type NoteEv, type SongDoc } from './song.ts';
+import { arrange, channelNotes, layerOrder, type NoteEv, type SongDoc } from './song.ts';
+import { parallelPairs } from './theory.ts';
+import { styleCheck, type MusicGuide } from './musicstyle.ts';
 import type { ChannelAudio, SongRender } from './songrender.ts';
 
-export type MusicCheckName = 'key' | 'range' | 'render-match' | 'loop-music' | 'masking' | 'clip' | 'loudness' | 'dc';
-export const MUSIC_CHECK_NAMES: readonly MusicCheckName[] = ['clip', 'loudness', 'dc', 'key', 'range', 'render-match', 'loop-music', 'masking'];
+export type MusicCheckName = 'key' | 'range' | 'render-match' | 'loop-music' | 'masking' | 'clip' | 'loudness' | 'dc' | 'voice-leading' | 'style' | 'layers';
+export const MUSIC_CHECK_NAMES: readonly MusicCheckName[] = ['clip', 'loudness', 'dc', 'key', 'range', 'render-match', 'loop-music', 'masking', 'voice-leading', 'style', 'layers'];
 
 export interface MusicRange extends CheckRange {
   channel?: string;
@@ -127,6 +132,116 @@ export function rangeCheck(song: SongDoc, arr: { instances: import('./song.ts').
   };
 }
 
+// ---- voice leading ------------------------------------------------------------------------------------------------
+
+/** Parallel fifths and octaves between the voices of the channels marked harmony=yes, from each onset to the next. Advisory. */
+export function voiceLeadingCheck(song: SongDoc, arr: { instances: import('./song.ts').Instance[] }): MusicCheck {
+  const base = { name: 'voice-leading' as const, advisory: true };
+  const marked = song.channels.filter((c) => c.harmony && c.inst);
+  if (!marked.length) return { ...base, pass: true, skipped: true, score: 1, value: 'no channel is marked as a harmony part', threshold: 'song channel set <song> <channel> harmony=yes marks the parts to read', ranges: [] };
+  const evs = marked.map((ch) => ({ ch: ch.name, ev: channelNotes(song, arr, ch.name).filter((e) => e.midi !== null) }));
+  // on the grid: a note humanise moved a few ms still belongs to its step
+  const times = [...new Set(evs.flatMap((x) => x.ev.map((e) => Math.round(e.grid * 1000) / 1000)))].sort((a, b) => a - b);
+  // the voices sounding at a time: each channel's notes low to high, named channel#n
+  const at = (t: number): Map<string, { midi: number; e: NoteEv }> => {
+    const out = new Map<string, { midi: number; e: NoteEv }>();
+    for (const x of evs) {
+      const on = x.ev.filter((e) => e.grid <= t + 0.0005 && e.grid + e.len > t + 0.0005).sort((a, b) => a.midi! - b.midi!);
+      on.forEach((e, i) => out.set(`${x.ch}#${i + 1}`, { midi: e.midi!, e }));
+    }
+    return out;
+  };
+  const ranges: MusicRange[] = [];
+  const seen = new Set<string>();
+  let moves = 0;
+  let prev = times.length ? at(times[0]!) : new Map();
+  for (let k = 1; k < times.length; k++) {
+    const cur = at(times[k]!);
+    const ids = [...prev.keys()].filter((id) => cur.has(id));
+    if (ids.length >= 2) {
+      moves++;
+      const a = ids.map((id) => prev.get(id)!.midi), b = ids.map((id) => cur.get(id)!.midi);
+      for (const [i, j, kind] of parallelPairs(a, b)) {
+        const e = cur.get(ids[j]!)!.e;
+        const what = `parallel ${kind}: ${ids[i]} and ${ids[j]} (${noteLabel(a[i]!)}-${noteLabel(a[j]!)} to ${noteLabel(b[i]!)}-${noteLabel(b[j]!)}) at ${e.at.pattern} step ${e.at.step}`;
+        if (seen.has(what)) continue;
+        seen.add(what);
+        ranges.push({ from: r4(times[k - 1]!), to: r4(times[k]! + e.len), channel: ids[j]!.split('#')[0], note: what });
+      }
+    }
+    prev = cur;
+  }
+  const pass = ranges.length === 0;
+  return {
+    ...base, pass, skipped: false, score: moves ? clamp01(1 - ranges.length / moves) : 1,
+    value: pass ? `no parallel fifths or octaves in ${marked.map((c) => c.name).join(', ')} (${moves} chord changes)` : `${ranges.length} parallel fifth${ranges.length === 1 ? '' : 's'} or octave${ranges.length === 1 ? '' : 's'} in ${marked.map((c) => c.name).join(', ')}`,
+    threshold: 'no two voices of the harmony parts moving the same way in fifths or octaves (a warning: the style may want them)', ranges: ranges.slice(0, 40),
+  };
+}
+
+// ---- game layers -------------------------------------------------------------------------------------------------
+
+export interface LayerMix { layers: string[]; lufs: number; truePeakDb: number; seam: MusicCheck | null }
+
+/** The mixes a game plays: the base alone, and the base with each set of the other layers (in stacking order). */
+export function layerCombinations(order: readonly string[]): string[][] {
+  const [base, ...rest] = order;
+  const out: string[][] = [];
+  const n = Math.min(rest.length, 5);
+  for (let mask = 0; mask < 1 << n; mask++) out.push([base!, ...rest.slice(0, n).filter((_, i) => mask & (1 << i))]);
+  return out.sort((a, b) => a.length - b.length);
+}
+
+/**
+ * The game layers: each layer alone stays in key and is no louder than the loudness class allows;
+ * the base with every mix of the others (the stems summed, as a game plays them) is within the
+ * class's loudness, under the true-peak limit, and loops without a click or a step.
+ */
+export function layersCheck(song: SongDoc, render: SongRender, style: Style, rule: SongLoudnessRule, arr: { instances: import('./song.ts').Instance[] }): { check: MusicCheck; mixes: LayerMix[] } {
+  const base = { name: 'layers' as const, advisory: false };
+  const order = layerOrder(song);
+  if (!song.layers.length || order.length < 2) return { check: { ...base, pass: true, skipped: true, score: 1, value: order.length < 2 ? 'the song has one layer' : `no layer plan (layers ${order.join(', ')})`, threshold: 'layer-plan <song> base=… tension=… combat=… sets the layers and the order they stack in; the check then plays each mix a game can play', ranges: [] }, mixes: [] };
+  const stems = new Map(render.stems.map((s) => [s.layer, s.channels] as const));
+  const n = render.length;
+  const lo = rule.target - rule.tolerance, hi = rule.target + rule.tolerance;
+  const ranges: MusicRange[] = [];
+  const d = r4(n / SR);
+  const key = song.key ? parseKey(song.key) : null;
+  const alone: string[] = [];
+  for (const l of order) {
+    const st = stems.get(l)!;
+    const lufs = integratedLoudness([st[0], st[1]]);
+    let out = 0;
+    if (key) for (const ch of song.channels.filter((c) => c.layer === l && c.inst)) for (const e of channelNotes(song, arr, ch.name)) if (e.midi !== null && !e.accidental && !inKey(key, e.midi)) out++;
+    if (out) ranges.push({ from: 0, to: d, note: `layer ${l} alone has ${out} note${out === 1 ? '' : 's'} outside ${song.key}` });
+    if (lufs > hi) ranges.push({ from: 0, to: d, note: `layer ${l} alone is ${f1(lufs)} LUFS, louder than the ${rule.class} class allows (${hi})` });
+    alone.push(`${l} ${f1(lufs)}`);
+  }
+  const mixes: LayerMix[] = [];
+  for (const combo of layerCombinations(order)) {
+    const sum: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
+    for (const l of combo) { const st = stems.get(l)!; for (let c = 0; c < 2; c++) { const a = st[c]!, o = sum[c]!; for (let i = 0; i < n; i++) o[i] = o[i]! + a[i]!; } }
+    const lufs = integratedLoudness(sum);
+    const tp = Math.max(...sum.map((c) => 20 * Math.log10(Math.max(1e-9, truePeak(c)))));
+    const seam = render.mode === 'loop' ? loopCheck(sum, song.tempo, style) : null;
+    mixes.push({ layers: combo, lufs, truePeakDb: tp, seam });
+    const name = combo.join('+');
+    if (!(lufs >= lo && lufs <= hi)) ranges.push({ from: 0, to: d, note: `${name} is ${f1(lufs)} LUFS, outside ${rule.target} ±${rule.tolerance} (${rule.basis})` });
+    if (tp > style.truePeakMax) ranges.push({ from: 0, to: d, note: `${name} peaks at ${f1(tp)} dBTP, over ${style.truePeakMax} (the stems are summed with no limiter)` });
+    if (seam && !seam.pass) ranges.push({ from: 0, to: d, note: `${name} at the loop seam: ${seam.ranges.map((r) => r.note).join('; ')}` });
+  }
+  const pass = ranges.length === 0;
+  return {
+    check: {
+      ...base, pass, skipped: false, score: clamp01(1 - ranges.length / (mixes.length + order.length)),
+      value: `${mixes.map((m) => `${m.layers.join('+')} ${f1(m.lufs)}`).join(', ')} LUFS; alone ${alone.join(', ')}; stems ${render.mode === 'loop' ? 'loop' : 'run'} ${r4(n / SR)} s each${render.mode === 'loop' ? `, seams ${mixes.every((m) => m.seam?.pass) ? 'clean' : 'not clean'}` : ''}`,
+      threshold: `every mix of the base and other layers within ${rule.target} ±${rule.tolerance} LUFS (${rule.basis}) and under ${style.truePeakMax} dBTP${render.mode === 'loop' ? ' with a clean seam' : ''}; each layer alone in key and at most ${hi} LUFS`,
+      ranges: ranges.slice(0, 40),
+    },
+    mixes,
+  };
+}
+
 // ---- render-match -------------------------------------------------------------------------------------------------
 
 export interface NoteMatch {
@@ -210,8 +325,11 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
     pitchTracks.set(part.name, track);
     const onsets: number[] = [];
     // group events that start together (a chord)
+    // (notes written at the same step, even when humanise moved them apart by a few ms)
+    const byStep = new Map<string, NoteEv[]>();
+    for (const e of events) { const k = `${e.at.instance}/${e.at.step}`; byStep.set(k, [...(byStep.get(k) ?? []), e]); }
     const groups = new Map<number, NoteEv[]>();
-    for (const e of events) { const k = Math.round(e.t * SR); groups.set(k, [...(groups.get(k) ?? []), e]); }
+    for (const g of byStep.values()) { g.sort((a, b) => a.t - b.t); const k = Math.round(g[0]!.t * SR); groups.set(k, [...(groups.get(k) ?? []), ...g]); }
     const keys = [...groups.keys()].sort((a, b) => a - b);
     keys.forEach((key, gi) => {
       const grp = groups.get(key)!;
@@ -445,6 +563,8 @@ export interface SongReport {
   analysis: MixNumbers;
   /** The loop render's numbers (null when the song has no loop). */
   loop: { analysis: MixNumbers; seam: MusicCheck } | null;
+  /** Each mix of the game layers a game can play. */
+  layerMixes: LayerMix[];
 }
 
 /** Worst gain reduction the master chain made on the mix: the smallest ratio of mix to pre-master level, dB. */
@@ -466,6 +586,8 @@ export interface ReportInput {
   loop: SongRender | null;
   style: Style;
   instruments: InstLookup;
+  /** The project's music style guide and bible (the style check). */
+  guide?: MusicGuide;
 }
 
 export function songReport(i: ReportInput): SongReport {
@@ -485,6 +607,10 @@ export function songReport(i: ReportInput): SongReport {
     checks.push(seam);
   } else checks.push({ name: 'loop-music', advisory: false, pass: true, skipped: true, score: 1, value: song.loop === false ? 'the song does not loop (loop is off)' : 'no loop region', threshold: 'the loop seam has no click and no level step', ranges: [] });
   checks.push(maskingCheck(map));
+  checks.push(voiceLeadingCheck(song, arr));
+  checks.push(styleCheck(song, i.guide));
+  const layers = layersCheck(song, i.loop ?? full, style, rule, arrange(song));
+  checks.push(layers.check);
   const channels = full.parts.map((p) => {
     const events = full.events.get(p.name) ?? [];
     let peak = 0;
@@ -495,7 +621,7 @@ export function songReport(i: ReportInput): SongReport {
     length: arr.total, loopLength: arr.loop ? arr.loop.end - arr.loop.start : null, tempo: song.tempo, swing: song.swing, time: `${song.time[0]}/${song.time[1]}`, key: song.key,
     lufs: analysis.lufs, truePeakDb: analysis.truePeakDb, rule, channels, layers: [...new Set(full.parts.map((p) => p.layer))], masterReductionDb: reductionDb(full.pre, full.mix),
   };
-  return { numbers, checks, match, map, analysis, loop };
+  return { numbers, checks, match, map, analysis, loop, layerMixes: layers.mixes };
 }
 
 /** The checks that must pass for `work done`: all but the advisory ones (skipped checks pass). */

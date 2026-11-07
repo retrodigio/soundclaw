@@ -128,3 +128,47 @@ describe('the reference', () => {
 });
 
 beforeAll(() => { void writeFileSync; });
+
+describe('scale and style', () => {
+  it('scale prints a key\'s notes and chords, a song\'s key, or every scale', () => {
+    let r = sc(['scale', 'A:minor']);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^A:minor: A B C D E F G/);
+    expect(r.out).toMatch(/VI\s+F\s+F A C\s+Fmaj7/);
+    expect(sc(['scale', 'list']).out).toMatch(/phrygian-dominant/);
+    expect(sc(['scale', 'H:major']).code).toBe(2);
+    sc(['run', proj, '-e', 'song new s key=F#:dorian']);
+    r = sc(['scale', proj, 's']);
+    expect(r.out).toMatch(/^F#:dorian: F# G# A B C# D# E/);
+  });
+  it('style --init writes a starter guide and bible, then style reads them back', () => {
+    let r = sc(['style', proj]);
+    expect(r.out).toMatch(/no style guide \(music-style.md/);
+    r = sc(['style', proj, '--init']);
+    expect(r.out).toMatch(/wrote music-style.md and music-bible.md/);
+    expect(r.out).toMatch(/forbid drums in town/);
+    expect(r.out).toMatch(/market: mood warm/);
+    expect(r.out).not.toMatch(/problems:/);
+    expect(sc(['style', proj, '--init']).out).toMatch(/nothing written/);
+    r = sc(['run', proj, '-e', 'song new m from-bible=market']);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/song new m tempo=96 key=D:major tags=town bible=market/);
+  });
+});
+
+describe('the example: a town theme from the bible, a layered battle loop and a stinger, written with the helpers', () => {
+  it('runs on the starter style and bible and passes every check, voice leading and layers included', () => {
+    sc(['style', proj, '--init']);
+    let r = sc(['run', proj, join(REPO, 'docs', 'examples', 'compose-demo.txt')]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/market: song, 96 bpm 4\/4, key D:major, 4 channels \(lead, pad, bass, harp\), 2 patterns, 60 s/);
+    expect(r.out).toMatch(/battle: song, 144 bpm 4\/4, key E:minor, .*layers base \+ tension \+ combat/);
+    expect(r.out).toMatch(/win: song, 132 bpm 4\/4, key D:major, .*no loop/);
+    r = sc(['check', proj]);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).not.toMatch(/FAIL|warn /);
+    expect(r.out).toMatch(/pass voice-leading .*no parallel fifths or octaves in pad/);
+    expect(r.out).toMatch(/pass style .*music bible entry market/);
+    expect(r.out).toMatch(/pass layers .*base\+tension\+combat/);
+  }, 240_000);
+});

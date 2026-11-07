@@ -1,10 +1,10 @@
-// soundclaw: new | run | list | history | changes | render | view | describe | check | import | sample | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
+// soundclaw: new | run | list | history | changes | render | view | describe | check | import | sample | export | scale | style | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
 
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AUTHOR_RE, openRequests, type ViewKind } from '@soundclaw/core';
+import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, type ViewKind } from '@soundclaw/core';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, normalizeSong, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
   EXPORT_FORMATS, sampleLine, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizeCommands, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
@@ -73,6 +73,11 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song set <id> ...   song channel add|set <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=]
         pattern <song>.<name> steps=16 tpb=4 [bar=8], then indented rows:  lead: C5 . E5 - | G5v80 . E5~slide .      pattern set|remove|copy|rename <song>.<name> ...
         song section add|set|remove <song> <name> <pattern>... [x<n>]   song order|intro|ending|loop|fx|copy|rename|remove|mark <song> ...   (music: docs/commands.md)
+        song set <id> tags=a,b kind=song|stinger   song channel set <song> <ch> harmony=yes   song new <id> from-bible=<entry> | kind=stinger template=victory|game-over|level-up|item-get
+        helpers (they write notes into <pattern>, and go on the tape with the rows they wrote; docs/commands.md "Composition helpers"):
+        chords <song> <pattern> <channel> "I vi ii65 V7/V bVII" [bars=] [rhythm=hold|beats|offbeat|"x-.x"] [range=]   bass ... "<prog>"|from=<ch> [style=root|root-fifth|walking|octave]
+        arp ... "<prog>"|from=<ch> [pattern=up|down|updown|random(<seed>)] [rate=1/16]   drums <song> <pattern> <ch>[,<hats>] <template> [fill=<n>] [seed=]
+        humanise <song> <pattern> <ch>|all [timing=8] [velocity=6] [seed=]   motif set|transpose|invert|retrograde|augment|diminish|write|sequence ...   layer-plan <song> base=<ch,..> tension=...
       '-' reads the commands from standard input. --by is the author written on the history:
       agent:<name> or human:<name> (default agent:claude; a bare name means agent:<name>).
       The result lists the commands as written and each changed sound's numbers and checks.
@@ -177,6 +182,15 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       with what changed. After claim the id may be left out. Any error applies nothing. --by
       names the agent (default agent:claude). With a server running these go through it, so the
       dashboard's cards move live and the agent shows as listening.
+  soundclaw scale <key> | list | <project> <song>
+      A key's notes (D:major, A:dorian, E:phrygian-dominant) and, for a seven-note scale, the triad and seventh on
+      each degree with its roman numeral, as chords, bass, arp and motif sequence read them; list: every scale
+      with what it sounds like; a song: its key.
+  soundclaw style <project> [--init]
+      The project's music style guide (music-style.md: tempo range, key, scales, instrument palette, loudness
+      classes, forbid: drums in town, ## <tag> sections) and music bible (music-bible.md: a ## <entry> per track
+      with mood, tempo, key, tags, instruments, motif) as SoundClaw reads them, with the lines it cannot read.
+      The style check holds songs to them. --init writes a starter pair when the project has neither.
   soundclaw skill install [--dest <dir> | --project <dir>]
       Install the Claude Code skill into ~/.claude/skills/soundclaw (or <dir>/.claude/skills/soundclaw).
       skill path prints where it is.
@@ -515,6 +529,74 @@ function cmdCheck(io: Io, p: Parsed): number {
   return r.pass && results.every((x) => x.pass) ? 0 : 1;
 }
 
+function cmdScale(io: Io, p: Parsed): number {
+  const [a, b, ...extra] = p.pos;
+  if (!a) throw new UsageError('scale: give a key like D:major, list, or <project> <song>');
+  if (extra.length) throw new UsageError(`scale: unexpected argument '${extra[0]}'`);
+  let key = a;
+  if (b !== undefined) {
+    const w = wr(io, a);
+    const k = w.song(b).key;
+    if (!k) throw new ProjectError(`${b} has no key (song set ${b} key=D:major)`);
+    key = k;
+  }
+  try { io.out(scaleText(key) + '\n'); } catch (e) { throw new UsageError((e as Error).message); }
+  return 0;
+}
+
+const STARTER_STYLE = `# Music style
+
+Small chip and synth music: short loops, clear tunes, nothing busy. Prose like this is for people;
+the \`key: value\` lines are what the style check reads.
+
+tempo: 70-150
+key: C:major
+scales: major, minor, dorian, mixolydian, harmonic-minor, pentatonic-major, pentatonic-minor
+instruments: square_lead, pulse_lead, triangle_bass, saw_pad, fm_bell, fm_bass, pluck, kick, snare, hat, hat_open
+loudness: music, stinger
+swing: 0-0.3
+forbid: locrian
+forbid: drums in town
+
+## town
+tempo: 80-112
+scales: major, mixolydian, pentatonic-major
+`;
+
+const STARTER_BIBLE = `# Music bible
+
+One entry per track: a \`## <id>\` heading, then its data. \`song new <id> from-bible=<entry>\` sets a song
+up from it.
+
+## market — the market square
+mood: warm, unhurried, a little proud
+tempo: 96
+key: D:major
+tags: town
+instruments: lead=square_lead, pad=saw_pad, bass=triangle_bass
+motif: theme tpb=4 D5 - F#5 A5 B5 - A5 - G5 F#5 E5 F#5 D5 - - -
+region: the market square at noon
+`;
+
+function cmdStyle(io: Io, p: Parsed): number {
+  const [dir, ...extra] = p.pos;
+  if (!dir) throw new UsageError('style: give a project folder');
+  if (extra.length) throw new UsageError(`style: unexpected argument '${extra[0]}'`);
+  const proj = loadProject(dir);
+  if (p.flags.has('init')) {
+    const made: string[] = [];
+    for (const [f, body] of [[STYLE_FILE, STARTER_STYLE], [BIBLE_FILE, STARTER_BIBLE]] as const) {
+      const file = join(proj.dir, f);
+      if (existsSync(file)) continue;
+      writeFileSync(file, body);
+      made.push(f);
+    }
+    io.out(made.length ? `wrote ${made.join(' and ')} in ${dir}; edit them, then soundclaw style ${dir}\n` : `${dir} has ${STYLE_FILE} and ${BIBLE_FILE} already; nothing written\n`);
+  }
+  io.out(guideText(wr(io, dir).musicGuide().guide) + '\n');
+  return 0;
+}
+
 function cmdImport(io: Io, p: Parsed): number {
   const [dir, what, source, ...extra] = p.pos;
   if (!dir || !what || !(IMPORT_KINDS as readonly string[]).includes(what) || !source) throw new UsageError(`import: soundclaw import <project> ${IMPORT_KINDS.join('|')} <file | "patch text"> [--id <id>]`);
@@ -723,6 +805,8 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'reply': case 'cancel': return cmdAnswer(io, cmd, parseArgs(rest, ...WRITE_OPTS.reply!));
       case 'work': return cmdWork(io, parseArgs(rest, ...WRITE_OPTS.work!));
       case 'skill': return cmdSkill(io, parseArgs(rest, ['dest', 'project'], []));
+      case 'scale': return cmdScale(io, parseArgs(rest, [], []));
+      case 'style': return cmdStyle(io, parseArgs(rest, [], ['init']));
       case undefined: case 'help': case '-h': case '--help':
         io.out(USAGE);
         return cmd === undefined ? 1 : 0;

@@ -5,13 +5,13 @@
 import { existsSync, statSync } from 'node:fs';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { builtinInstruments, openRequests } from '@soundclaw/core';
+import { builtinInstruments, guideText, openRequests, scaleText } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, normalizeCommands, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { ProjectError } from './project.ts';
-import { formatErrors, plural } from './report.ts';
+import { formatErrors, plural, tapeEntryLines } from './report.ts';
 import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
 import { historyText, soundSummary } from './summary.ts';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, normalizeSong, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
@@ -56,7 +56,8 @@ Music (instruments, patterns, songs; build a song in passes and run \`check\` af
   instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= pitched= adsr=a,d,s,r velocity= range=C3-C6 pitchenv= gain=   instrument layer|fx|env …   (built-ins: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open: use them by name)
   song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song channel add <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=base|tension|combat]   song section add <song> <name> <pattern>… [x2]   song loop <song> <from>..<to>|off   song intro|ending <song> <section>   song fx add <song> compress|limit …
   pattern <song>.<name> steps=16 tpb=4 bar=8, then indented rows: \`lead: C5 . E5 - | G5v80 . E5~slide .\` (. rest, - hold, | bars, v velocity, ! outside the key on purpose, ~slide ~vib ~arp(0,4,7), chords C4+E4+G4, lower-case words are drum hits)
-  Songs have the views notes (written notes against what the render plays, per channel) and mix (energy by band over time, masking in amber); the checks key, range, render-match, loop-music, masking (advisory) and clip, loudness, dc on the mix. \`normalize\` writes the song's gain; \`export\` writes wav/ogg, --loop (seamless), --stems (one per game layer), midi.
+  Helpers write notes into patterns (on the tape with the rows they wrote; edit the rows afterwards like any pattern): \`chords <song> <pattern> <channel> "i VI III VII" [bars=1] [rhythm=hold|beats|offbeat|"x-.x"] [range=G3-G5]\` (roman numerals in the song's key: V7 ii65 bVII V/V Vsus4), \`bass <song> <pattern> <channel> "<progression>"|from=<chord channel> style=root|root-fifth|walking|octave\`, \`arp … pattern=up|down|updown|random(7) rate=1/16\`, \`drums <song> <pattern> <channel>[,<hats>] rock|halftime|shuffle|march|waltz|pulse|chip… fill=4 seed=1\`, \`humanise <song> <pattern> <channel>|all timing=8 velocity=6 seed=1\`, \`motif set|transpose|invert|retrograde|augment|diminish|write|sequence …\`, \`layer-plan <song> base=<ch,…> tension=… combat=…\`. \`song new <id> from-bible=<entry>\` sets a song up from music-bible.md; \`song new <id> kind=stinger template=victory|game-over|level-up|item-get\` writes a stinger. The \`scale\` tool lists a key's notes and chords; \`style\` shows music-style.md and music-bible.md.
+  Songs have the views notes (written notes against what the render plays, per channel) and mix (energy by band over time, masking in amber); the checks key, range, render-match, loop-music, masking and voice-leading (advisory), style (music-style.md and the song's bible entry), layers (each game layer alone and with the base) and clip, loudness, dc on the mix. \`normalize\` writes the song's gain; \`export\` writes wav/ogg, --loop (seamless), --stems (one per game layer), midi.
 
 Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-sting\` (or loudness=<LUFS>); the loudness check holds each sound to its class (standard: -16 LUFS ±1) and says which applied. \`normalize\` writes the gain that brings sounds to their class; \`measure\` returns the numbers and checks of many sounds as JSON in one call. Dynamics: \`fx add <id> compress|limit\` (a limiter on the master chain lets a spiky sound be loud without clipping). Many hits in one layer: \`env <id> 1.amp bursts(times=0.1,0.3 ...)\`. \`sound copy|rename|remove <id> ...\` manage sounds.
 
@@ -125,7 +126,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       const r = w.run({ commands: a.commands, by: AGENT });
       if (!r.ok) return fail(formatErrors('commands', r.errors));
       if (!r.added.length) return { content: [text('no commands')] };
-      const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd.length > 150 ? `${e.cmd.slice(0, 120).replace(/\\n/g, ' ')}… (${e.cmd.length} characters)` : e.cmd}`)];
+      const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group}`, ...r.added.flatMap((e) => tapeEntryLines(e))];
       for (const id of r.touched) lines.push(soundSummary(w, id));
       for (const id of r.touchedSets) lines.push(setSummary(w, id));
       for (const id of r.touchedSongs) lines.push(songSummary(w, id));
@@ -248,6 +249,34 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
         return { content: [text(JSON.stringify(doc, null, 2))] };
       }
       return { content: [text([only ? '' : checkText(w, soundIds).text, ...songIds.map((x) => songChecksText(w, x).text)].filter(Boolean).join('\n\n'))] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('scale', {
+    title: 'Scales and chords',
+    description: 'A key\'s notes and, for a seven-note scale, the triad and seventh on each degree with its roman numeral (as chords, bass, arp and motif sequence read them). key: like D:major or A:dorian, a song id (its key), or list (every scale).',
+    annotations: { readOnlyHint: true },
+    inputSchema: z.object({ key: z.string().describe('D:major, A:dorian, a song id, or list') }),
+  }, (a) => w.enqueue(() => {
+    try {
+      const k = w.hasSong(a.key) ? w.song(a.key).key : a.key;
+      if (!k) return fail(`${a.key} has no key (song set ${a.key} key=D:major)`);
+      return { content: [text(scaleText(k))] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('style', {
+    title: 'Music style guide and bible',
+    description: 'The project\'s music style guide (music-style.md: tempo range, key, scales, instrument palette, loudness classes, forbidden things, rules per tag) and music bible (music-bible.md: per track mood, tempo, key, instruments, motif) as SoundClaw reads them, with any lines it cannot read. The style check holds songs to them; song new <id> from-bible=<entry> starts a song from an entry.',
+    annotations: { readOnlyHint: true },
+    inputSchema: z.object({}),
+  }, () => w.enqueue(() => {
+    try {
+      return { content: [text(guideText(w.musicGuide().guide))] };
     } catch (e) {
       return errorResult(e);
     }

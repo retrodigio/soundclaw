@@ -1,0 +1,66 @@
+# Three pieces written with the composition helpers. First, in a new project:
+#   soundclaw new demo.sclaw && soundclaw style demo.sclaw --init
+# (the starter style guide and bible: the bible's entry `market` is a town theme in D major with a motif).
+# Then: soundclaw run demo.sclaw docs/examples/compose-demo.txt && soundclaw check demo.sclaw market battle win
+
+# ---- 1. A 24-bar town theme from the bible entry `market`: A (8 bars), B (8 bars), A again ----
+song new market from-bible=market
+song channel add market harp inst=pluck gain=0.5 pan=0.3
+song channel set market pad harmony=yes gain=0.5
+song channel set market lead pan=-0.1
+
+# A: the theme moved down an octave, sequenced over the chords, then the theme itself and its retrograde
+chords market a pad "I vi IV V I vi ii V" rhythm=half
+bass market a bass from=pad style=root-fifth
+motif transpose market theme by=-7 mode=diatonic as=low
+motif sequence market low a lead "I vi IV V"
+motif write market theme a lead at=64
+motif retrograde market theme as=back
+motif write market back a lead at=96
+humanise market a lead,pad timing=5 velocity=8 seed=3
+
+# B: the theme turned upside down and sequenced, an arpeggio in the pluck, a walking bass
+chords market b pad "IV V iii vi ii V I V6" rhythm=bar range=D3-D5
+bass market b bass from=pad style=walking
+arp market b harp from=pad pattern=updown rate=1/8 range=D4-D6
+motif invert market theme as=turn
+motif sequence market turn b lead "IV V iii vi ii V I V6"
+humanise market b all timing=5 velocity=8 seed=4
+
+song section add market A a
+song section add market B b
+song section add market A2 a
+song set market gain=0.5
+
+# ---- 2. A battle loop in three game layers: base (pad, bass), tension (arp, hats), combat (drums, lead) ----
+song new battle tempo=144 key=E:minor tags=battle
+song channel add battle pad inst=saw_pad gain=0.3 harmony=yes
+song channel add battle bass inst=triangle_bass gain=0.6
+song channel add battle arp inst=pulse_lead gain=0.3 pan=0.25
+song channel add battle hats kit=default gain=0.45 pan=-0.2
+song channel add battle drums kit=default gain=0.65
+song channel add battle lead inst=square_lead gain=0.33 pan=-0.1
+layer-plan battle base=pad,bass tension=arp,hats combat=drums,lead
+
+motif set battle riff "E5 . B4 E5 G5 - F#5 E5 D5 - E5 - B4 - - ."
+motif invert battle riff as=riff2
+
+chords battle x pad "i VI iv V"
+bass battle x bass from=pad style=octave
+arp battle x arp from=pad pattern=updown rate=1/16 range=B3-B5
+drums battle x drums,hats rock-16 fill=4 seed=2
+motif sequence battle riff x lead "i VI iv V"
+humanise battle x all timing=4 velocity=6 seed=7
+
+chords battle y pad "VI VII i V"
+bass battle y bass from=pad style=octave
+arp battle y arp from=pad pattern=random(5) rate=1/16 range=B3-B5
+drums battle y drums,hats rock-push fill=4 seed=5
+motif sequence battle riff2 y lead "VI VII i V"
+humanise battle y all timing=4 velocity=6 seed=8
+
+song section add battle X x
+song section add battle Y y
+
+# ---- 3. A victory stinger in the town's key ----
+song new win kind=stinger template=victory key=D:major

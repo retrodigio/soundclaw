@@ -4,7 +4,7 @@
 // layer name (base, tension, combat ...); the stems of a layer are its channels mixed, all the same
 // length so that they loop together.
 
-import { clonePattern, channelEvents, formatPattern, type NoteFx, type Pattern } from './pattern.ts';
+import { clonePattern, channelEvents, formatCell, formatPattern, type Cell, type NoteFx, type Pattern } from './pattern.ts';
 import { parseKey } from './music.ts';
 import { FX_SPECS, defaultsOf, type Fx } from './layered.ts';
 
@@ -28,7 +28,23 @@ export interface Channel {
   pan: number;
   /** The game layer (stem) the channel belongs to. */
   layer: string;
+  /** A harmony part: the voice-leading check looks at it. */
+  harmony?: true;
 }
+
+/** A named note list kept in the song (a melody idea), on its own grid. */
+export interface Motif {
+  name: string;
+  /** Steps per beat of its cells. */
+  tpb: number;
+  /** Notes, holds and rests, as in a pattern row. */
+  cells: Cell[];
+}
+
+export const MOTIF_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+export const TAG_RE = /^[a-z][a-z0-9_-]{0,23}$/;
+export const SONG_KINDS = ['song', 'stinger'] as const;
+export type SongKind = (typeof SONG_KINDS)[number];
 
 export interface Section {
   name: string;
@@ -56,13 +72,22 @@ export interface SongDoc {
   master: Fx[];
   patterns: Map<string, Pattern>;
   status: 'draft' | 'approved' | 'rejected';
+  /** A song, or a stinger (a short piece with a fixed ending that never loops). */
+  kind: SongKind;
+  /** Words the style guide's sections and rules apply by (town, battle ...). */
+  tags: string[];
+  /** The music bible entry the song was made from. */
+  bible: string | null;
+  /** The game layers in the order they stack (the first is the base); empty: as the channels first name them. */
+  layers: string[];
+  motifs: Motif[];
 }
 
 export const DEFAULT_KIT: Readonly<Record<string, string>> = { k: 'kick', kick: 'kick', s: 'snare', snare: 'snare', h: 'hat', hat: 'hat', oh: 'hat_open', hat_open: 'hat_open' };
 
 export function newSong(id: string): SongDoc {
   const limit: Fx = { kind: 'limit', p: { ...defaultsOf(FX_SPECS.limit), ceiling: -1 }, envs: {} };
-  return { id, tempo: 120, swing: 0, time: [4, 4], key: null, gain: 1, channels: [], sections: [], intro: null, ending: null, loop: null, master: [limit], patterns: new Map(), status: 'draft' };
+  return { id, tempo: 120, swing: 0, time: [4, 4], key: null, gain: 1, channels: [], sections: [], intro: null, ending: null, loop: null, master: [limit], patterns: new Map(), status: 'draft', kind: 'song', tags: [], bible: null, layers: [], motifs: [] };
 }
 
 export function cloneSong(s: SongDoc): SongDoc {
@@ -74,6 +99,9 @@ export function cloneSong(s: SongDoc): SongDoc {
     loop: s.loop && typeof s.loop === 'object' ? { ...s.loop } : s.loop,
     master: s.master.map((f) => ({ kind: f.kind, p: { ...f.p }, envs: Object.fromEntries(Object.entries(f.envs).map(([k, e]) => [k, e.map((q) => ({ ...q }))])) })),
     patterns: new Map([...s.patterns].map(([k, v]) => [k, clonePattern(v)] as const)),
+    tags: [...s.tags],
+    layers: [...s.layers],
+    motifs: s.motifs.map((m) => ({ ...m, cells: clonePattern({ name: 'm', steps: m.cells.length, tpb: m.tpb, bar: null, channels: [{ name: 'm', cells: m.cells }] }).channels[0]!.cells })),
   };
 }
 
@@ -165,6 +193,8 @@ export function arrange(song: SongDoc): Arrangement {
 export interface NoteEv {
   /** Seconds from the start of the arrangement. */
   t: number;
+  /** Where the grid puts it (t without the note's nudge). */
+  grid: number;
   /** Seconds the key is held (to the next step after the note and its holds). */
   len: number;
   midi: number | null;
@@ -187,12 +217,23 @@ export function channelNotes(song: SongDoc, arr: { instances: Instance[] }, chan
       const t = stepTime(inst, e.step, song.swing, inst.pattern.steps);
       const end = stepTime(inst, e.step + e.len, song.swing, inst.pattern.steps);
       const at = { instance: inst.index, pattern: inst.pattern.name, section: inst.section, step: e.step };
-      if (e.drum !== null) out.push({ t, len: Math.max(0.01, end - t), midi: null, drum: e.drum, vel: e.vel, fx: {}, slideFrom: e.slideFrom, accidental: false, at });
-      else for (const n of e.notes!) out.push({ t, len: end - t, midi: n.midi, drum: null, vel: n.vel, fx: n.fx, slideFrom: e.slideFrom, accidental: !!n.accidental, at });
+      // a nudge moves the whole note off the grid (its length is kept)
+      if (e.drum !== null) out.push({ t: t + e.nudge / 1000, grid: t, len: Math.max(0.01, end - t), midi: null, drum: e.drum, vel: e.vel, fx: {}, slideFrom: e.slideFrom, accidental: false, at });
+      else for (const n of e.notes!) out.push({ t: t + (n.nudge ?? 0) / 1000, grid: t, len: end - t, midi: n.midi, drum: null, vel: n.vel, fx: n.fx, slideFrom: e.slideFrom, accidental: !!n.accidental, at });
     }
   }
-  return out;
+  return out.sort((a, b) => a.t - b.t);
 }
+
+/** The layers in the order they stack: the song's plan, then any layer a channel names that the plan leaves out. */
+export function layerOrder(song: SongDoc): string[] {
+  const out = [...song.layers];
+  for (const c of song.channels) if (!out.includes(c.layer)) out.push(c.layer);
+  return out.filter((l) => song.channels.some((c) => c.layer === l));
+}
+
+/** A motif's cells as text (the form `motif set` takes). */
+export const motifText = (m: Motif): string => m.cells.map(formatCell).join(' ');
 
 /** Problems with a song that stop it rendering (errors), and things worth saying (warnings). */
 export function songProblems(song: SongDoc, hasInstrument: (id: string) => boolean): { errors: string[]; warnings: string[] } {
@@ -207,6 +248,7 @@ export function songProblems(song: SongDoc, hasInstrument: (id: string) => boole
   if (errors.length) return { errors, warnings };
   let arr: Arrangement;
   try { arr = arrange(song); } catch (e) { return { errors: [(e as Error).message], warnings }; }
+  if (song.kind === 'stinger' && !song.ending) warnings.push(`${song.id} is a stinger without an ending section (song ending ${song.id} <section>): a stinger ends on a fixed ending`);
   const beats = song.time[0] * (4 / song.time[1]);
   const seen = new Set<string>();
   for (const inst of arr.instances) {
@@ -233,7 +275,12 @@ export function serializeSongHead(s: SongDoc, fmt: (n: number) => string): strin
   const lines = ['soundclaw song 1', `id ${s.id}`, `tempo ${fmt(s.tempo)}`, `swing ${fmt(s.swing)}`, `time ${s.time[0]}/${s.time[1]}`, `key ${s.key ?? 'none'}`, `gain ${fmt(s.gain)}`];
   if (s.loudClass) lines.push(`class ${s.loudClass}`);
   if (s.loudness !== undefined) lines.push(`loudness ${fmt(s.loudness)}`);
-  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${Object.entries(c.kit ?? {}).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}`);
+  if (s.kind !== 'song') lines.push(`kind ${s.kind}`);
+  if (s.tags.length) lines.push(`tags ${s.tags.join(',')}`);
+  if (s.bible) lines.push(`bible ${s.bible}`);
+  if (s.layers.length) lines.push(`layers ${s.layers.join(' ')}`);
+  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${Object.entries(c.kit ?? {}).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}`);
+  for (const m of s.motifs) lines.push(`motif ${m.name} tpb=${m.tpb} ${motifText(m)}`);
   for (const x of s.sections) lines.push(`section ${x.name} ${x.patterns.join(' ')}${x.repeat > 1 ? ` x${x.repeat}` : ''}${s.intro === x.name ? ' intro' : ''}${s.ending === x.name ? ' ending' : ''}`);
   lines.push(`loop ${s.loop === false ? 'off' : s.loop ? `${s.loop.from}..${s.loop.to}` : 'auto'}`);
   lines.push(`status ${s.status}`);

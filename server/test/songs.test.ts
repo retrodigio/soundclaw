@@ -102,7 +102,7 @@ describe('numbers, checks and work done', () => {
     expect(c.text).toMatch(/pass clip/);
     expect(c.text).toMatch(/render-match/);
     const j = songJsonObject(f.w, 'demo') as { playable: boolean; checks: { name: string }[]; numbers: { channels: unknown[] } };
-    expect(j.checks.map((x) => x.name)).toEqual(['clip', 'loudness', 'dc', 'key', 'range', 'render-match', 'loop-music', 'masking']);
+    expect(j.checks.map((x) => x.name)).toEqual(['clip', 'loudness', 'dc', 'key', 'range', 'render-match', 'loop-music', 'masking', 'voice-leading', 'style', 'layers']);
     expect(j.numbers.channels.length).toBe(3);
   });
 

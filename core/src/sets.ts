@@ -56,6 +56,8 @@ export class Library extends Map<string, Sound> {
   /** The project's instruments (the built-in ones are not in here). */
   instruments = new Map<string, Instrument>();
   songs = new Map<string, SongDoc>();
+  /** The project's music style guide and bible, for the commands that read them (a replay never needs them). */
+  guide?: import('./musicstyle.ts').MusicGuide;
 }
 
 export function copyLibrary(lib: Library): Library {
@@ -63,6 +65,7 @@ export function copyLibrary(lib: Library): Library {
   out.sets = new Map(lib.sets);
   out.instruments = new Map(lib.instruments);
   out.songs = new Map(lib.songs);
+  out.guide = lib.guide;
   return out;
 }
 

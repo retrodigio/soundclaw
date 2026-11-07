@@ -154,12 +154,16 @@ test('a set\'s page: the members in a row, play in sequence, regen with a new se
   await shot(page, 'set.png');
   // regen with a new seed: one command by the person, the members change, the target holds
   const hashes = await page.locator('[data-testid^=member-footsteps_]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.hash));
+  const gainCount = async (): Promise<number> => (await texts(page)).filter((t) => /^sound set footsteps_\d gain=/.test(t)).length;
+  const gainsBefore = await gainCount();
   await page.getByTestId('set-regen').click();
   await expect.poll(async () => (await texts(page)).filter((t) => /^set regen footsteps seed=\d+$/.test(t)).length).toBe(1);
   await expect.poll(async () => (await page.locator('[data-testid^=member-footsteps_]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.hash))).join()).not.toBe(hashes.join());
   expect((await rows(page)).find((r) => /^set regen/.test(r.text))!.by).toBe('human:ana');
-  const gains = (await texts(page)).filter((t) => /^sound set footsteps_\d gain=/.test(t));
-  expect(gains.length).toBeGreaterThanOrEqual(10); // matched at the start, and again after the regen (a member already on the target needs no command)
+  // matched at the start, and again after the regen (the seed is random, so how many members need a gain varies;
+  // one already on the target needs no command)
+  expect(gainsBefore).toBeGreaterThanOrEqual(5);
+  await expect.poll(gainCount).toBeGreaterThan(gainsBefore);
   await expect(page.getByTestId('set-seed')).not.toHaveText('2');
   // the audition page for the set shows its six sounds
   await page.getByTestId('set-audition').click();

@@ -9,7 +9,7 @@ Project folders are named anything; `*.sclaw` is the convention.
 ## The command language
 
 A batch is text sent with `soundclaw run` (or the MCP `run` tool): one command per line or
-separated by `;`, `#` starts a comment, words are separated by spaces, text goes in "double
+separated by `;`, `#` at the start of a word starts a comment (inside a word, as in `key=F#:minor`, it is part of it), words are separated by spaces, text goes in "double
 quotes". A batch is **one undo group**: every command is checked against a copy of the sounds
 first, and if any fails nothing is applied (not a line of history, not a file). Errors are
 reported with their line and column.
@@ -636,17 +636,18 @@ In a script a pattern is a block: the header `pattern <song>.<name> steps=<n> tp
 
 - **Header.** `steps` is the length (1 to 256), `tpb` the steps per beat (the grid's resolution: 4 is sixteenth notes, 2 eighth notes, 3 or 12 triplets), `bar` the steps in a bar (written when rows use `|`). A step lasts 60 / (tempo x tpb) seconds.
 - **Rows.** `<channel>: <step> <step> ...`, exactly `steps` steps. `.` is a rest, `-` holds the note before it one more step (across a `|` too), `|` only splits bars (the groups must all be `bar` steps). A note lasts until the next event or rest, or the end of the pattern; its release rings on after.
-- **Notes.** `C5`, `C#5`, `Db5`, `C-1` (C4 is middle C, 60). `v1`..`v127` is the velocity (default 100, left out of the normal form), `!` marks a note outside the song's key on purpose (`G#5!`), and effects follow: `~slide` glides in from the note before it (over 80 ms, when that note ended at this step), `~vib` or `~vib(<Hz>,<semitones>)` (default 5 Hz, 0.4 semitones, starting after 80 ms), `~arp(0,4,7)` steps through 2 to 8 semitone offsets every 20 ms. A chord joins notes with `+`: `C4+E4+G4`.
-- **Drums.** A lower-case word is a drum hit (`k`, `s`, `hat`, `oh`), with its own velocity (`sv60`). A hit is one step. Which instrument plays a hit comes from the channel's kit.
+- **Notes.** `C5`, `C#5`, `Db5`, `C-1` (C4 is middle C, 60). `v1`..`v127` is the velocity (default 100, left out of the normal form), `!` marks a note outside the song's key on purpose (`G#5!`), and effects follow: `~slide` glides in from the note before it (over 80 ms, when that note ended at this step), `~vib` or `~vib(<Hz>,<semitones>)` (default 5 Hz, 0.4 semitones, starting after 80 ms), `~arp(0,4,7)` steps through 2 to 8 semitone offsets every 20 ms. A chord joins notes with `+`: `C4+E4+G4`. `@<ms>` after the velocity (and `!`) plays the note that many milliseconds off the grid, -50 to 50 (`C5v90@-6`, `E5@4`; a positive nudge has no sign, since `+` joins chord notes); `humanise` writes these.
+- **Drums.** A lower-case word is a drum hit (`k`, `s`, `hat`, `oh`), with its own velocity (`sv60`) and nudge (`sv60@-3`). A hit is one step. Which instrument plays a hit comes from the channel's kit.
 - **Note lists.** `lead= 0:C5*2 4:E5v90 6:G5` (step, note, `*` length in steps) is another way to write a row; it prints as the grid.
 - **Normal form.** The grid, aligned in columns, flats written as sharps, comments dropped; format(parse(x)) is stable. Problems are reported with the line and column: `demo.sclaw:4:14: error: 'Q5' is not a note (like C5, C#5, Db3, C5v80, E5~slide, G4!)`.
 
 #### Songs
 
 ```
-song new <id> [tempo=120] [swing=0] [time=4/4] [key=A:minor] [class=music|stinger]
-song set <id> tempo= swing= time= key=<tonic:mode>|none class=<name>|none loudness=<LUFS>|auto gain=<g>
-song channel add|set <song> <name> inst=<instrument> | kit=default|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>]
+song new <id> [tempo=120] [swing=0] [time=4/4] [key=A:minor] [class=music|stinger] [tags=a,b] [kind=song|stinger]
+song new <id> from-bible=<entry> [<any of the above>]      song new <id> kind=stinger template=victory|game-over|level-up|item-get [key=] [tempo=]
+song set <id> tempo= swing= time= key=<tonic:mode>|none class=<name>|none loudness=<LUFS>|auto gain=<g> tags=a,b|none kind=song|stinger
+song channel add|set <song> <name> inst=<instrument> | kit=default|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>] [harmony=yes|no]
 song channel remove <song> <name>
 song section add|set <song> <name> <pattern>... [x<n>]       song section remove <song> <name>       song order <song> <section>...
 song intro <song> <section>|none      song ending <song> <section>|none      song loop <song> <from>[..<to>]|auto|off
@@ -683,7 +684,166 @@ song copy|rename <id> <new>    song remove <id>    song mark <id> approved|rejec
 | `loop-music` | the loop's seam: no jump from the last sample to the first (more than `clickMax` and 4 times the local step), and no more than 2 x `seamStepMaxDb` (6 dB) between the loudness of the last beat and the first (a gap of silence is a gap, not a step) | the seam |
 | `masking` | in each 46 ms frame, the band with the most energy (sub, low, mid, high, air): the two loudest channels in it must not be within 4 dB of each other for more than 25 % of the time | stretches of 0.5 s or more, with the two channels. **Advisory:** it is a warning and never blocks `work done` |
 
-`work done` on a request about a song needs every check to pass except `masking`. The `notes` view draws, per channel, the written notes (blue bars), the detected pitch (yellow), the detected onsets (green ticks) and the notes that differ in red; `mix` draws each channel's energy in five bands over time with the masked stretches in amber. Both are saved under `<project>/.cache/views/` and printed with the numbers.
+The composition helpers add three more checks, `voice-leading`, `style` and `layers` ("Composition helpers" below). `work done` on a request about a song needs every check to pass except `masking` and `voice-leading`. The `notes` view draws, per channel, the written notes (blue bars), the detected pitch (yellow), the detected onsets (green ticks) and the notes that differ in red; `mix` draws each channel's energy in five bands over time with the masked stretches in amber. Both are saved under `<project>/.cache/views/` and printed with the numbers.
+
+#### Composition helpers
+
+The helpers are commands that write notes into a pattern. They are not generators hidden behind a seed: each one goes on the tape with every option resolved and the rows it wrote (`written="…"`), so the history shows the notes, a replay puts back exactly those rows (it never works them out again, so a later change to a helper cannot change an old song), and the notes can then be edited by hand like any others. A helper writes the rows of the channels it names and leaves the pattern's other rows alone; when the pattern does not exist it makes one as long as the progression (or `bars=`), on a grid of 4 steps per beat unless `tpb=` says otherwise. A helper works in the song's key (`song set <id> key=D:major` first). A note it writes outside the key (V in a minor key, a borrowed bVII, a secondary dominant) is marked `!`, so the `key` check passes it as meant.
+
+```
+$ soundclaw run town.sclaw -e 'chords town a pad "I vi IV V" rhythm=beats'
+  #12 chords town a pad "I vi IV V" bars=1 rhythm=beats voices=3 range=G3-G5 vel=100 tpb=4  (wrote:)
+        pad: D4+F#4+A4 - - - D4+F#4+A4 - - - ...
+```
+
+**Scales.** A key is `<tonic>:<scale>`. Besides the modes above there are `ionian`, `aeolian`, `natural-minor`, `major-blues`, `whole-tone`, `phrygian-dominant`, `hungarian-minor`, `double-harmonic`, `harmonic-major`, `lydian-dominant`, `hirajoshi` and `octatonic`. `soundclaw scale list` prints every scale with what it sounds like; `soundclaw scale D:dorian` prints the notes and, for a seven-note scale, the triad and seventh chord on each degree with its roman numeral; `soundclaw scale <project> <song>` does it for the song's key. Roman numerals in a scale of other than seven notes count in the major (or natural minor) scale on the same tonic.
+
+**Progressions.** A progression is roman numerals in quotes, counted in the song's key: upper case a major chord, lower case a minor one, whatever the scale (`I vi IV V`; in A minor `i iv V` gives the major V of harmonic minor, `i iv v` the minor one). After the numeral:
+
+| suffix | chord | example |
+|---|---|---|
+| `°` or `o` or `dim` | diminished | `vii°` |
+| `ø` | half-diminished seventh | `iiø7` |
+| `+` or `aug` | augmented | `III+` |
+| `7` | a minor seventh on top (a dominant seventh on a major chord, a minor seventh on a minor one, a diminished seventh on `°`) | `V7`, `ii7`, `vii°7` |
+| `maj7` | a major seventh | `IVmaj7` |
+| `sus2`, `sus4` | the third replaced by the second or the fourth | `Vsus4` |
+| `add9` | an added ninth | `Iadd9` |
+| `6` / `64` | first / second inversion of a triad | `I6`, `I64` |
+| `65` / `43` / `42` | first / second / third inversion of a seventh chord | `V65` |
+| `b` or `#` before it | borrowed: the chord on the lowered or raised degree (and a minor `iv` in a major key is borrowed by its case) | `bVII`, `bVI`, `iv` |
+| `/<numeral>` | secondary: the chord in the major key on that degree | `V/V`, `V7/vi`, `vii°/V` |
+| `:<bars>` | its length in bars (else `bars=`) | `I:2 V:1` |
+
+`bars=` gives every chord's length (`bars=2`) or each in turn (`bars=2,1,1,2`; half a bar is `0.5`). A progression shorter than the pattern repeats to fill it.
+
+**Chords.**
+
+```
+chords <song> <pattern> <channel> "<progression>" [bars=1] [rhythm=hold] [voices=<n>] [range=<lo>-<hi>] [vel=100] [tpb=4]
+```
+
+The chords are voiced with smooth voice leading: each chord's notes are chosen inside the range (default G3 to G5, narrowed to the instrument's own range) to move as little as possible from the chord before, with no parallel fifths or octaves where they can be avoided, the root doubled before the fifth and the fifth before the third, and the voicing kept near the middle of the range. `voices` is 2 to 6 notes (default: the most notes any chord has). `rhythm` is `hold` (each chord held for its length), `bar`, `half` or `beats` (struck every bar, half note or beat), `pulse` (every step), `offbeat` (on the off beat, resting on the beat), or a mask repeated across the pattern: `x` strike, `X` accent (velocity + 20), `-` hold, `.` rest (`rhythm="x-.x-.x-"`). Each chord starts with a strike. Mark the channel `harmony=yes` (`song channel set <song> <channel> harmony=yes`) to have the `voice-leading` check read it.
+
+**Bass.**
+
+```
+bass <song> <pattern> <channel> ("<progression>" | from=<channel>) [style=root] [rate=<r>] [bars=1] [range=C2-C4] [vel=100] [tpb=4]
+```
+
+`from=` follows the chords another channel of the same pattern plays (each chord or note lasts until the next). `style`: `root` (the root, once per chord; default rate `chord`), `root-fifth` (root and fifth, half notes), `octave` (the root and the octave above, eighth notes), `walking` (quarter notes: the root on the beat, chord tones and scale tones heading for the next chord, and a step into its root; never the same note twice running). An inverted chord puts its bass note (the third of `I6`) in place of the root. `rate` is `chord`, `1`, `1/2`, `1/4`, `1/8`, `1/16` or `1/32` (a whole note to a thirty-second note; it must be a whole number of steps on the grid). The range defaults to C2 to C4, narrowed to the instrument's.
+
+**Arpeggios.**
+
+```
+arp <song> <pattern> <channel> ("<progression>" | from=<channel>) [pattern=up] [rate=1/16] [octaves=1] [bars=1] [range=C4-C6] [vel=100] [tpb=4]
+```
+
+The chord's notes from its lowest root in the range, over 1 to 3 `octaves`, in the order `up`, `down`, `updown` (up and back without repeating the ends) or `random(<seed>)` (seeded: the same seed writes the same notes; never the same note twice running), one note every `rate`.
+
+**Motifs.** A motif is a named note list kept in the song (`motif <name> tpb=4 D5 - F#5 A5` in the `.song` file), written in the pattern text's cells (notes, chords, `-`, `.`, velocities, effects). The transforms make a new motif (`as=<name>`) or replace it:
+
+```
+motif set <song> <name> "<cells>" [tpb=4]          motif remove <song> <name>
+motif transpose <song> <name> by=<n> [mode=chromatic|diatonic] [as=<new>]     by semitones, or steps of the song's scale
+motif invert <song> <name> [around=<note>] [mode=diatonic|chromatic] [as=]    mirrored about a note (default its first), along the scale when the song has a key
+motif retrograde <song> <name> [as=]               the notes backwards (each keeps its length)
+motif augment|diminish <song> <name> [factor=2] [as=]   lengths times or divided by 2 to 4 (a diminish that does not divide moves the motif to a finer grid)
+motif write <song> <name> <pattern> <channel> [at=0] [by=0] [mode=chromatic] [vel=] [bars=] [tpb=]     the motif into a pattern from step at, moved by
+motif sequence <song> <name> <pattern> <channel> "<progression>" [bars=1] [mode=diatonic] [vel=] [tpb=]   the motif once per chord, moved as the chord's root moves
+```
+
+A note a transform moves out of the key is marked `!`. A motif's grid must fit the pattern's (a motif at tpb=2 writes into tpb=4 at two steps a cell; the other way is an error). `motif sequence` with `mode=diatonic` moves the motif by the chord's degree (I IV V I: up three steps, up four, back), with `mode=chromatic` by the semitones between the roots (the nearer way, up to a tritone).
+
+**Drums.**
+
+```
+drums <song> <pattern> <channel>[,<hat channel>] <template> [bars=<n>] [fill=0] [seed=1] [vary=0.25]
+```
+
+A drum template is one bar of kick, snare and hats; `drums` writes it into every bar of the pattern (or a new pattern of `bars` bars) of a channel with a drum kit, kick `k`, snare `s`, hat `h`, open hat `oh`. With one channel the hats play where the kick and snare rest; with two (`drums,hats`) the hats get their own channel. `fill=4` puts a fill in the last beat or two of every 4th bar; `vary` (0 to 1) adds seeded variation in every bar but the first (ghost snares, an extra kick, a hat opened or dropped), the same for the same seed.
+
+| template | feel | |
+|---|---|---|
+| `rock`, `rock-16`, `rock-push` | straight rock | kick on 1 and 3 and snare on 2 and 4; sixteenth hats; a syncopated kick |
+| `halftime`, `halftime-ghost` | half-time | the snare on 3 only; with ghost notes |
+| `shuffle`, `shuffle-half` | shuffle | triplet swing (tpb=3) |
+| `march`, `march-roll` | march | bass drum on 1 and 3 under snare figures; a running snare |
+| `waltz`, `waltz-light` | waltz | 3/4 |
+| `pulse`, `pulse-sparse` | ambient pulse | a soft heartbeat; one kick a bar |
+| `chip`, `chip-gallop`, `chip-break` | chiptune | driving noise hats; a galloping kick; a broken beat |
+
+A template must fit the song's bar (a waltz needs 3/4) and the pattern's grid.
+
+**Humanise.**
+
+```
+humanise <song> <pattern> <channel>[,<channel>...]|all [timing=8] [velocity=6] [seed=1]
+```
+
+Moves each note or hit off the grid by up to `timing` ms (0 to 50) and its velocity by up to `velocity` steps (0 to 40), both from a seeded triangular spread (most moves small), and writes them into the notes: the timing as a nudge, `C5@-4` or `kv92@6` (−50 to 50 ms; a nudge is the note's own, so humanising again replaces it, while velocity moves from what the note has). `humanize` is the same command. The checks read the notes on the grid: a chord humanised apart is still one chord to `render-match` and `voice-leading`. In a looping song a note nudged before the start of the loop plays at its end.
+
+**Layers.**
+
+```
+layer-plan <song> base=<channel>,... <layer>=<channel>,... ...
+```
+
+Names the game layers (stems) in the order they stack and puts each channel in one (a channel left out joins the base): `layer-plan battle base=pad,bass tension=arp,hats combat=drums,lead`. The `layers` check then plays every mix a game can play, the base with each combination of the others (up to five layers above the base): each mix within the song's loudness class, under the true-peak limit with no limiter (stems are summed as a game sums them), and with a clean loop seam; each layer alone in key and no louder than its class allows. The check's line lists every mix with its loudness (`base -17.9, base+tension -16.4, ... LUFS`). Export the stems with `export <project> <song> --stems`.
+
+**Style guide and music bible.** Two Markdown files in the project folder that people write and SoundClaw reads (`soundclaw style <project> --init` writes a starter pair; `soundclaw style <project>` prints what it reads and the lines it cannot). Prose is for people; the `key: value` lines are data.
+
+`music-style.md` holds every song to the project's style; `## <tag>` sections add rules for songs with that tag (their values replace the guide's; `## stinger` holds stingers):
+
+```
+tempo: 70-150
+key: C:major                       the project's key (stingers take it)
+scales: major, minor, dorian       the scales a song's key may use
+instruments: square_lead, saw_pad, triangle_bass, kick, snare, hat
+loudness: music, stinger           the loudness classes songs may use
+swing: 0-0.3
+forbid: locrian                    a scale, an instrument, drums, accidentals or swing,
+forbid: drums in town                optionally in songs with a tag
+
+## town
+tempo: 80-112
+scales: major, mixolydian, pentatonic-major
+```
+
+`music-bible.md` has an entry per track, a `## <id>` heading (the id is its first word; a title may follow after a dash) and its data:
+
+```
+## market — the market square
+mood: warm, unhurried, a little proud
+tempo: 96
+key: D:major
+time: 4/4
+tags: town
+instruments: lead=square_lead, pad=saw_pad, bass=triangle_bass, drums=kit
+motif: theme tpb=4 D5 - F#5 A5 B5 - A5 - G5 F#5 E5 F#5 D5 - - -
+region: the market square at noon
+```
+
+`song new <id> from-bible=<entry>` sets a song up from it and goes on the tape as the plain commands it stands for: `song new` with the tempo, time, key, swing, class, tags and `bible=<entry>`, a `song channel add` per instrument, and a `motif set` per motif (other options on the line win over the entry's). The `style` check holds a song to the guide's rules for its tags, and a song from the bible to its entry (tempo, key, time, channels and their instruments, its motifs present).
+
+**Stingers.** `song new <id> kind=stinger template=<template> [key=<key>] [tempo=<bpm>]` writes a short piece that ends and never loops: a lead, a harmony part, a bass and (for some) drums in one pattern, played as the song's ending with the loop off, in the `stinger` loudness class. The templates are written in scale degrees, so they land in any key (default: the style guide's `key`, else C:major).
+
+| template | |
+|---|---|
+| `victory` | a rising arpeggio and a held tonic chord, about 3.6 s |
+| `game-over` | a slow fall from the fifth to the tonic over vi IV V I, about 4.8 s |
+| `level-up` | a scale run up an octave over IV V I, about 1.6 s |
+| `item-get` | a quick sparkle up two octaves to a held tonic, about 1.7 s |
+
+A song of `kind=stinger` refuses `song loop` (other than `off`) and warns when it has no ending. `song set <id> tags=a,b` and `kind=song|stinger` change them later.
+
+**The helpers' checks.**
+
+| check | holds the song to | flags |
+|---|---|---|
+| `voice-leading` | the channels marked `harmony=yes`, read as voices low to high: no two moving the same way into a fifth or an octave (on the grid) | each pair, with the notes and the step. **Advisory:** a warning that never blocks `work done` (the style may want parallels) |
+| `style` | the style guide's rules for the song's tags, and its bible entry (skipped when there is neither) | each rule broken |
+| `layers` | with a layer plan: every mix of the base and the other layers within the class, under the true-peak limit, with a clean seam; each layer alone in key and within the class's top | each mix or layer |
 
 ### Loudness classes
 
@@ -804,6 +964,8 @@ soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]..
 soundclaw reply <project> <request> "<answer>" [--by <author>]
 soundclaw cancel <project> <request> ["<why>"] [--by <author>]
 soundclaw work <project> list | claim [<request>] | progress [<request>] "<note>" | block [<request>] "<question>" | done [<request>] "<what changed>" [--by <agent>]
+soundclaw scale <key> | list | <project> <song>
+soundclaw style <project> [--init]
 soundclaw skill install [--dest <dir> | --project <dir>]
 soundclaw await <project-folder | watch-url> [--timeout <seconds>] [--since <cursor>] [--as <name>] [--json]
 soundclaw serve --project <project> [--port 7427] [--no-mcp]
@@ -1050,6 +1212,8 @@ is also served over HTTP at `/mcp` with the token as a bearer.
 | `request` | File (`sound`, `note`, `tags`, `like`), `reply` (`id`, `text`) or `cancel` a request. |
 | `work` | `next` (default), `progress`, `done`, `blocked`, `list`. |
 | `await_requests` | Wait for people; `cursor` from the previous call. |
+| `scale` | `key`: a key like `D:major`, a song id (its key), or `list`: the notes and the chords on each degree with their roman numerals. |
+| `style` | The project's music style guide and music bible as SoundClaw reads them, with the lines it cannot read. |
 
 ## HTTP API (localhost, token required)
 

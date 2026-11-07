@@ -1,6 +1,6 @@
 // Results as text, for the CLI and the MCP tools.
 
-import { CLASSIC_FIELDS, WAVE_NAMES, isStereo, layerLabel, type Sound, type TapeEntry } from '@soundclaw/core';
+import { CLASSIC_FIELDS, WAVE_NAMES, isStereo, layerLabel, tapeLineLines, type Sound, type TapeEntry } from '@soundclaw/core';
 import type { RunOutcome } from './writer.ts';
 
 export const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -10,13 +10,20 @@ export function formatRun(r: Extract<RunOutcome, { ok: true }>, summary: (id: st
   if (!r.added.length) return 'no commands';
   const first = r.added[0]!;
   const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group} by ${first.by}`];
-  lines.push(...r.added.map((e) => `  #${e.seq} ${e.cmd.length > 150 ? `${e.cmd.slice(0, 120).replace(/\\n/g, ' ')}… (${e.cmd.length} characters)` : e.cmd}`));
+  lines.push(...r.added.flatMap((e) => tapeEntryLines(e)));
   for (const id of r.touched) lines.push(summary(id));
   for (const id of r.touchedSets ?? []) lines.push(setSummary(id));
   for (const id of r.touchedInstruments ?? []) lines.push(`instrument ${id}: ${r.added.some((e) => e.cmd.startsWith('instrument remove ' + id)) ? 'removed' : 'changed'}`);
   for (const id of r.touchedSongs ?? []) lines.push(songSummary(id));
   lines.push(r.warnings.length ? `warnings: ${r.warnings.join('; ')}` : 'warnings: none');
   return lines.join('\n');
+}
+
+/** A tape entry as the run report shows it: a helper's command and the rows it wrote; any other long line cut short. */
+export function tapeEntryLines(e: { seq: number; cmd: string }): string[] {
+  const parts = tapeLineLines(e.cmd);
+  if (parts.length > 1) return [`  #${e.seq} ${parts[0]}`, ...parts.slice(1).map((l) => `      ${l}`)];
+  return [`  #${e.seq} ${e.cmd.length > 150 ? `${e.cmd.slice(0, 120).replace(/\\n/g, ' ')}… (${e.cmd.length} characters)` : e.cmd}`];
 }
 
 export function formatErrors(source: string, errors: { line: number; col: number; message: string }[]): string {

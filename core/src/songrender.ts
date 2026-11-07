@@ -112,7 +112,9 @@ function renderChannelAudio(song: SongDoc, ch: Channel, ev: readonly NoteEv[], N
       buf = renderNote(inst, { midi, gate, fx: e.fx, slideFrom: e.slideFrom }, o.bank);
       notes.set(nk, buf);
     }
-    const at = Math.round(e.t * SR);
+    // a note nudged before the start: in a loop it sounds at the end of the region (it wraps), else at 0
+    const raw = Math.round(e.t * SR);
+    const at = raw >= 0 ? raw : wrap ? raw + N : 0;
     placed.push({ at, buf, g: velocityGain(inst, e.vel) });
     size = Math.max(size, Math.min(at + buf[0]!.length, at + MAX_TAIL * SR + Math.round(e.len * SR)));
   }
@@ -169,7 +171,7 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
   // a full render has room after the end for the last notes to die away: the longest tail among the channels
   const rendered: { ch: Channel; ev: NoteEv[] }[] = [];
   for (const ch of song.channels) {
-    const ev = channelNotes(song, { instances }, ch.name).map((e) => ({ ...e, t: e.t - window.start }));
+    const ev = channelNotes(song, { instances }, ch.name).map((e) => ({ ...e, t: e.t - window.start, grid: e.grid - window.start }));
     events.set(ch.name, ev);
     if (!only || only.has(ch.name)) rendered.push({ ch, ev });
   }

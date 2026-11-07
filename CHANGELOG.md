@@ -24,6 +24,31 @@ All notable changes to SoundClaw are listed here. The format follows
 - **Dashboard**: song cards with play, the loop playing repeatedly, the pattern text read-only with the current step lit, and mute/solo for listening (not stored).
 - The command text now reads `\n` in a quoted word as a line break (the pattern text on the tape).
 
+### Composition helpers
+- **Helpers that write notes** into a pattern and go on the history tape with every option resolved and the rows they wrote
+  (`written="…"`), so a replay puts back exactly those notes: `chords`, `bass`, `arp`, `drums`, `humanise`, `motif write|sequence`.
+  Notes they write outside the key are marked `!`.
+- **Scales and chords**: twelve more scales (`whole-tone`, `phrygian-dominant`, `hungarian-minor`, `hirajoshi`, `octatonic` …);
+  `soundclaw scale <key> | list | <project> <song>` and the MCP tool `scale` print a key's notes and its chords by roman numeral.
+- **`chords <song> <pattern> <channel> "<progression>"`**: roman numerals with inversions (`I6`, `V65`), sevenths, `sus2`/`sus4`, `add9`,
+  borrowed (`bVII`, `iv`) and secondary (`V/V`, `V7/vi`) chords, lengths in bars, rhythms (`hold`, `beats`, `offbeat`, masks like `"x-.x"`),
+  and voice leading within a range per channel (least motion, no parallel fifths or octaves where avoidable, sensible doubling).
+- **`bass`** (root, root-fifth, walking, octave) and **`arp`** (up, down, updown, `random(<seed>)`, a rate, octaves), from a progression
+  or following the chords another channel plays (`from=pad`).
+- **Motifs**: named note lists kept in the song (`motif set`), transformed (`transpose` chromatic or diatonic, `invert`, `retrograde`,
+  `augment`, `diminish`), written into patterns (`motif write`) and sequenced over a progression (`motif sequence`).
+- **Drum templates**: rock, half-time, shuffle, march, waltz, ambient pulse and chiptune (sixteen in all), fills every N bars, seeded variation.
+- **Humanise**: seeded timing and velocity written into the notes. The pattern text gains a nudge, `C5@-4` (−50 to 50 ms), on notes and drum hits.
+- **Style guide and music bible**: `music-style.md` (tempo, key, scales, instrument palette, loudness classes, swing, `forbid:` rules,
+  `## <tag>` sections) and `music-bible.md` (an entry per track: mood, tempo, key, tags, instruments, motif); `soundclaw style <project> [--init]`
+  and the MCP tool `style`; `song new <id> from-bible=<entry>` (written to the tape as plain commands); songs have `tags`.
+- **Stingers**: `song new <id> kind=stinger template=victory|game-over|level-up|item-get` in any key, as plain commands; a stinger never loops.
+- **Layers**: `layer-plan <song> base=… tension=… combat=…` names the game layers and their order.
+- **Checks**: `voice-leading` (advisory: parallel fifths and octaves in channels marked `harmony=yes`), `style` (the guide's rules and the
+  song's bible entry), and `layers` (every mix of the base and the other layers within the loudness class, under the true-peak limit,
+  with a clean seam; each layer alone in key).
+- In the command text a `#` inside a word is part of it (`key=F#:dorian`); a comment starts at the start of a word.
+
 ### Fixes from the second large use
 - **Samples**: a sample layer with no envelope and no trim plays the file as it is (no 2 ms fades, not cut by `duration=auto`), so `measure`
   of a reference equals the file. A stereo file stays stereo through `side=left` / `side=right` on two hard-panned layers (`sample import`

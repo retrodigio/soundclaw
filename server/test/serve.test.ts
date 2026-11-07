@@ -208,7 +208,7 @@ describe('MCP over stdio', () => {
   it('lists the tools, runs commands, reports numbers, reads the history, renders and exports', async () => {
     const m = await connect();
     const tools = (await client!.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'history', 'import', 'measure', 'midi', 'normalize', 'project', 'render', 'request', 'run', 'sample', 'view', 'work']);
+    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'history', 'import', 'measure', 'midi', 'normalize', 'project', 'render', 'request', 'run', 'sample', 'scale', 'style', 'view', 'work']);
     expect((await m.call('project')).text).toMatch(/sounds: none yet/);
     const r = await m.call('run', { commands: 'sound new beep\nsound set beep frequency=880 volume=0.4' });
     expect(r.isError).toBe(false);
@@ -229,6 +229,8 @@ describe('MCP over stdio', () => {
     expect(exp.text).toContain('beep.wav');
     expect(decodeWav(new Uint8Array(readFileSync(join(dir, 'exports', 'beep.wav')))).frames).toBe(22050);
     expect((await m.call('project')).text).toContain('watch: http://127.0.0.1:');
+    expect((await m.call('scale', { key: 'D:major' })).text).toMatch(/^D:major: D E F# G A B C#/);
+    expect((await m.call('style')).text).toMatch(/no style guide \(music-style.md/);
   });
 
   it('files, claims and finishes a request, and await_requests returns what people did', async () => {
