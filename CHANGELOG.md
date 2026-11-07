@@ -6,6 +6,23 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixes from the first real use of the music tools
+- **`render-match` no longer forces musical compromises.** A note that touches the one before it has no rise in level to find; its onset is now found
+  in the change of pitch (and a note of the same pitch as the one before has none to find). `instrument set <id> legato=yes` declares a legato voice
+  (checking only: no sample changes). A decaying pluck whose pitch tracker locks onto a sub-harmonic is looked at again in the start of the note, where
+  the written pitch must be the fundamental, so a plucked line passes without a helper layer; an octave or a semitone off still fails.
+- `export --loop --loops <n>` repeats the loop region (it was ignored); stems take `--loops` too. Combinations that mean nothing are refused with what to do
+  instead, for songs and for sounds.
+- `export --stems --stems-through-master` runs the master chain's filters over each stem; the compressor and limiter cannot be split, and the export says so.
+- `normalize` fits a layered song to every mix a game can play (the song gain and the gains above the base), and is a line of a `run` batch.
+- Faster measuring: each channel is analysed once and the numbers are kept in `.cache/analysis` between processes; the mix is mixed only when something needs it;
+  loudness is summed by steps. A 73 s seven-channel song: `check` 13 s before, about 1 s when nothing changed.
+- `masking` lists its stretches (time range, the two channels, the band, how far apart), longest first.
+- Notes keep their spelling (`Eb4` stays `Eb4` in the normal form and the messages); the helpers spell by the key (flats in a flat key); `scale` too.
+- Song send buses: `song send <song> reverb|delay …`, and `song channel set … reverb=<0..1> delay=<0..1>`, one shared space for the piece.
+- `chords`, `bass` and `arp` take `gate=<0..1>` and `legato=yes`.
+- `view compare` takes a WAV or OGG file outside the project for either side (a reference), or a song's full mix.
+
 ### Music
 - **Instruments** (`instruments/<id>.inst`): any voice (classic, osc, fm, ks, sample, layered, with effects) played at a pitch, with a note envelope,
   an optional pitch envelope, velocity sensitivity and a declared range. Eleven built-ins to play by name: `square_lead`, `pulse_lead`,

@@ -170,7 +170,10 @@ pass you just made.
    built-in instruments first (square_lead, pulse_lead, triangle_bass, saw_pad, fm_bell, fm_bass, pluck, kick, snare, hat,
    hat_open); `instrument new <id> from=<built-in>` then `instrument set` to change one. An inharmonic voice (a bell) is
    heard an octave off by a pitch tracker: `instrument set <id> pitch-check=class` has `render-match` check its pitch class
-   only (`fm_bell` has it), `pitch-check=onset` its timing only. A fanfare or jingle is a stinger:
+   only (`fm_bell` has it), `pitch-check=onset` its timing only. A legato voice (a recorder, a bowed string, a held drone) is
+   declared with `instrument set <id> legato=yes`: `render-match` then finds the onset of a note that touches the one before it
+   in the change of pitch, so a legato line need not be written detached to pass; plucked strings need no helper sine layer.
+   A fanfare or jingle is a stinger:
    `song new win kind=stinger template=victory|game-over|level-up|item-get` writes a whole one in the project's key to edit.
 2. **Harmony.** `chords <song> <pattern> pad "I vi ii65 V7" bars=1 rhythm=beats` writes the chords with smooth voice leading
    into the `pad` row (making the pattern when it is new: as long as the progression). Inversions (`I6`, `V65`), sevenths,
@@ -179,7 +182,9 @@ pass you just made.
    One chord a bar is a good start; a progression shorter than the pattern repeats.
 3. **Bass and motion.** `bass <song> <pattern> bass from=pad style=root-fifth|walking|octave|root` follows the chords you wrote;
    `arp <song> <pattern> arp from=pad pattern=updown rate=1/16` adds an arpeggio. Both stay in the instrument's range. Under C2 the
-   `render-match` pitch check cannot hear the note.
+   `render-match` pitch check cannot hear the note. `chords`, `bass` and `arp` take `gate=<0..1>` (each note's length as a fraction
+   of the time to the next, kept to whole steps, at least one) and `legato=yes` (hold each note right up to the next): for a slow,
+   sustained style write `legato=yes`, for plucked notes `gate=0.5`. The notes are spelled by the key: flats in a flat key.
 4. **Melody.** Put the tune in a motif: `motif set <song> theme "D5 - F#5 A5 B5 - A5 -"` (or the bible's), then
    `motif write <song> <pattern> lead theme at=0`, and develop it: `motif transpose ... by=2 mode=diatonic as=answer`,
    `invert`, `retrograde`, `augment`, `diminish`, and `motif sequence <song> theme <pattern> lead "I IV V I"` (the motif on each
@@ -195,10 +200,14 @@ pass you just made.
    music, `layer-plan <song> base=pad,bass tension=arp combat=drums,lead` names the layers in the order they stack; the `layers`
    check then plays the base with every mix of the others (as a game sums the stems, with no limiter) and holds each to the
    loudness class, the true-peak limit and a clean seam, and each layer alone to the key. `loop-music` checks the seam.
-7. **Mix.** `normalize <project> <song>` writes `song set <id> gain=...` to the class target; with a layer plan, lower the
-   channel gains of the loudest layers until every mix sits inside the class (the check prints each mix's LUFS). Then
-   `view <song> mix`: channels sharing the main band at the same time are amber, and `masking` warns (advisory). Fix it by
-   moving a part to another octave, thinning its notes, or panning it, not by turning it down.
+7. **Mix.** `normalize <project> <song>` writes `song set <id> gain=...` to the class target; with a layer plan it fits every mix
+   a game can play into the class window in one command (the song gain, and the gains of the channels above the base), and tells
+   you what still does not fit. It is also a line of a `run` script. Give the piece one space: `song send <song> reverb size=0.6`,
+   then `song channel set <song> <channel> reverb=0.3` for each channel that should sit in it (the same for `delay`); the dry
+   channels are unchanged. Then `view <song> mix`: channels sharing the main band at the same time are amber, and `masking`
+   (advisory) lists the stretches with their time range, the two channels and the band. Fix it by moving a part to another
+   octave, thinning its notes, or panning it, not by turning it down. To hold the work against a reference,
+   `view <project> <song> compare ~/refs/target.wav` (a WAV or OGG outside the project; either side may be a file).
 
 Every helper goes on the tape with every option resolved and the rows it wrote (`run` and `history` print them), so the
 song replays to the same notes and you can see and edit what it did. `chords`, `bass`, `arp` and
@@ -208,8 +217,9 @@ before hand edits to that row, not after.
 What the checks hold the song to: `clip`, `loudness` (class `music` -16 ±2 LUFS, `stinger` -14 ±2), `dc` (a pulse wave off 50 %
 duty needs a high-pass), `key`, `range`, `render-match` (every note's onset within 20 ms and its pitch right), `loop-music`,
 `masking` (advisory), `voice-leading` (advisory), `style`, `layers`. `work done` on a request about a song needs all but the two
-advisory ones to pass. `export <song> --loop` is the seamless loop, `--stems` one aligned file per game layer (before the master
-chain: they sum to the mix), `--format ogg|midi`; `midi import` brings a MIDI file in as a song. People mute and solo channels on
+advisory ones to pass. `export <song> --loop` is the seamless loop (`--loops <n>` repeats it), `--stems` one aligned file per game layer (before the master
+chain: they sum to the mix; `--stems-through-master` runs the chain's filters over each stem, but not its compressor or limiter, so
+the stems then sum louder than the mix), `--format ogg|midi`; combinations that mean nothing are refused; `midi import` brings a MIDI file in as a song. People mute and solo channels on
 the song card for listening; that is not stored, and a request from a person on a song is a `song mark <id> rejected` with their
 note. Change a pattern with `pattern set <song>.<name> "<text>"` (or the block form in a script), or one note at a time with
 `pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> …` (`pattern note move tune.verse lead 4 step=6 note=G5`).

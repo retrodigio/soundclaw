@@ -582,7 +582,7 @@ An instrument is any voice of the layered sound (classic, osc, fm, ks, sample, s
 ```
 instrument new <id> [from=<instrument or built-in>] [kind=osc|fm|ks|classic|sample] [seed=<n>]
 instrument from-sound <id> <sound> [root=<note>]       the sound's layers; root: the note it sounds at (found from an osc, fm or ks layer's freq when left out, else A4)
-instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none pitch-check=full|class|onset gain=<g> seed=<n>
+instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none pitch-check=full|class|onset legato=yes|no gain=<g> seed=<n>
                   (also attack= decay= sustain= release=)
 instrument layer|fx|env <the sound commands, with the instrument's id>      instrument layer add bell osc wave=sine freq=880
 instrument copy|rename <id> <new>       instrument remove <id>     (refused while a channel plays it)
@@ -600,6 +600,7 @@ instrument copy|rename <id> <new>       instrument remove <id>     (refused whil
 | `range` | two notes | the notes the instrument is meant to play: the `range` check |
 | `pitchenv` | semitones over time | a pitch envelope on every note (a kick's drop: `0:30 0.07:0@exp`) |
 | `pitch-check` | `full`, `class`, `onset` | how `render-match` hears the instrument's pitch: the note itself (default), its pitch class with the octave ignored (a bell, whose inharmonic partials make a pitch tracker hear an octave off; `fm_bell` uses it), or timing only |
+| `legato` | yes / no | a legato voice (a recorder, a bowed string, a held drone): `render-match` finds the onset of a note that touches the one before it in the change of pitch, not in a rise of level, and a note of the same pitch as the one before has no onset to find. Checking only: it changes no sample |
 | `gain`, `seed` | | the instrument's level and noise seed |
 
 Pitch effects (a pitch envelope, `~slide`, `~vib`, `~arp`) move osc, fm and sample layers continuously. A pluck (ks) and a classic layer are tuned at the note's start and keep their pitch. A pulse wave off 50 % duty has a DC offset: give it a high-pass filter (`filter=hp cutoff=35`), as `pulse_lead` has.
@@ -637,7 +638,7 @@ In a script a pattern is a block: the header `pattern <song>.<name> steps=<n> tp
 
 - **Header.** `steps` is the length (1 to 256), `tpb` the steps per beat (the grid's resolution: 4 is sixteenth notes, 2 eighth notes, 3 or 12 triplets), `bar` the steps in a bar (written when rows use `|`). A step lasts 60 / (tempo x tpb) seconds.
 - **Rows.** `<channel>: <step> <step> ...`, exactly `steps` steps. `.` is a rest, `-` holds the note before it one more step (across a `|` too), `|` only splits bars (the groups must all be `bar` steps). A note lasts until the next event or rest, or the end of the pattern; its release rings on after.
-- **Notes.** `C5`, `C#5`, `Db5`, `C-1` (C4 is middle C, 60). `v1`..`v127` is the velocity (default 100, left out of the normal form), `!` marks a note outside the song's key on purpose (`G#5!`), and effects follow: `~slide` glides in from the note before it (over 80 ms, when that note ended at this step), `~vib` or `~vib(<Hz>,<semitones>)` (default 5 Hz, 0.4 semitones, starting after 80 ms), `~arp(0,4,7)` steps through 2 to 8 semitone offsets every 20 ms. A chord joins notes with `+`: `C4+E4+G4`. `@<ms>` after the velocity (and `!`) plays the note that many milliseconds off the grid, -50 to 50 (`C5v90@-6`, `E5@4`; a positive nudge has no sign, since `+` joins chord notes); `humanise` writes these.
+- **Notes.** `C5`, `C#5`, `Db5`, `C-1` (C4 is middle C, 60). A flat stays a flat and a sharp a sharp in the normal form, the messages and the views (`Eb4` is not turned into `D#4`); the helpers spell the notes they write by the song's key: flats in a flat key (F, Bb, Eb, Ab, Db major and their relatives, D, G, C, F minor ...), sharps elsewhere. `v1`..`v127` is the velocity (default 100, left out of the normal form), `!` marks a note outside the song's key on purpose (`G#5!`), and effects follow: `~slide` glides in from the note before it (over 80 ms, when that note ended at this step), `~vib` or `~vib(<Hz>,<semitones>)` (default 5 Hz, 0.4 semitones, starting after 80 ms), `~arp(0,4,7)` steps through 2 to 8 semitone offsets every 20 ms. A chord joins notes with `+`: `C4+E4+G4`. `@<ms>` after the velocity (and `!`) plays the note that many milliseconds off the grid, -50 to 50 (`C5v90@-6`, `E5@4`; a positive nudge has no sign, since `+` joins chord notes); `humanise` writes these.
 - **Drums.** A lower-case word is a drum hit (`k`, `s`, `hat`, `oh`), with its own velocity (`sv60`) and nudge (`sv60@-3`). A hit is one step. Which instrument plays a hit comes from the channel's kit.
 - **Note lists.** `lead= 0:C5*2 4:E5v90 6:G5` (step, note, `*` length in steps) is another way to write a row; it prints as the grid.
 - **Normal form.** The grid, aligned in columns, flats written as sharps, comments dropped; format(parse(x)) is stable. Problems are reported with the line and column: `demo.sclaw:4:14: error: 'Q5' is not a note (like C5, C#5, Db3, C5v80, E5~slide, G4!)`.
@@ -672,11 +673,12 @@ pattern note add explore.verse drums 3 oh
 song new <id> [tempo=120] [swing=0] [time=4/4] [key=A:minor] [class=music|stinger] [tags=a,b] [kind=song|stinger]
 song new <id> from-bible=<entry> [<any of the above>]      song new <id> kind=stinger template=victory|game-over|level-up|item-get [key=] [tempo=]
 song set <id> tempo= swing= time= key=<tonic:mode>|none class=<name>|none loudness=<LUFS>|auto gain=<g> tags=a,b|none kind=song|stinger
-song channel add|set <song> <name> inst=<instrument> | kit=default|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>] [harmony=yes|no]
+song channel add|set <song> <name> inst=<instrument> | kit=default|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>] [harmony=yes|no] [reverb=<0..1>] [delay=<0..1>]
 song channel remove <song> <name>
 song section add|set <song> <name> <pattern>... [x<n>]       song section remove <song> <name>       song order <song> <section>...
 song intro <song> <section>|none      song ending <song> <section>|none      song loop <song> <from>[..<to>]|auto|off
 song fx add|set|remove|move <song> <effect> ...      the master chain (default: a limiter at -1 dB; compress and limit are for this)
+song send <song> reverb|delay [<param>=<value> ...]|off      the song's send reverb and send delay (see "Send buses")
 song copy|rename <id> <new>    song remove <id>    song mark <id> approved|rejected|draft
 ```
 
@@ -688,7 +690,13 @@ song copy|rename <id> <new>    song remove <id>    song mark <id> approved|rejec
 
 **Loops.** The loop region is rendered folded onto itself: every note is rendered with its release and effect tail, and what runs past the end is added to the start, which is what a player hears when the region repeats. There is no click and no dip at the seam. The master chain runs over the region twice and the second pass is kept. A loop export is exactly the region's length. **Stems** are the channels of each game layer summed (all the same length, the loop's when the song loops); they are before the master chain, so they sum to the mix whenever the chain does not turn the mix down (the numbers say how far it does).
 
-**Loudness.** A song is held to a class: `music` (-16 LUFS, ±2 LU, the default) or `stinger` (-14 LUFS, ±2), or its own `loudness=`. `normalize <project> <song> [target=<LUFS>]` writes `song set <id> gain=...`; if the master limiter stops it short it says how far.
+**Export.** `export <project> <song>` writes the whole song (intro, body once, ending); `--loops <n>` repeats the loop region in it. `--loop` writes the loop region alone, seamless; with `--loops <n>` the region n times over, end to end. `--stems` writes one aligned file per game layer (the stems of the loop when the song loops; `--loops` repeats them too). `--format midi` writes the notes (`--pattern` for one pattern). Combinations that mean nothing are refused with what to do instead: `--loops` where the song has no loop region, `--pattern` with audio, `--quality` with wav (it is for ogg), `--loop`, `--stems`, `--loops` or `--quality` with midi, `--stems-through-master` without `--stems`, song flags (`--loop --stems --loops --pattern`) on a sound, `--all`, `--pack` or `--set` on a song, songs and sounds in one command, and both `--to` and `--out`.
+
+**Stems and the master chain.** Stems are before the master chain, so they sum to the mix when the chain does not turn the mix down. With **`--stems-through-master`** the chain's linear part, its **filters** (a low-pass or high-pass, a notch: the tone shaping), is run over each stem, so that shaping reaches the stems a game plays. What cannot be split among stems is not applied, and the export says so: a **compressor** or **limiter** follows the level of the whole mix, and `delay`, `reverb`, `chorus`, `distort` and `bitcrush` are not filters. The stems then sum to the mix as the filters leave it, before those effects: louder than the exported mix, and not limited. With no filter in the chain they are the plain stems. The manifest (`<song>-manifest.json`) has `stems: { throughMaster, applied, notApplied }`.
+
+**Send buses.** A song has one **send reverb** and one **send delay**, so the whole piece sits in one space: `song send <song> reverb size=0.6 damp=0.4` sets the reverb up (`size`, `damp`), `song send <song> delay time=0.375 feedback=0.35` the delay (`time`, `feedback`), `song send <song> reverb off` takes it away (and clears the channels' sends). A channel feeds a bus by an amount, `song channel set <song> <channel> reverb=0.3 delay=0.1` (0 to 1, after the channel's gain and pan). The bus returns only the effect (its mix is always 1; `mix=` is refused): the dry channel is unchanged, and the effect of every channel that feeds it is added to the mix before the song gain and the master chain. A full render leaves room after the last note for the bus to ring out (up to 4 s); a loop wraps the tail to its start as the notes' tails do. The channel parts, and so every analysis of a channel alone (`render-match`, `masking`), are the dry channels. Both buses are linear, so each game layer's stem carries the share of the return its own channels send, and the stems sum to the mix before the master chain.
+
+**Loudness.** A song is held to a class: `music` (-16 LUFS, ±2 LU, the default) or `stinger` (-14 LUFS, ±2), or its own `loudness=`. `normalize <project> <song> [target=<LUFS>]` writes `song set <id> gain=...`; if the master limiter stops it short it says how far. A song with a layer plan (`layer-plan`) is held to every mix a game can play, so `normalize` fits them together: the base alone and the base with each set of the other layers (the mixes the `layers` check measures) all inside the class's window. If the base alone and the fullest mix already fit with room to spare, the song gain centres them and the balance the music has is kept; if they are further apart than the window, the base goes to the low end and the channels above it are turned down together (`song channel set <song> <channel> gain=...`, one line each) until the fullest mix is at the high end. It measures with the gains as they will be written and says in a note what still does not fit (a mix outside the window, a true peak over the limit, the whole song with its master chain outside it). A song whose mixes already fit has nothing to write. `normalize` is also a line of a `run` script or batch, on what the batch has made so far; the tape holds the gain commands it measured, not the word `normalize`.
 
 #### MIDI
 
@@ -705,9 +713,9 @@ song copy|rename <id> <new>    song remove <id>    song mark <id> approved|rejec
 | `dc` | DC offset at most 0.5 % | the whole song |
 | `key` | every written note in the song's key, or marked `!` (notes made by `~arp` are not checked) | each note, with its channel, pattern and step |
 | `range` | every note inside the range its instrument declares | each note |
-| `render-match` | each channel rendered alone: the onset of each written note within 20 ms (plus half its instrument's attack) and a single note's pitch within 0.6 semitones (chords and `~arp` notes: timing only; notes under 55 Hz are not pitched); a note 40 dB under its channel's loudest counts as not heard | the note, with `wrong octave` and `wrong pitch` told apart (a wrong `root` is what usually does it) |
+| `render-match` | each channel rendered alone: the onset of each written note within 20 ms (plus half its instrument's attack) and a single note's pitch within 0.6 semitones (chords and `~arp` notes: timing only; notes under 55 Hz are not pitched); a note whose onset has no rise in level (one that touches the note before it, a legato line) is found in the change of pitch; a pitch the tracker gets wrong on a decaying pluck is looked for again in the start of the note (the written pitch must be the fundamental there), so a plucked line needs no helper layer; a note 40 dB under its channel's loudest counts as not heard | the note, with `wrong octave` and `wrong pitch` told apart (a wrong `root` is what usually does it) |
 | `loop-music` | the loop's seam: no jump from the last sample to the first (more than `clickMax` and 4 times the local step), and no more than 2 x `seamStepMaxDb` (6 dB) between the loudness of the last beat and the first (a gap of silence is a gap, not a step) | the seam |
-| `masking` | in each 46 ms frame, the band with the most energy (sub, low, mid, high, air): the two loudest channels in it must not be within 4 dB of each other for more than 25 % of the time | stretches of 0.5 s or more, with the two channels. **Advisory:** it is a warning and never blocks `work done` |
+| `masking` | in each 46 ms frame, the band with the most energy (sub, low, mid, high, air): the two loudest channels in it must not be within 4 dB of each other for more than 25 % of the time | the stretches of 0.5 s or more, longest first, each with its time range, the two channels, the band (and its Hz), and how many dB apart they are; the value line names the longest three. They are listed even when the check passes. **Advisory:** it is a warning and never blocks `work done` |
 
 The composition helpers add three more checks, `voice-leading`, `style` and `layers` ("Composition helpers" below). `work done` on a request about a song needs every check to pass except `masking` and `voice-leading`. The `notes` view draws, per channel, the written notes (blue bars), the detected pitch (yellow), the detected onsets (green ticks) and the notes that differ in red; `mix` draws each channel's energy in five bands over time with the masked stretches in amber. Both are saved under `<project>/.cache/views/` and printed with the numbers.
 
@@ -745,15 +753,17 @@ $ soundclaw run town.sclaw -e 'chords town a pad "I vi IV V" rhythm=beats'
 **Chords.**
 
 ```
-chords <song> <pattern> <channel> "<progression>" [bars=1] [rhythm=hold] [voices=<n>] [range=<lo>-<hi>] [vel=100] [tpb=4]
+chords <song> <pattern> <channel> "<progression>" [bars=1] [rhythm=hold] [voices=<n>] [range=<lo>-<hi>] [vel=100] [gate=<0..1>] [legato=yes] [tpb=4]
 ```
 
 The chords are voiced with smooth voice leading: each chord's notes are chosen inside the range (default G3 to G5, narrowed to the instrument's own range) to move as little as possible from the chord before, with no parallel fifths or octaves where they can be avoided, the root doubled before the fifth and the fifth before the third, and the voicing kept near the middle of the range. `voices` is 2 to 6 notes (default: the most notes any chord has). `rhythm` is `hold` (each chord held for its length), `bar`, `half` or `beats` (struck every bar, half note or beat), `pulse` (every step), `offbeat` (on the off beat, resting on the beat), or a mask repeated across the pattern: `x` strike, `X` accent (velocity + 20), `-` hold, `.` rest (`rhythm="x-.x-.x-"`). Each chord starts with a strike. Mark the channel `harmony=yes` (`song channel set <song> <channel> harmony=yes`) to have the `voice-leading` check read it.
 
+**Gate and legato** (chords, bass and arp). `gate=<0..1>` sets how long each note sounds as a fraction of the time to the next note (or to the end of its span); the rest of the time is a rest. The grid holds a note for whole steps, so the length is rounded to a step and is never less than one: `gate=0.5` on a chord that lasts a bar of 16 steps holds it 8 steps and rests 8; a one-step arpeggio note cannot get shorter (write the pattern at a finer `tpb` for that). Without `gate` the helper's own rhythm decides, as before. `legato=yes` holds every note right up to the next (a gate of 1, rests inside a rhythm included), the way to write a line for a legato instrument (`instrument set <id> legato=yes`); giving it with a `gate` below 1 is an error. The options are written in the helper's normal form, and the notes are on the tape as before.
+
 **Bass.**
 
 ```
-bass <song> <pattern> <channel> ("<progression>" | from=<channel>) [style=root] [rate=<r>] [bars=1] [range=C2-C4] [vel=100] [tpb=4]
+bass <song> <pattern> <channel> ("<progression>" | from=<channel>) [style=root] [rate=<r>] [bars=1] [range=C2-C4] [vel=100] [gate=<0..1>] [legato=yes] [tpb=4]
 ```
 
 `from=` follows the chords another channel of the same pattern plays (each chord or note lasts until the next). `style`: `root` (the root, once per chord; default rate `chord`), `root-fifth` (root and fifth, half notes), `octave` (the root and the octave above, eighth notes), `walking` (quarter notes: the root on the beat, chord tones and scale tones heading for the next chord, and a step into its root; never the same note twice running). An inverted chord puts its bass note (the third of `I6`) in place of the root. `rate` is `chord`, `1`, `1/2`, `1/4`, `1/8`, `1/16` or `1/32` (a whole note to a thirty-second note; it must be a whole number of steps on the grid). The range defaults to C2 to C4, narrowed to the instrument's.
@@ -761,7 +771,7 @@ bass <song> <pattern> <channel> ("<progression>" | from=<channel>) [style=root] 
 **Arpeggios.**
 
 ```
-arp <song> <pattern> <channel> ("<progression>" | from=<channel>) [pattern=up] [rate=1/16] [octaves=1] [bars=1] [range=C4-C6] [vel=100] [tpb=4]
+arp <song> <pattern> <channel> ("<progression>" | from=<channel>) [pattern=up] [rate=1/16] [octaves=1] [bars=1] [range=C4-C6] [vel=100] [gate=<0..1>] [legato=yes] [tpb=4]
 ```
 
 The chord's notes from its lowest root in the range, over 1 to 3 `octaves`, in the order `up`, `down`, `updown` (up and back without repeating the ends) or `random(<seed>)` (seeded: the same seed writes the same notes; never the same note twice running), one note every `rate`.
@@ -979,10 +989,10 @@ soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id
 soundclaw sample import <project> <file.wav | folder> [as=<name>]
 soundclaw sample list <project>
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
-soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems] [--loops <n>] [--pattern <name>] [--to <dir>]
+soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
 soundclaw midi import <project> <file.mid> [--id <song>]
 soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
-soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems] [--loops <n>] [--pattern <name>] [--to <dir>]
+soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
 soundclaw midi import <project> <file.mid> [--id <song>]
 soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
 soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
@@ -1027,7 +1037,7 @@ MCP `view` tool returns the image itself.
 | `layers` | for a layered sound: each sounding layer's waveform and spectrogram, stacked on one time axis (the layer as it enters the sum: filter, envelope, effects, gain and pan applied), its start offset marked, with its label, gain and pan |
 | `loop` | for a looping sound: the last 50 ms joined to the first (the seam marked), the two drawn over each other, the joined spectrogram, and the level across four repeats |
 | `set` | (`view <project> <set> set`) a set's members side by side on one time scale: waveform, spectrogram and a loudness bar each (the target marked), then the pairwise distance matrix in dB with the pairs outside the limits outlined |
-| `compare` | two spectrograms stacked and, under them, their difference (red: the second is louder; blue: the first), plus distance numbers: spectral distance (dB), loudness, duration, brightness, pitch start and end (semitones), envelope correlation |
+| `compare` | two spectrograms stacked and, under them, their difference (red: the second is louder; blue: the first), plus distance numbers: spectral distance (dB), loudness, duration, brightness, pitch start and end (semitones), envelope correlation. Either side may be a sound, a song (its full mix) or the path of a WAV or OGG file outside the project, a reference to hold the work against: `view <project> theme.wav compare ~/refs/target.ogg`. A WAV is read at any rate and bit depth (resampled to 44,100 Hz, mixed to mono); OGG and other formats are decoded by `ffmpeg` when it is installed (else the error says to convert to WAV). The numbers are the same as for two sounds. Audio is limited to 120 s |
 
 The `compare` header says `A = <first>, B = <second>` (the order of the arguments); the differences are B compared with A: positive means B is more.
 
@@ -1241,14 +1251,14 @@ is also served over HTTP at `/mcp` with the token as a bearer.
 | `run` | `commands`: a batch, as above. |
 | `history` | The tape, filtered by `sound`, `by` or `last` (default 50). Includes what people did. |
 | `render` | `sound`: the numbers of its render (samples, peaks, loudness, attack, tail, brightness, pitch, onsets), a description, and the check summary last. |
-| `view` | `sound` (a set's name for `set`), `kind` (`wave`, `spec` default, `pitch`, `layers`, `loop`, `set`, `compare`), `other` for compare: a PNG image and the numbers. |
+| `view` | `sound` (a set's name for `set`), `kind` (`wave`, `spec` default, `pitch`, `layers`, `loop`, `set`, `compare`), `other` for compare (a sound, a song, or the path of a WAV or OGG file; `sound` may be a file too): a PNG image and the numbers. |
 | `describe` | `sound`, `json`: words from the numbers, then the numbers (or one JSON object). |
 | `measure` | `sounds` (ids and set names; default all), `json` (default true): the class, every number and every check of many sounds in one call. |
-| `normalize` | `sounds`, `to` (a class name, or `target=<LUFS>`): write the gain that brings sounds to a loudness, as one undo group. |
+| `normalize` | `sounds`, `to` (a class name, or `target=<LUFS>`): write the gain that brings sounds, a set or a song to a loudness, as one undo group. A song with layers is fitted so every mix of them is inside the class window. |
 | `check` | `sounds` (sound ids and set names; default all), `json`: the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
 | `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
 | `sample` | `action` (`import` with `file` (a WAV or a folder) and `as`, or `list`): WAV samples for sample layers. |
-| `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too. |
+| `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too. A song: `format` `wav`, `ogg` or `midi`, `loop`, `stems`, `stemsThroughMaster`, `loops`, `pattern`. |
 | `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |
 | `request` | File (`sound`, `note`, `tags`, `like`), `reply` (`id`, `text`) or `cancel` a request. |
 | `work` | `next` (default), `progress`, `done`, `blocked`, `list`. |
