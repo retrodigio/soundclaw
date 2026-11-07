@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  arrange, builtinInstruments, joinChannels, masterChainForStems, type Memo, renderStems, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
+  arrange, builtinInstruments, joinChannels, layerCombinations, integratedLoudness, layerOrder, masterChainForStems, type Memo, renderStems, truePeak, type SongLoudnessRule, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
   type MusicCheck, type PartStore, type SongDoc, type SongReport, type SongRender, midiToScript, type Instrument,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -481,20 +481,27 @@ export function formatSongExport(files: readonly SongExportedFile[]): string {
 
 // ---- loudness -----------------------------------------------------------------------------------------------------
 
-/** The `song set <id> gain=…` command that brings the mix to its loudness target, found by rendering with the new gain (the channel renders are cached, so each try is the sum and the master chain). */
-export function normalizeSong(w: Writer, id: string, target?: number): { command: string | null; notes: string[]; target: number; gain: number } {
+/**
+ * The commands that bring a song to its loudness, found by rendering with the new gains (the channel renders are cached, so each
+ * try is a sum and the master chain). A song with one layer gets `song set <id> gain=…` for its mix. A song with a layer plan
+ * is held to every mix a game can play (the base alone, the base with each set of the others: what the `layers` check
+ * measures), so it gets the song gain and the gains of the channels above the base, chosen so those mixes fit the class's
+ * window together; see `normalizeLayers`.
+ */
+export function normalizeSong(w: Writer, id: string, target?: number): { command: string | null; notes: string[]; info?: string; target: number; gain: number } {
   const song = w.song(id);
   const p = playable(w, id);
   if (!p.ok) throw new ProjectError(`${id} is not playable yet: ${p.why}`);
   const rule = w.measureSong(id).report.numbers.rule;
   const goal = target ?? rule.target;
+  if (song.layers.length >= 2 && layerOrder(song).length >= 2) return normalizeLayers(w, id, song, rule, goal, target);
   const notes: string[] = [];
   let gain = song.gain;
   let lufs = Infinity;
   for (let k = 0; k < 6; k++) {
     const trial = { ...song, gain };
     const r = w.bench.render(trial, { mode: 'full' });
-    lufs = analyze([r.mix[0], r.mix[1]]).lufs;
+    lufs = integratedLoudness([r.mix[0], r.mix[1]]);
     if (!Number.isFinite(lufs)) throw new ProjectError(`${id} is silent: nothing to normalize`);
     const diff = goal - lufs;
     if (Math.abs(diff) <= 0.05) break;
@@ -505,6 +512,87 @@ export function normalizeSong(w: Writer, id: string, target?: number): { command
   gain = Math.round(gain * 10000) / 10000;
   if (Math.abs(goal - lufs) > 0.2) notes.push(`${id} stops at ${f1(lufs)} LUFS, ${f1(Math.abs(goal - lufs))} LU ${lufs < goal ? 'short of' : 'over'} ${goal}: ${lufs < goal ? 'the master limiter holds the peak (raise its ceiling with song fx set, or thin the loudest channels)' : 'the gain is at its smallest'}`);
   return { command: gain === song.gain ? null : `song set ${id} gain=${gain}${target !== undefined ? ` loudness=${target}` : ''}`, notes, target: goal, gain };
+}
+
+/**
+ * Layered songs. The mixes a game plays are the stems summed with no limiter: the base alone and the base with each set of the
+ * others, and each must sit in the window goal ± tolerance. Scaling the whole song moves them together; scaling the layers above
+ * the base moves them against the base. So: if the base alone and the fullest mix already fit the window with room to spare, the
+ * song gain centres the pair (the balance the music has is kept); if they are further apart than the window, the base goes to the
+ * low end, and the other layers' channel gains are lowered together until the fullest mix is at the high end. Every mix is then
+ * measured with the gains as they will be written (to four places), and any that is still outside, or a true peak over the limit,
+ * is said in a note.
+ */
+function normalizeLayers(w: Writer, id: string, song: SongDoc, rule: SongLoudnessRule, goal: number, target: number | undefined): { command: string | null; notes: string[]; info?: string; target: number; gain: number } {
+  const order = layerOrder(song);
+  const base = order[0]!;
+  const tol = rule.tolerance;
+  const margin = Math.min(0.2, tol * 0.2);
+  const lo = goal - tol, hi = goal + tol;
+  const mode = arrange(song).loop ? 'loop' : 'full';
+  const r = w.bench.render(song, { mode });
+  const stems = new Map(renderStems(song, r.parts, r.length, mode === 'loop').map((x) => [x.layer, x.channels] as const));
+  const n = r.length;
+  const sumLufs = (combo: readonly string[], k: (layer: string) => number): number => {
+    const out: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
+    for (const l of combo) { const st = stems.get(l)!, g = k(l); for (let c = 0; c < 2; c++) { const a = st[c]!, d = out[c]!; for (let i = 0; i < n; i++) d[i] = d[i]! + a[i]! * g; } }
+    return integratedLoudness(out);
+  };
+  const dB = (x: number): number => 10 ** (x / 20);
+  const full = order.slice(0, 6);
+  const lb = sumLufs([base], () => 1);
+  if (!Number.isFinite(lb)) throw new ProjectError(`${id}: the base layer '${base}' is silent: nothing to normalize`);
+  // already inside the window, every mix a game can play and the whole song: nothing to write
+  const inside = (v: number): boolean => v >= lo - 0.05 && v <= hi + 0.05;
+  if (layerCombinations(order).every((combo) => inside(sumLufs(combo, () => 1))) && inside(integratedLoudness(w.bench.render(song, { mode: 'full' }).mix))) {
+    return { command: target !== undefined && song.loudness !== target ? `song set ${id} loudness=${target}` : null, notes: [], info: `${id} has ${order.length} layers (${order.join(', ')}) and every mix of them is already inside ${f1(lo)} to ${f1(hi)} LUFS`, target: goal, gain: song.gain };
+  }
+  const lf = sumLufs(full, () => 1);
+  // factors on the layers: the base's (shared by all, it is the song gain) and the others' relative to it
+  let kBase: number, kOther = 1;
+  if (lf - lb <= 2 * tol - 2 * margin) kBase = dB(goal - (lb + lf) / 2);
+  else {
+    kBase = dB(lo + margin - lb);
+    // the others come down together until the fullest mix is at the high end: bisection on their factor, in dB
+    let a = -30, b = 0;
+    for (let it = 0; it < 10; it++) {
+      const mid = (a + b) / 2;
+      const v = sumLufs(full, (l) => (l === base ? kBase : kBase * dB(mid)));
+      if (v > hi - margin) b = mid; else a = mid;
+    }
+    kOther = dB((a + b) / 2);
+  }
+  // the gains as they will be written
+  const notes: string[] = [];
+  const round4 = (v: number): number => Math.round(v * 10000) / 10000;
+  let gain = round4(Math.min(4, Math.max(0.01, song.gain * kBase)));
+  if (Math.abs(gain - song.gain * kBase) > 1e-3 * kBase) notes.push(`${id}: the song gain would be ${round4(song.gain * kBase)}, past its limits (0.01 to 4); it is set to ${gain}`);
+  const chans = song.channels.filter((c) => c.layer !== base);
+  const newGain = new Map<string, number>();
+  for (const c of chans) newGain.set(c.name, round4(Math.min(4, Math.max(0, c.gain * kOther))));
+  // measure with exactly those gains
+  const trial: SongDoc = { ...song, gain, channels: song.channels.map((c) => (newGain.has(c.name) ? { ...c, gain: newGain.get(c.name)! } : c)) };
+  const rt = w.bench.render(trial, { mode });
+  const st2 = new Map(renderStems(trial, rt.parts, rt.length, mode === 'loop').map((x) => [x.layer, x.channels] as const));
+  let worst: { name: string; lufs: number } | null = null;
+  for (const combo of layerCombinations(order)) {
+    const out: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
+    for (const l of combo) { const st = st2.get(l)!; for (let c = 0; c < 2; c++) { const a = st[c]!, d = out[c]!; for (let i = 0; i < n; i++) d[i] = d[i]! + a[i]!; } }
+    const lufs = integratedLoudness(out);
+    const tp = Math.max(...out.map((c) => 20 * Math.log10(Math.max(1e-9, truePeak(c)))));
+    if (lufs < lo - 0.05 || lufs > hi + 0.05) { if (!worst || Math.abs(lufs - goal) > Math.abs(worst.lufs - goal)) worst = { name: combo.join('+'), lufs }; }
+    if (tp > w.style.truePeakMax) notes.push(`${combo.join('+')} peaks at ${f1(tp)} dBTP, over ${w.style.truePeakMax} (the stems are summed with no limiter): thin the loudest channel of the layers above the base`);
+  }
+  if (worst) notes.push(`${worst.name} is ${f1(worst.lufs)} LUFS, outside ${goal} ±${tol}: the layers differ more than the window allows between some mixes; move a channel to another layer, or thin the layer`);
+  // and the whole song with its master chain
+  const mix = w.bench.render(trial, { mode: 'full' });
+  const mixLufs = integratedLoudness([mix.mix[0], mix.mix[1]]);
+  if (mixLufs < lo - 0.05 || mixLufs > hi + 0.05) notes.push(`the full song with its master chain is ${f1(mixLufs)} LUFS, outside ${goal} ±${tol} (the master chain's compressor or limiter changes the level of the sum): song fx set can ease it`);
+  const lines: string[] = [];
+  if (gain !== song.gain || target !== undefined) lines.push(`song set ${id} gain=${gain}${target !== undefined ? ` loudness=${target}` : ''}`);
+  for (const c of chans) if (newGain.get(c.name) !== c.gain) lines.push(`song channel set ${id} ${c.name} gain=${newGain.get(c.name)}`);
+  const info = (`${id} has ${order.length} layers (${order.join(', ')}): the base alone is held at ${f1(sumLufs([base], () => kBase))} LUFS and the fullest mix at ${f1(sumLufs(full, (l) => (l === base ? kBase : kBase * kOther)))} LUFS, inside ${f1(lo)} to ${f1(hi)}${kOther < 1 ? `; the layers above the base are ${f1(-20 * Math.log10(kOther))} dB lower` : ''}`);
+  return { command: lines.length ? lines.join('\n') : null, notes, info, target: goal, gain };
 }
 
 // ---- MIDI import --------------------------------------------------------------------------------------------------

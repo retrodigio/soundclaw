@@ -12,6 +12,7 @@ import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
 import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
+import { normalizePlan } from './normalize.ts';
 import { SongBench, type SongMeasured } from './songs.ts';
 import type { ServerMessage, Snapshot } from './protocol.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
@@ -217,6 +218,13 @@ export class Writer {
     for (const n of names) if (!table[n]) throw new Error(`no loudness class '${n}' (classes: ${Object.keys(table).join(', ')}; project.json style.loudnessClasses adds more)`);
   }
 
+  /** Run `f` with `lib` as the library the writer reads, so a measurement sees a batch's changes before they are written. */
+  private measuring<T>(lib: Library, f: () => T): T {
+    const saved = this.library;
+    this.library = lib;
+    try { return f(); } finally { this.library = saved; }
+  }
+
   /** The commands (and notes) that match the loudness of the sounds a set or family command made or changed, by gain. */
   private matchAfter(lib: Library, c: Command): { commands: string[]; notes: string[] } {
     const out = { commands: [] as string[], notes: [] as string[] };
@@ -380,6 +388,18 @@ export class Writer {
       next.guide = this.musicGuide().guide;
       for (const c of parsed.commands) {
         try {
+          if (c.op === 'normalize') {
+            // measured against the batch so far, and put on the tape as the plain commands it found
+            const plan = this.measuring(next, () => normalizePlan(this, c.args));
+            for (const text of plan.commands.split('\n').filter(Boolean)) {
+              applyCommand(next, parse(text).commands[0]!);
+              added.push({ seq: ++seq, by: req.by, at, group, cmd: text });
+            }
+            if (!plan.commands) warnings.push(`line ${c.line}: ${plan.already}: nothing to write`);
+            if (plan.info) warnings.push(plan.info);
+            warnings.push(...plan.notes);
+            continue;
+          }
           const before = c.op === 'set' ? next.get(c.id) : undefined;
           this.checkClassNames(c);
           const loopCmd = c.op === 'loop' && c.loop ? c : undefined;

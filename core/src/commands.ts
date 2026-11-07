@@ -172,6 +172,7 @@ export type Command =
   | { op: 'set-regen'; id: string; seed: number | null; spread: SpreadRule[] | null; text: string }
   | { op: 'family'; id: string; kind: FamilyKind; as: string | null; text: string }
   | { op: 'undo' | 'redo'; group: string | null; by: string | null; text: string }
+  | { op: 'normalize'; args: string[]; text: string }
   | MusicCommand;
 
 function checkId(t: Token | undefined, line: number, what: string): string {
@@ -655,6 +656,11 @@ function parseLine(l: RawLine): Command {
     if (group && by) throw new DiagError(line, rest[0]!.col, `${head!.v}: give group= or by=, not both`);
     return { op: head!.v as 'undo' | 'redo', group, by, text: `${head!.v}${group ? ` group=${group}` : ''}${by ? ` by=${by}` : ''}` };
   }
+  if (head!.v === 'normalize') {
+    // normalize <sound|set|song>... [<class>|target=<LUFS>]: the writer measures and puts the gain commands on the tape in its place
+    if (!rest.length) throw new DiagError(line, head!.col, 'normalize: name sounds, a set or a song (normalize <id>... [<class> | target=<LUFS>])');
+    return { op: 'normalize', args: rest.map((t) => t.v), text: `normalize ${rest.map((t) => t.v).join(' ')}` };
+  }
   if (head!.v === 'mutate') return parseMutate(rest, head!.col, line);
   if (head!.v === 'set') return parseSet(rest, head!, line);
   if (head!.v === 'family') return parseFamily(rest, head!, line);
@@ -663,7 +669,7 @@ function parseLine(l: RawLine): Command {
   if (head!.v === 'env') return parseEnvCommand(rest, head!, line);
   if (head!.v === 'instrument' || head!.v === 'pattern' || head!.v === 'song') return parseMusic(head!, rest, line, (tokens, ln) => parseLine({ line: ln, tokens }));
   if ((COMPOSE_HEADS as readonly string[]).includes(head!.v)) return parseCompose(head!, rest, line);
-  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, instrument, pattern, song, chords, bass, arp, drums, humanise, motif, layer-plan, undo, redo)`);
+  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, normalize, instrument, pattern, song, chords, bass, arp, drums, humanise, motif, layer-plan, undo, redo)`);
 }
 
 /** A command with the line it came from. */
@@ -944,6 +950,8 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
     case 'undo':
     case 'redo':
       throw new Error(`${c.op} is applied by the history, not to a sound`);
+    case 'normalize':
+      throw new Error('normalize is worked out by the writer, which puts the commands it measured on the tape');
     default:
       if (isMusicOp(c.op)) return applyMusic(lib, c as MusicCommand);
       if (isComposeOp(c.op)) return applyCompose(lib, c as unknown as ComposeCommand);

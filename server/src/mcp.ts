@@ -9,12 +9,13 @@ import { builtinInstruments, guideText, openRequests, scaleText } from '@soundcl
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
-import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, normalizeCommands, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
+import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
+import { normalizePlan } from './normalize.ts';
 import { ProjectError } from './project.ts';
 import { formatErrors, plural, tapeEntryLines } from './report.ts';
 import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
 import { historyText, soundSummary } from './summary.ts';
-import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, normalizeSong, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
+import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
 import { readFileSync } from 'node:fs';
 import type { Writer } from './writer.ts';
 
@@ -307,23 +308,17 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
   server.registerTool('normalize', {
     title: 'Normalize loudness',
     description: 'Write the gain (a layered sound\'s gain, a classic sound\'s volume) that brings sounds, or a set\'s members, to a loudness, as one undo group. With no `to`, each sound goes to its own class target; ' +
-      '`to` is a class name (the sounds join that class) or target=<LUFS> (the sounds are held to it). A classic sound cannot go above volume 1: the warning says how far it falls short (sound layer-up lets gain go to 4).',
+      '`to` is a class name (the sounds join that class) or target=<LUFS> (the sounds are held to it). A classic sound cannot go above volume 1: the warning says how far it falls short (sound layer-up lets gain go to 4). A song takes target=<LUFS> or nothing; a song with layers gets the song gain and the gains of the channels above the base chosen so every mix a game can play fits the class window. The same word works as a line of a run batch.',
     inputSchema: z.object({ sounds: z.array(z.string()).min(1).describe('Sound ids and set names'), to: z.string().optional().describe('A class name, or target=<LUFS>') }),
   }, (a) => w.enqueue(() => {
     try {
-      if (a.sounds.length === 1 && w.hasSong(a.sounds[0]!)) {
-        const t = a.to?.replace(/^target=/, '');
-        const sn = normalizeSong(w, a.sounds[0]!, t === undefined ? undefined : Number(t));
-        if (!sn.command) return { content: [text(`${a.sounds[0]} is already at ${sn.target} LUFS: nothing to write${sn.notes.map((x) => `\nwarning: ${x}`).join('')}`)] };
-        const sr = w.run({ commands: sn.command, by: AGENT });
-        if (!sr.ok) return fail(formatErrors('normalize', sr.errors));
-        return { content: [text([...sn.notes.map((x) => `warning: ${x}`), `normalized ${a.sounds[0]} to ${sn.target} LUFS as group ${sr.group}`, ...sr.added.map((e) => `  #${e.seq} ${e.cmd}`), songSummary(w, a.sounds[0]!)].join('\n'))] };
-      }
-      const n = normalizeCommands(w, a.sounds, a.to);
-      if (!n.commands) return { content: [text(`${plural(n.ids.length, 'sound')} already at ${n.target}: nothing to write${n.notes.map((x) => `\nwarning: ${x}`).join('')}`)] };
+      const n = normalizePlan(w, a.to === undefined ? a.sounds : [...a.sounds, a.to]);
+      const warn = n.notes.map((x) => `warning: ${x}`);
+      if (!n.commands) return { content: [text([`${n.already}: nothing to write`, ...(n.info ? [n.info] : []), ...warn].join('\n'))] };
       const r = w.run({ commands: n.commands, by: AGENT });
       if (!r.ok) return fail(formatErrors('normalize', r.errors));
-      return { content: [text([...n.notes.map((x) => `warning: ${x}`), `normalized ${plural(n.ids.length, 'sound')} to ${n.target} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd}`)].join('\n'))] };
+      const song = a.sounds.length === 1 && w.hasSong(a.sounds[0]!) ? [songSummary(w, a.sounds[0]!)] : [];
+      return { content: [text([...(n.info ? [n.info] : []), ...warn, `normalized ${n.what} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd}`), ...song].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }

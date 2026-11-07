@@ -5,9 +5,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, type ViewKind } from '@soundclaw/core';
-import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, normalizeSong, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
+import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
-  EXPORT_FORMATS, sampleLine, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizeCommands, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, sampleLine, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
@@ -480,30 +480,16 @@ function cmdMeasure(io: Io, p: Parsed): number {
   return r.pass && songIds.every((x) => songChecksText(w, x).pass) ? 0 : 1;
 }
 
-/** `normalize`: the gain commands that bring sounds to a loudness, run as one undo group. */
+/** `normalize`: the gain commands that bring sounds, a set or a song to a loudness, run as one undo group. */
 function cmdNormalize(io: Io, p: Parsed): number {
   const [dir, ...rest] = p.pos;
-  if (!dir || !rest.length) throw new UsageError('normalize: soundclaw normalize <project> <id|set>... [<class> | target=<LUFS>]');
+  if (!dir || !rest.length) throw new UsageError('normalize: soundclaw normalize <project> <id|set|song>... [<class> | target=<LUFS>]');
   assertNoServer(dir, io);
   const w = wr(io, dir);
-  if (rest.length >= 1 && w.hasSong(rest[0]!)) {
-    const sid = rest[0]!;
-    const t = rest[1]?.replace(/^target=/, '');
-    const target = t === undefined ? undefined : Number(t.replace(/lufs$/i, ''));
-    if (target !== undefined && !(target >= -60 && target <= 0)) throw new UsageError('normalize: a song takes target=<LUFS> (or nothing: its class target)');
-    const n = normalizeSong(w, sid, target);
-    if (!n.command) { io.out(`${sid} is already at ${n.target} LUFS: nothing to write\n${n.notes.map((x) => `warning: ${x}\n`).join('')}`); return 0; }
-    const r = w.run({ commands: n.command, by: author(p, 'agent:claude', (x) => `agent:${x}`) });
-    if (!r.ok) { io.err(formatErrors('normalize', r.errors) + '\n'); return 1; }
-    io.out(`${n.notes.map((x) => `warning: ${x}\n`).join('')}normalized ${sid} to ${n.target} LUFS as group ${r.group}\n${r.added.map((e) => `  #${e.seq} ${e.cmd}\n`).join('')}${songSummary(w, sid)}\n`);
-    return 0;
-  }
-  const last = rest[rest.length - 1]!;
-  const isName = (x: string): boolean => w.has(x) || w.hasSet(x);
-  const spec = rest.length > 1 && !isName(last) ? rest.pop() : undefined;
-  const n = normalizeCommands(w, rest, spec);
+  const n = normalizePlan(w, rest);
+  const warn = n.notes.map((x) => `warning: ${x}\n`).join('');
   if (!n.commands) {
-    io.out(`${plural(n.ids.length, 'sound')} already at ${n.target}: nothing to write\n${n.notes.map((x) => `warning: ${x}\n`).join('')}`);
+    io.out(`${n.already}: nothing to write\n${n.info ? n.info + '\n' : ''}${warn}`);
     return 0;
   }
   const r = w.run({ commands: n.commands, by: author(p, 'agent:claude', (x) => `agent:${x}`) });
@@ -511,7 +497,8 @@ function cmdNormalize(io: Io, p: Parsed): number {
     io.err(formatErrors('normalize', r.errors) + '\n');
     return 1;
   }
-  io.out(`${n.notes.map((x) => `warning: ${x}\n`).join('')}normalized ${plural(n.ids.length, 'sound')} to ${n.target} as group ${r.group}\n${r.added.map((e) => `  #${e.seq} ${e.cmd}\n`).join('')}`);
+  const song = rest[0] !== undefined && w.hasSong(rest[0]) ? `${songSummary(w, rest[0])}\n` : '';
+  io.out(`${n.info ? n.info + '\n' : ''}${warn}normalized ${n.what} as group ${r.group}\n${r.added.map((e) => `  #${e.seq} ${e.cmd}\n`).join('')}${song}`);
   return 0;
 }
 
