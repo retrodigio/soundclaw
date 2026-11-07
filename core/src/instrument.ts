@@ -48,6 +48,12 @@ export interface Instrument {
    * a pitch tracker hear an octave off) or `onset` (timing only). Left out when full.
    */
   pitchCheck?: PitchCheck;
+  /**
+   * A legato voice (a recorder, a bowed string, a held drone): notes that touch run into each other with no
+   * rise in level, so `render-match` finds a touching note's onset in the pitch change, not the level. Checking
+   * only: it changes no sample. Left out when not set.
+   */
+  legato?: true;
   /** Set on the built-in instruments: the name they are listed under. */
   builtin?: true;
 }
@@ -93,6 +99,7 @@ export function serializeInstrument(i: Instrument): string {
     `note-envelope ${fmtNum(i.attack)} ${fmtNum(i.decay)} ${fmtNum(i.sustain)} ${fmtNum(i.release)}`, `velocity ${fmtNum(i.velocity)}`,
     `range ${i.range ? `${noteLabel(i.range[0])}-${noteLabel(i.range[1])}` : 'none'}`, `pitch-envelope ${i.pitchEnv ? formatEnv(i.pitchEnv) : 'none'}`];
   if (pitchCheckOf(i) !== 'full') lines.push(`pitch-check ${pitchCheckOf(i)}`);
+  if (i.legato) lines.push('legato yes');
   lines.push(...serializeLayered(i.voice));
   return lines.join('\n') + '\n';
 }

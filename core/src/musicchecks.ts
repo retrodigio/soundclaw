@@ -297,6 +297,81 @@ function steepestRise(env: Float64Array, from: number, to: number): { k: number;
   return best;
 }
 
+/** How alike x and x shifted by `tau` are over `w` samples from `a`: 0 for a signal periodic at tau, about 1 for unrelated ones. */
+function lagFit(x: Float32Array, a: number, w: number, tau: number): number {
+  let d = 0, e = 0;
+  for (let j = a; j < a + w; j++) { const u = x[j]!, v = x[j + tau]!; d += (u - v) * (u - v); e += u * u + v * v; }
+  return e > 1e-12 ? d / e : 1;
+}
+
+/** The lag near `center` (within `semis` semitones either way) where the signal repeats best, with its fit. */
+function bestLag(x: Float32Array, a: number, w: number, center: number, semis: number): { tau: number; fit: number } {
+  const lo = Math.max(2, Math.floor(center * 2 ** (-semis / 12))), hi = Math.ceil(center * 2 ** (semis / 12));
+  const fits: number[] = [];
+  let at = lo;
+  for (let t = lo; t <= hi; t++) { const f = lagFit(x, a, w, t); fits.push(f); if (f < fits[at - lo]!) at = t; }
+  const k = at - lo;
+  let tau = at;
+  if (k > 0 && k < fits.length - 1) { const l = fits[k - 1]!, m = fits[k]!, r = fits[k + 1]!, den = l - 2 * m + r; if (den > 0) tau = at + Math.max(-0.5, Math.min(0.5, (l - r) / (2 * den))); }
+  return { tau, fit: fits[k]! };
+}
+
+const FIT_MAX = 0.3;
+/** A half-lag that repeats this well (about as well as the written lag) means the sound is an octave above the note. */
+const OCTAVE_FIT = 0.15;
+
+/**
+ * Is the signal from `a` periodic at the pitch of `midi`, within the pitch tolerance, and at nothing shorter? A cheap
+ * look at the lags near the note's own period (and its half, for an octave above): enough to see where a pitch begins.
+ * Null when the window is too short to say.
+ */
+function repeatsNear(x: Float32Array, a: number, w: number, midi: number): boolean | null {
+  const c = SR / midiFreq(midi);
+  if (w < 2 * c || a < 0 || c < 12 || a + w + c * 1.1 + 2 > x.length) return null;
+  const b = bestLag(x, a, w, c, 1.5);
+  if (Math.abs(12 * Math.log2(b.tau / c)) > MATCH_PITCH_SEMITONES || b.fit > FIT_MAX) return false;
+  const h = bestLag(x, a, w, c / 2, 1.5);
+  return !(Math.abs(12 * Math.log2(h.tau / (c / 2))) <= MATCH_PITCH_SEMITONES && h.fit < OCTAVE_FIT && h.fit <= b.fit + 0.05);
+}
+
+/**
+ * Does the note sound as written? The fundamental period of the signal from `a` is the first lag (after the signal has
+ * stopped resembling itself) where it repeats with a fit of at most FIT_MAX; this is YIN's idea with a plain difference
+ * and a kinder threshold, over the start of the note only, where a pluck is still clear. The sound is the written note
+ * when that period is the written period (the written pitch class at any octave when `octaves`). A pluck whose later
+ * cycles drift, so that a tracker finds only the doubled period, still has its fundamental here. Null when the window is
+ * too short to say.
+ */
+function soundsAs(x: Float32Array, a: number, w: number, midi: number, octaves: boolean): boolean | null {
+  const t0 = SR / midiFreq(midi);
+  const lo = Math.max(6, Math.floor(t0 / 4.2));
+  let hi = Math.ceil(t0 * (octaves ? 4.2 : 1.2));
+  hi = Math.min(hi, x.length - a - w - 2);
+  if (w < 2 * t0 || a < 0 || hi < t0 * 1.1) return null;
+  const fits: number[] = [];
+  for (let t = lo; t <= hi; t++) fits.push(lagFit(x, a, w, t));
+  let apart = false;
+  for (let i = 1; i < fits.length - 1; i++) {
+    if (fits[i]! > 0.5) apart = true;
+    if (!apart || fits[i]! > FIT_MAX || fits[i]! > fits[i - 1]! || fits[i]! >= fits[i + 1]!) continue;
+    const l = fits[i - 1]!, m = fits[i]!, r = fits[i + 1]!, den = l - 2 * m + r;
+    const tau = lo + i + (den > 0 ? Math.max(-0.5, Math.min(0.5, (l - r) / (2 * den))) : 0);
+    const off = 12 * Math.log2(tau / t0);
+    return Math.abs(octaves ? off - 12 * Math.round(off / 12) : off) <= MATCH_PITCH_SEMITONES;
+  }
+  return false;
+}
+
+/** The time the pitch becomes `midi` between `from` and `to` seconds (the first window that is wholly the new note), or null. For touching notes that have no rise in level. */
+function pitchOnset(x: Float32Array, from: number, to: number, midi: number): number | null {
+  const t0 = SR / midiFreq(midi);
+  const w = Math.min(1536, Math.max(256, Math.ceil(3 * t0)));
+  for (let t = Math.max(0, from); t <= to; t += 0.004) {
+    if (repeatsNear(x, Math.round(t * SR), w, midi) === true) return r4(t);
+  }
+  return null;
+}
+
 export interface RenderMatchResult {
   check: MusicCheck;
   notes: NoteMatch[];
@@ -323,6 +398,7 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
     const attack = chan.inst ? (lookup(chan.inst)?.attack ?? 0) : 0;
     // the instrument's declared pitch rule: the note, its pitch class (an inharmonic bell), or timing alone
     const rule = chan.inst ? pitchCheckOf(lookup(chan.inst)) : 'full';
+    const legato = chan.inst ? lookup(chan.inst)?.legato === true : false;
     const tolerance = MATCH_TIMING_MS / 1000 + 0.5 * attack;
     pitchTracks.set(part.name, track);
     const onsets: number[] = [];
@@ -342,15 +418,28 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
       const kFrom = Math.floor(((Math.max(tw - 0.04, (tw + prevT) / 2)) * SR) / HOP), kTo = Math.ceil(((Math.min(tw + 0.12, Math.max(tw + 0.03, nextT - 0.03))) * SR) / HOP);
       const { k, rise } = steepestRise(env, kFrom, kTo);
       const prevEnd = gi > 0 ? Math.max(...groups.get(keys[gi - 1]!)!.map((e) => e.t + e.len)) : -1;
-      const legato = prevEnd >= tw - 0.03;
+      // a note that touches the one before it (no gap, or under 30 ms; under 80 ms for a legato voice) has no rise in level to find
+      const touching = prevEnd >= tw - (legato ? 0.08 : 0.03);
+      const single = grp.length === 1 && first.midi !== null && !first.fx.arp;
+      const prevGrp = gi > 0 ? groups.get(keys[gi - 1]!)! : null;
+      const prevMidi = prevGrp && prevGrp.length === 1 && prevGrp[0]!.midi !== null && !prevGrp[0]!.fx.arp ? prevGrp[0]!.midi : null;
+      const octaves = rule === 'class';
+      const changes = single && prevMidi !== null && rule !== 'onset' && (octaves ? (first.midi! - prevMidi) % 12 !== 0 : first.midi! !== prevMidi);
       let onset: number | null = null;
       let problem: string | null = null;
       // the level around the note, to know whether it is heard at all
       const winLevel = Math.max(...Array.from(env.subarray(Math.max(0, Math.floor((tw * SR) / HOP)), Math.min(env.length, Math.ceil(((tw + Math.max(0.03, first.len)) * SR) / HOP) + 1)), (v) => v), -120);
-      if (rise >= 6) { onset = r4(((k * HOP) + WIN / 2 - 3 * HOP / 2) / SR); onsets.push(onset); }
+      const levelOnset = rise >= 6 ? r4(((k * HOP) + WIN / 2 - 3 * HOP / 2) / SR) : null;
+      // where the note is written to change pitch, the onset may be the pitch change (always for a legato voice's touching notes)
+      const byPitchOnly = legato && touching;
+      let pitchAt: number | null = null;
+      if (changes && (touching || levelOnset === null || Math.abs(levelOnset - tw) > tolerance)) pitchAt = pitchOnset(x, tw - 0.04, tw + 0.12 + 0.5 * attack, first.midi!);
+      const found = (byPitchOnly ? [pitchAt] : [levelOnset, pitchAt]).filter((v): v is number => v !== null);
+      if (found.length) onset = found.reduce((m, v) => (Math.abs(v - tw) < Math.abs(m - tw) ? v : m));
+      if (onset !== null) onsets.push(onset);
       if (winLevel < peakDb - NOT_HEARD_DB) problem = `not heard: the channel is ${f1(peakDb - winLevel)} dB under its loudest at ${r4(tw)} s`;
       else if (onset !== null && Math.abs(onset - tw) > tolerance) problem = `onset ${onset < tw ? 'early' : 'late'} by ${Math.round(Math.abs(onset - tw) * 1000)} ms (written ${r4(tw)} s, heard ${onset} s)`;
-      else if (onset === null && !legato) problem = `no clear onset near ${r4(tw)} s`;
+      else if (onset === null && !touching) problem = `no clear onset near ${r4(tw)} s`;
       // pitch
       let hz: number | null = null;
       const pitchedGroup = grp.filter((e) => e.midi !== null);
@@ -364,11 +453,17 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
           const best = diffs.reduce((m, d) => (Math.abs(d) < Math.abs(m) ? d : m), diffs[0]!);
           const oct = Math.round(best / 12);
           if (Math.abs(best) > MATCH_PITCH_SEMITONES && !(rule === 'class' && Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES)) {
-            const want = noteLabel(pitchedGroup[0]!.midi!);
-            const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)));
-            problem = Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES && oct !== 0
-              ? `wrong octave: written ${want}, heard ${got} (${Math.abs(oct)} octave${Math.abs(oct) === 1 ? '' : 's'} ${oct > 0 ? 'high' : 'low'}); check the instrument's root`
-              : `wrong pitch: written ${want}, heard ${got} (${best > 0 ? '+' : ''}${best.toFixed(1)} semitones)`;
+            // the track can lock onto a sub-harmonic of a decaying pluck: look for the written pitch in the start of the note before calling it wrong
+            const from = tw + 0.5 * attack + 0.012;
+            const until = Math.min(tw + len, Number.isFinite(nextT) ? nextT - 0.01 : Infinity, tw + 0.35);
+            const w = Math.min(2048, Math.floor((until - from) * SR));
+            if (soundsAs(x, Math.round(from * SR), w, pitchedGroup[0]!.midi!, octaves) !== true) {
+              const want = noteLabel(pitchedGroup[0]!.midi!);
+              const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)));
+              problem = Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES && oct !== 0
+                ? `wrong octave: written ${want}, heard ${got} (${Math.abs(oct)} octave${Math.abs(oct) === 1 ? '' : 's'} ${oct > 0 ? 'high' : 'low'}); check the instrument's root`
+                : `wrong pitch: written ${want}, heard ${got} (${best > 0 ? '+' : ''}${best.toFixed(1)} semitones)`;
+            }
           }
         }
       }

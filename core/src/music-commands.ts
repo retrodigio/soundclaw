@@ -3,7 +3,7 @@
 //
 //   instrument new <id> [from=<instrument>] [kind=osc|fm|ks|classic|sample] [seed=<n>]
 //   instrument from-sound <id> <sound> [root=<note>]
-//   instrument set <id> <key>=<value> ...     root pitched attack decay sustain release adsr velocity range pitchenv pitch-check gain seed
+//   instrument set <id> <key>=<value> ...     root pitched attack decay sustain release adsr velocity range pitchenv pitch-check legato gain seed
 //   instrument layer|fx|env <…> <id> …        the layer, fx and env commands, on the instrument's template
 //   instrument copy|rename <id> <to>   instrument remove <id>
 //   pattern set <song>.<name> "<pattern text>"  (a block under `pattern <song>.<name> steps=.. tpb=..` in scripts)
@@ -120,6 +120,7 @@ export function parseInstValue(key: string, v: string): [string, InstValue][] {
       if (!(PITCH_CHECKS as readonly string[]).includes(v)) throw new Error(`pitch-check is full (the note, octave included), class (the pitch class, octave ignored: bells and other inharmonic voices) or onset (timing only), got '${v}'`);
       return [['pitch-check', v]];
     }
+    case 'legato': { const b = yesNo(v); if (b === null) throw new Error(`legato is yes or no (got '${v}')`); return [['legato', b]]; }
     case 'range': {
       if (v === 'none') return [['range', null]];
       const r = parseRange(v);
@@ -132,7 +133,7 @@ export function parseInstValue(key: string, v: string): [string, InstValue][] {
       for (const p of e) if (p.v < -60 || p.v > 60) throw new Error(`pitchenv values are semitones from -60 to 60 (got ${p.v})`);
       return [['pitchenv', e]];
     }
-    default: throw new Error(`no instrument setting '${key}' (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, gain, seed; layers have: instrument layer set <id> <n> <param>=<value>)`);
+    default: throw new Error(`no instrument setting '${key}' (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, legato, gain, seed; layers have: instrument layer set <id> <n> <param>=<value>)`);
   }
 }
 
@@ -183,7 +184,7 @@ function parseInstrument(head: Token, rest: Token[], line: number, parseSub: Par
   if (verb.v === 'set') {
     const id = checkIn(args[0], line, 'instrument set', INSTRUMENT_ID_RE, 'instrument id');
     const ps = pairs(args.slice(1), line, `instrument set ${id}`);
-    if (!ps.length) throw new DiagError(line, verb.col, `instrument set ${id}: give at least one <key>=<value> (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, gain, seed)`);
+    if (!ps.length) throw new DiagError(line, verb.col, `instrument set ${id}: give at least one <key>=<value> (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, legato, gain, seed)`);
     const values: [string, InstValue][] = [];
     for (const p of ps) {
       try { values.push(...parseInstValue(p.key, p.value)); } catch (e) { throw new DiagError(line, p.t.col, `${id}: ${(e as Error).message}`); }
@@ -516,6 +517,7 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         else if (k === 'seed') i.voice.seed = v as number;
         else if (k === 'range') i.range = v as [number, number] | null;
         else if (k === 'pitchenv') i.pitchEnv = v as Env | null;
+        else if (k === 'legato') { if (v) i.legato = true; else delete i.legato; }
         else if (k === 'pitch-check') { if (v === 'full') delete i.pitchCheck; else i.pitchCheck = v as PitchCheck; }
       }
       lib.instruments.set(c.id, i);
