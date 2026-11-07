@@ -14,7 +14,7 @@ import {
 import { download } from './download.ts';
 import { Spectrogram } from './Spectrogram.tsx';
 import { LoudnessClass } from './LoudnessClass.tsx';
-import type { Store } from './store.ts';
+import type { RunResult, Store } from './store.ts';
 import { Waveform } from './Waveform.tsx';
 
 const sched: Scheduler = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
@@ -115,7 +115,7 @@ function targetsOf(sound: LayeredSound, n: number): EnvTarget[] {
 
 const GW = 520, GH = 190, PAD = 34;
 
-function EnvEditor({ store, sound, target, onTarget, targets, span }: { store: Store; sound: LayeredSound; target: string; onTarget(t: string): void; targets: EnvTarget[]; span: number }) {
+function EnvEditor({ run, sound, target, onTarget, targets, span }: { run(cmds: string): Promise<unknown>; sound: LayeredSound; target: string; onTarget(t: string): void; targets: EnvTarget[]; span: number }) {
   const t = targets.find((x) => x.target === target) ?? targets[0];
   const [draft, setDraft] = useState<Env | null>(null);
   const [sel, setSel] = useState(0);
@@ -138,7 +138,7 @@ function EnvEditor({ store, sound, target, onTarget, targets, span }: { store: S
     const v = log ? spec.min * (spec.max / spec.min) ** u : spec.min + (spec.max - spec.min) * u;
     return { time: Math.max(0, ((x - PAD) / (GW - PAD - 8)) * tmax), v };
   };
-  const send = (e: Env | null) => store.run(envCommand(sound.id, t.target, e));
+  const send = (e: Env | null) => run(envCommand(sound.id, t.target, e));
   const path = env ? Array.from({ length: 160 }, (_, k) => { const time = (k / 159) * tmax; return `${k ? 'L' : 'M'}${xOf(time).toFixed(1)},${yOf(envAt(env, time)).toFixed(1)}`; }).join(' ') : '';
   const ticks = log ? [spec.min, spec.min * Math.sqrt(spec.max / spec.min), spec.max] : [spec.min, (spec.min + spec.max) / 2, spec.max];
 
@@ -231,18 +231,31 @@ function LayerStrips({ store, sound }: { store: Store; sound: LayeredSound }) {
   );
 }
 
-export function LayeredEditor({ store, id }: { store: Store; id: string }) {
-  const found = store.sounds.find((s) => s.id === id);
+/**
+ * Another document with a layered voice edited with these controls: an instrument's template. Its
+ * commands are the sound commands the controls write, which `run` turns into the document's own
+ * (`instrument layer set …`); the sound-only panels (length, loop, recipes, export) are left out.
+ */
+export interface VoiceTarget {
+  sound: LayeredSound;
+  run(cmds: string): Promise<RunResult>;
+  play(): void;
+  playing: boolean;
+}
+
+export function LayeredEditor({ store, id, voice }: { store: Store; id: string; voice?: VoiceTarget }) {
+  const found = voice ? voice.sound : store.sounds.find((s) => s.id === id);
   const sound = found?.voice === 'layered' ? found : undefined;
+  const runCmd = (cmds: string): Promise<RunResult> => (voice ? voice.run(cmds) : store.run(cmds));
   const [sel, setSel] = useState(1);
   const [envTarget, setEnvTarget] = useState('1.amp');
   const [draft, setDraft] = useState<Record<string, Value>>({});
-  const latest = useRef({ sound, store, id });
-  latest.current = { sound, store, id };
+  const latest = useRef({ sound, store, id, run: { run: runCmd }, voice });
+  latest.current = { sound, store, id, run: { run: runCmd }, voice };
   const release = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const co = useMemo(() => new KeyedCoalescer<Value>((edits) => {
-    const { sound: cur, store: st, id: sid } = latest.current;
+    const { sound: cur, run: st, id: sid } = latest.current;
     const clear = () => setDraft((d) => {
       const next = { ...d };
       for (const [k, v] of edits) if (next[k] === v) delete next[k];
@@ -261,8 +274,8 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
     const was = prevKey.current;
     prevKey.current = key;
     if (!was || !key || was === key) return;
-    if (sound && store.playOnChange) void store.playDoc(id, sound, id, undefined, true);
-  }, [key, sound, store, id]);
+    if (sound && store.playOnChange) { if (voice) voice.play(); else void store.playDoc(id, sound, id, undefined, true); }
+  }, [key, sound, store, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -270,7 +283,8 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.tagName === 'BUTTON' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range' && (t as HTMLInputElement).type !== 'checkbox'))) return;
       e.preventDefault();
-      void latest.current.store.play(latest.current.id);
+      if (latest.current.voice) latest.current.voice.play();
+      else void latest.current.store.play(latest.current.id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -281,7 +295,7 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
 
   if (!sound) return <section className="editor"><a href="#/" className="back">← all sounds</a><p className="empty" data-testid="editor-missing">No sound “{id}”.</p></section>;
 
-  const now = (cmd: string) => { co.flush(); return store.run(cmd); };
+  const now = (cmd: string) => { co.flush(); return runCmd(cmd); };
   const move = (k: string, v: Value) => { setDraft((d) => ({ ...d, [k]: v })); co.push(k, v); };
   const doRelease = () => {
     if (release.current) clearTimeout(release.current);
@@ -291,7 +305,7 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
     if (release.current) { clearTimeout(release.current); release.current = null; }
     co.cancel();
     setDraft((d) => { const n = { ...d }; delete n[k]; return n; });
-    void store.run(commandsFor(id, sound, new Map([[k, def]])).join('\n'));
+    void runCmd(commandsFor(id, sound, new Map([[k, def]])).join('\n'));
   };
   const val = (k: string, fallback: Value | undefined): Value | undefined => draft[k] ?? fallback;
   const releaseFor = (k: string) => () => { if (co.value(k) !== undefined) doRelease(); };
@@ -300,7 +314,7 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
   const targets = targetsOf(sound, sel);
   const effTarget = targets.some((t) => t.target === envTarget) ? envTarget : (targets[0]?.target ?? '1.amp');
   const measured = store.measure(sound);
-  const playing = store.playing === id;
+  const playing = voice ? voice.playing : store.playing === id;
   const stereo = isStereo(sound);
   const samples = store.samples.map((s) => s.name);
   const length = store.render(sound).length / 44100;
@@ -341,17 +355,17 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
   );
 
   return (
-    <section className="editor layered" data-testid="editor" data-sound={id} data-voice="layered">
+    <section className={`editor layered${voice ? ' voice' : ''}`} data-testid={voice ? 'voice-editor' : 'editor'} data-sound={id} data-voice="layered">
       <header className="editor-head">
-        <a href="#/" className="back" data-testid="back">← all sounds</a>
-        <h2>{sound.id}</h2>
-        <span className={`chip status-${sound.status}`}>{sound.status}</span>
+        {!voice && <a href="#/" className="back" data-testid="back">← all sounds</a>}
+        <h2>{voice ? `voice of ${sound.id}` : sound.id}</h2>
+        {!voice && <span className={`chip status-${sound.status}`}>{sound.status}</span>}
         <span className="dim" data-testid="editor-numbers">
           {measured.analysis.duration.toFixed(2)} s · {Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · centroid {measured.analysis.centroid.mean.toFixed(0)} Hz{stereo ? ' · stereo' : ''}
         </span>
-        <LoudnessClass store={store} sound={sound} />
+        {!voice && <LoudnessClass store={store} sound={sound} />}
         <span className="spacer" />
-        <button className="play" data-testid="editor-play" data-playing={playing} onClick={() => void store.play(id)}>{playing ? '■ Stop' : '▶ Play'} <span className="dim">space</span></button>
+        <button className="play" data-testid="editor-play" data-playing={playing} onClick={() => (voice ? voice.play() : void store.play(id))}>{playing ? '■ Stop' : '▶ Play'} <span className="dim">space</span></button>
         <button data-testid="editor-stop" onClick={() => store.stop()} disabled={!store.playing}>■ Stop</button>
         <label className="toggle"><input type="checkbox" data-testid="play-on-change" checked={store.playOnChange} onChange={(e) => { store.playOnChange = e.target.checked; store.changed(); }} /> play on change</label>
         <button data-testid="editor-undo" disabled={!store.canUndo()} onClick={() => void store.undo()}>Undo</button>
@@ -442,8 +456,9 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
             <div className="dim hash">samples {store.hashOf(sound).slice(0, 12)}</div>
           </section>
 
-          {layer && <EnvEditor store={store} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
+          {layer && <EnvEditor run={runCmd} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
 
+          {!voice && <>
           <section className="panel" data-testid="sound-settings" aria-label="Sound settings">
             <h3>Sound</h3>
             <div className="row">
@@ -472,6 +487,7 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
             <div className="row wrap"><button data-testid="export-wav" onClick={() => download(`${id}.wav`, store.wavOf(sound), 'audio/wav')}>WAV</button></div>
             <p className="dim">A layered sound exports as a WAV only ({stereo ? 'stereo' : 'mono'}, 16-bit, 44,100 Hz, through a limiter at {store.style.truePeakMax} dBTP); a synth.csv row or patch text cannot hold layers.</p>
           </section>
+          </>}
         </div>
       </div>
     </section>

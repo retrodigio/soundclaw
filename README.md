@@ -10,7 +10,8 @@ machine, and can be edited and checked by a person and an agent alike.
 > agent "hears" with are in, and so is the sound editor (sliders, A/B, feedback tags) and the layered
 > voice (layers, FM, plucks, samples, envelopes, effects, stereo), sets and loops, and the music core
 > (instruments, a text pattern grid, songs with game layers, MIDI, and the views and checks for music),
-> with composition helpers that write notes on the tape. The music editor (piano roll) comes next. Expect the commands and documents to change.
+> with composition helpers that write notes on the tape, and the music editor (pattern grid, piano roll, instruments, song order,
+> loop region). Expect the commands and documents to change.
 
 ## What works today
 
@@ -57,6 +58,11 @@ machine, and can be edited and checked by a person and an agent alike.
   groups that replay as you move them, the category buttons and `random`, mutate, A/B, and WAV,
   patch text and CSV downloads. Every edit is a command written as `human:<name>`, the line an
   agent would write (a drag is one command), so `soundclaw changes` shows an agent what you did.
+- **A music editor.** Open a song from its card: the pattern grid (drum hits to paint), a piano roll (click to add, drag to
+  move or lengthen, a velocity lane, slide/vibrato/arp), the channels and their instruments (an instrument's voice with the
+  sound editor's controls), the song order with the loop region on a bar ruler, the helpers with a preview, and playback with
+  a cursor. Each edit is the command an agent would write (`pattern note move tune.verse lead 4 step=6 note=G5`), one gesture
+  one undo step, and `changes` shows the agent what a person did to a song, note by note.
 - **People and agents talk through requests.** "Ask for changes", quick feedback tags (too loud, too harsh, good, …) and "Approve" on a card reach an
   agent that is waiting with `soundclaw await` (it exits with the events, which wakes the agent) or
   the MCP `await_requests`; the agent takes them with `soundclaw work` or the MCP `work` tool.

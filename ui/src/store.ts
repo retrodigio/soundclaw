@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { arrange, builtinInstruments, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, measuredChannels, fullScaleOf, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, measuredChannels, fullScaleOf, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
 
 export interface Measured {
@@ -38,13 +38,15 @@ export function routeSound(hash: string): string | null {
 }
 
 /** Where the address points: the cards, a sound's editor, a set's page, or the audition page (all sounds, or one set's). */
-export type Route = { kind: 'cards' } | { kind: 'sound'; id: string } | { kind: 'set'; id: string } | { kind: 'audition'; set: string | null };
+export type Route = { kind: 'cards' } | { kind: 'sound'; id: string } | { kind: 'set'; id: string } | { kind: 'song'; id: string } | { kind: 'audition'; set: string | null };
 
 export function parseRoute(hash: string): Route {
   let m = /^#\/sound\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
   if (m) return { kind: 'sound', id: m[1]! };
   m = /^#\/set\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
   if (m) return { kind: 'set', id: m[1]! };
+  m = /^#\/song\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
+  if (m) return { kind: 'song', id: m[1]! };
   m = /^#\/audition(?:\/([A-Za-z][A-Za-z0-9_-]*))?$/.exec(hash);
   if (m) return { kind: 'audition', set: m[1] ?? null };
   return { kind: 'cards' };
@@ -155,13 +157,21 @@ export class Store {
         this.requests = m.snapshot.requests;
         this.presence = m.snapshot.presence;
         break;
-      case 'batch':
+      case 'batch': {
         this.sounds = m.sounds;
         this.sets = m.sets ?? this.sets;
+        const playingSong = this.songPlay ? this.songs.find((x) => x.id === this.songPlay!.id) : undefined;
+        const before = playingSong ? this.songKey(playingSong) : null;
         if (m.songs) this.songs = m.songs.map(songFromJson);
         if (m.instruments) this.instruments = m.instruments;
         this.tape = [...this.tape, ...m.entries];
+        // a song playing that the batch changed plays on from where it is, rendered again (only the parts that changed)
+        if (this.songPlay && before !== null && this.playOnChange) {
+          const now = this.songs.find((x) => x.id === this.songPlay!.id);
+          if (now && this.songKey(now) !== before) { this.editStarted = performance.now(); void this.playSong(now.id, this.songPlay.mode, true, this.songPlay.region); }
+        }
         break;
+      }
       case 'requests':
         this.requests = m.requests;
         break;
@@ -313,11 +323,11 @@ export class Store {
   readonly songMutes = new Map<string, { mute: Set<string>; solo: Set<string> }>();
   private songRenders = new Map<string, SongRender>();
   /** The song playing now: where its buffer began on the audio clock, and what part of the song it plays. */
-  songPlay: { id: string; mode: 'full' | 'loop'; started: number; offset: number; window: { start: number; end: number }; length: number } | null = null;
+  songPlay: { id: string; mode: 'full' | 'loop'; started: number; offset: number; window: { start: number; end: number }; length: number; region: { start: number; end: number } | null } | null = null;
   /** The song being rendered for playback (a render takes a second or two here). */
   songBusy: string | null = null;
   /** Songs played, as tests read them: the mode and the hash of the samples handed to the speakers. */
-  readonly songsPlayed: { id: string; mode: 'full' | 'loop'; hash: string; muted: string[] }[] = [];
+  readonly songsPlayed: { id: string; mode: 'full' | 'loop'; hash: string; muted: string[]; from?: number; region?: { start: number; end: number } }[] = [];
 
   lookupInstrument = (id: string): Instrument | undefined => this.instruments.find((i) => i.id === id) ?? builtinInstruments()[id];
 
@@ -329,12 +339,40 @@ export class Store {
     return sha256Text(`${songText(song)}|${insts.join(',')}`);
   }
 
+  /** Channel parts kept between renders (a part's key is its notes, instruments, gain and pan): after an edit only the changed channel renders again. */
+  private parts = new Map<string, Float32Array>();
+  private partBytes = 0;
+  readonly partStore: PartStore = {
+    get: (k) => { const v = this.parts.get(k); if (v) { this.parts.delete(k); this.parts.set(k, v); } return v ?? null; },
+    put: (k, v) => {
+      this.parts.set(k, v);
+      this.partBytes += v.byteLength;
+      // keep about 400 MB of parts, the least recently used going first
+      for (const [old, buf] of this.parts) { if (this.partBytes <= 400e6) break; this.parts.delete(old); this.partBytes -= buf.byteLength; }
+    },
+  };
+  /** Rendered notes kept between renders: a changed channel re-sums the notes it had and renders only its new ones. */
+  private noteCache = new Map<string, Float32Array[]>();
+  /** What the master limiter worked out on the last render of each song and mode. */
+  private limiterMemos = new Map<string, { value: LimiterMemo | null }[]>();
+  /** The last song render: how long it took and how many channels came from the cache (the page shows it; tests read it). */
+  lastRender: { id: string; mode: 'full' | 'loop'; ms: number; cached: number; channels: number } | null = null;
+  /** When the last edit to a playing song arrived (performance.now()), and how long until it was playing again. */
+  editStarted: number | null = null;
+  lastEditToSound: number | null = null;
+
   /** A song rendered here with core: the same samples the CLI renders. */
   songRender(song: SongDoc, mode: 'full' | 'loop'): SongRender {
     const key = `${this.songKey(song)}|${mode}`;
     let r = this.songRenders.get(key);
     if (!r) {
-      r = renderSong(song, { instruments: this.lookupInstrument, bank: this.sampleBank, mode });
+      const mk = `${song.id}|${mode}`;
+      let limiter = this.limiterMemos.get(mk);
+      if (!limiter) { limiter = [{ value: null }, { value: null }]; this.limiterMemos.set(mk, limiter); if (this.limiterMemos.size > 4) this.limiterMemos.delete(this.limiterMemos.keys().next().value!); }
+      if (this.noteCache.size > 6000) this.noteCache.clear();
+      const t0 = performance.now();
+      r = renderSong(song, { instruments: this.lookupInstrument, bank: this.sampleBank, mode, store: this.partStore, notes: this.noteCache, limiter });
+      this.lastRender = { id: song.id, mode, ms: Math.round(performance.now() - t0), cached: r.cached, channels: r.parts.length };
       this.songRenders.set(key, r);
       if (this.songRenders.size > 6) this.songRenders.delete(this.songRenders.keys()[Symbol.iterator]().next().value!);
     }
@@ -360,15 +398,18 @@ export class Store {
     else set.add(channel);
     this.changed();
     const song = this.songs.find((x) => x.id === id);
-    if (song && this.songPlay?.id === id) void this.playSong(id, this.songPlay.mode, true);
+    if (song && this.songPlay?.id === id) void this.playSong(id, this.songPlay.mode, true, this.songPlay.region);
   }
 
-  /** Play a song (the whole of it once, or its loop region repeating) with the channels as muted and soloed on this page. Playing it again stops it. */
-  async playSong(id: string, mode: 'full' | 'loop', restart = false): Promise<void> {
+  /**
+   * Play a song (the whole of it once, or its loop region repeating) with the channels as muted and soloed on this page. Playing it
+   * again stops it. `region` (song seconds, full mode) plays that stretch repeating (a selection); `from` starts there (the cursor).
+   */
+  async playSong(id: string, mode: 'full' | 'loop', restart = false, region: { start: number; end: number } | null = null, from: number | null = null): Promise<void> {
     const song = this.songs.find((x) => x.id === id);
     if (!song) return;
-    if (!restart && this.songPlay?.id === id && this.songPlay.mode === mode) { this.stop(); return; }
-    const where = restart && this.songPlay ? this.songClock(id) : null;
+    if (!restart && this.songPlay?.id === id && this.songPlay.mode === mode && from === null && JSON.stringify(region) === JSON.stringify(this.songPlay.region)) { this.stop(); return; }
+    const where = from ?? (restart && this.songPlay ? this.songClock(id) : null);
     this.stop();
     this.songBusy = id;
     this.changed();
@@ -378,7 +419,9 @@ export class Store {
       const audible = this.songAudible(song);
       const all = audible.length === song.channels.length;
       const mix = all ? r.mix : mixParts(song, r.parts.filter((p) => audible.includes(p.name)), r.length, mode === 'loop').mix;
-      this.songsPlayed.push({ id, mode, hash: samplesHash(joinChannels([mix[0], mix[1]])), muted: song.channels.map((c) => c.name).filter((n) => !audible.includes(n)) });
+      // the hash of what was played is worked out when asked for (hashing a long song takes a while)
+      let hash: string | null = null;
+      this.songsPlayed.push({ id, mode, get hash() { return (hash ??= samplesHash(joinChannels([mix[0], mix[1]]))); }, muted: song.channels.map((c) => c.name).filter((n) => !audible.includes(n)), ...(from !== null ? { from } : {}), ...(region ? { region } : {}) });
       this.ctx ??= new AudioContext({ sampleRate: 44100 });
       if (this.ctx.state === 'suspended') await this.ctx.resume();
       const buf = this.ctx.createBuffer(2, r.length, 44100);
@@ -386,17 +429,20 @@ export class Store {
       buf.copyToChannel(mix[1] as Float32Array<ArrayBuffer>, 1);
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
-      src.loop = mode === 'loop';
+      src.loop = mode === 'loop' || region !== null;
+      if (region && mode === 'full') { src.loopStart = region.start - r.window.start; src.loopEnd = region.end - r.window.start; }
       src.connect(this.ctx.destination);
-      const offset = where !== null ? Math.max(0, Math.min(r.length / 44100 - 0.01, where - r.window.start)) : 0;
+      let offset = where !== null ? Math.max(0, Math.min(r.length / 44100 - 0.01, where - r.window.start)) : 0;
+      if (region && (offset < region.start - r.window.start || offset >= region.end - r.window.start)) offset = region.start - r.window.start;
       src.onended = () => {
         if (this.source === src) { this.source = null; this.songPlay = null; this.playing = null; this.changed(); this.wake(); }
       };
       this.source = src;
       this.playing = `${id}#song-${mode}`;
-      this.songPlay = { id, mode, started: this.ctx.currentTime - offset, offset, window: r.window, length: r.length / 44100 };
+      this.songPlay = { id, mode, started: this.ctx.currentTime - offset, offset, window: r.window, length: r.length / 44100, region: mode === 'full' ? region : null };
       this.songBusy = null;
       src.start(0, offset);
+      if (this.editStarted !== null) { this.lastEditToSound = Math.round(performance.now() - this.editStarted); this.editStarted = null; }
       this.changed();
     } catch (e) {
       this.songBusy = null;
@@ -412,6 +458,11 @@ export class Store {
     const p = this.songPlay;
     if (!p || p.id !== id || !this.ctx) return null;
     const t = this.ctx.currentTime - p.started;
+    if (p.region) {
+      // a selection repeating: the buffer plays from the offset into the region, then round the region
+      const a = p.region.start - p.window.start, len = p.region.end - p.region.start;
+      return p.window.start + (t < a + len ? t : a + ((t - a) % len));
+    }
     const inside = p.mode === 'loop' ? t % p.length : Math.min(t, p.length);
     return p.window.start + inside;
   }
@@ -425,6 +476,33 @@ export class Store {
     let step = 0;
     for (let s = 0; s < inst.pattern.steps; s++) if (stepTime(inst, s, song.swing, inst.pattern.steps) <= t + 1e-9) step = s;
     return { instance: inst.index, pattern: inst.pattern.name, section: inst.section, step };
+  }
+
+  /** Play one note of an instrument (its root, held half a second): what the instrument panel's play button sounds. */
+  async playNote(inst: Instrument, midi = inst.root, gate = 0.5): Promise<void> {
+    const key = `${inst.id}#note`;
+    if (this.playing === key) { this.stop(); return; }
+    this.stop();
+    const chans = renderNote(inst, { midi, gate }, this.sampleBank);
+    this.played.push({ id: inst.id, hash: samplesHash(joinChannels(chans)), samples: chans[0]!.length, key });
+    this.playing = key;
+    this.changed();
+    try {
+      this.ctx ??= new AudioContext({ sampleRate: 44100 });
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      const buf = this.ctx.createBuffer(chans.length, chans[0]!.length, 44100);
+      chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.ctx.destination);
+      src.onended = () => { if (this.source === src) { this.source = null; this.playing = null; this.changed(); this.wake(); } };
+      this.source = src;
+      src.start();
+    } catch (e) {
+      this.playing = null;
+      this.error = `could not play: ${(e as Error).message}`;
+      this.changed();
+    }
   }
 
   /** The key a sound's render is kept by: its document and the bytes of the samples it names (as the server's cache keys it). */

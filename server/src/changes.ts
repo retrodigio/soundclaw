@@ -1,12 +1,13 @@
-// `changes`: what other hands (people, usually) did to the sounds since an agent last looked.
+// `changes`: what other hands (people, usually) did to the sounds, songs and instruments since an agent last looked.
 // Each group on the tape after the agent's cursor is shown with the parameters before and after,
-// the numbers before and after, and a before/after compare view saved as a PNG. The cursor is
+// the numbers before and after, and a before/after compare view saved as a PNG; for a song, the
+// notes that went and came in each pattern and a before/after view of the written notes. The cursor is
 // kept per agent in the project (.cache/changes-seen.json, ignored by git), the way `await`
 // remembers what an agent has seen.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTHOR_RE, CLASSIC_FIELDS, TONE_PARAMS, WAVE_NAMES, activeGroups, compareView, groupsOf, replay, serializeSound, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, CLASSIC_FIELDS, TONE_PARAMS, WAVE_NAMES, activeGroups, compareView, groupsOf, patternChangeView, patternNoteDiff, replay, serializeInstrument, serializeSong, serializeSound, songText, type Library, type SongDoc, type Sound, type TapeEntry } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
 import type { Writer } from './writer.ts';
 
@@ -64,6 +65,17 @@ export interface SoundChange {
   view: string | null;
 }
 
+export interface SongChange {
+  id: string;
+  kind: 'new' | 'removed' | 'edited';
+  /** The song's settings, channels and sections that differ: `− line` then `+ line`. */
+  settings: string[];
+  /** Per pattern, the notes that went and came (`verse.lead: − C5 at 4; + E5 at 6 (2 steps)`). */
+  notes: string[];
+  /** The written notes before and after, one PNG per changed pattern (at most three). */
+  views: string[];
+}
+
 export interface GroupChange {
   group: string;
   first: number;
@@ -74,6 +86,41 @@ export interface GroupChange {
   /** The group is out of effect now (undone later). */
   undone: boolean;
   sounds: SoundChange[];
+  songs: SongChange[];
+  /** Instruments made, removed or changed: `− line` then `+ line` of their files. */
+  instruments: { id: string; kind: 'new' | 'removed' | 'edited'; lines: string[] }[];
+}
+
+function lineDiff(a: string, b: string, max = 14): string[] {
+  const la = a.split('\n').filter(Boolean), lb = b.split('\n').filter(Boolean);
+  const had = new Set(la), has = new Set(lb);
+  const lines = [...la.filter((l) => !has.has(l)).map((l) => `− ${l.trim()}`), ...lb.filter((l) => !had.has(l)).map((l) => `+ ${l.trim()}`)];
+  return [...lines.slice(0, max), ...(lines.length > max ? [`… ${lines.length - max} more lines differ`] : [])];
+}
+
+/** What a group did to a song: its settings, the notes of each pattern, and a before/after view of the patterns whose notes changed. */
+function songChange(w: Writer, id: string, a: SongDoc | undefined, b: SongDoc | undefined, group: string): SongChange {
+  const kind = !a ? 'new' : !b ? 'removed' : 'edited';
+  const sc: SongChange = { id, kind, settings: [], notes: [], views: [] };
+  if (!a || !b) return sc;
+  sc.settings = lineDiff(serializeSong(a), serializeSong(b));
+  const names = [...new Set([...a.patterns.keys(), ...b.patterns.keys()])];
+  for (const n of names) {
+    const pa = a.patterns.get(n), pb = b.patterns.get(n);
+    if (!pa) { sc.notes.push(`${n}: new pattern (${pb!.steps} steps)`); }
+    else if (!pb) { sc.notes.push(`${n}: removed`); continue; }
+    const d = patternNoteDiff(pa, pb);
+    if (!d.length) continue;
+    if (pa) sc.notes.push(...d.map((x) => `${n}.${x}`));
+    if (sc.views.length < 3) {
+      const img = patternChangeView(pa, pb, `${id}.${n} before and after ${group}`);
+      const file = join(w.project.dir, '.cache', 'views', `change-${group}-${id}-${n}.png`);
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, img.png);
+      sc.views.push(file);
+    }
+  }
+  return sc;
 }
 
 export interface ChangesResult {
@@ -181,7 +228,20 @@ export function collectChanges(w: Writer, o: ChangesOptions): ChangesResult {
       }
       sounds.push(sc);
     }
-    return { group: g, first: first.seq, last: last.seq, by: first.by, ...(first.at ? { at: first.at } : {}), commands: es.map((e) => e.cmd), undone: !active.has(g), sounds };
+    const songs: SongChange[] = [];
+    for (const id of [...new Set([...before.songs.keys(), ...after.songs.keys()])].sort()) {
+      const a = before.songs.get(id), b = after.songs.get(id);
+      if (a && b && songText(a) === songText(b)) continue;
+      songs.push(songChange(w, id, a, b, g));
+    }
+    const instruments: GroupChange['instruments'] = [];
+    for (const id of [...new Set([...before.instruments.keys(), ...after.instruments.keys()])].sort()) {
+      const a = before.instruments.get(id), b = after.instruments.get(id);
+      const ta = a ? serializeInstrument(a) : '', tb = b ? serializeInstrument(b) : '';
+      if (ta === tb) continue;
+      instruments.push({ id, kind: !a ? 'new' : !b ? 'removed' : 'edited', lines: a && b ? lineDiff(ta, tb) : [] });
+    }
+    return { group: g, first: first.seq, last: last.seq, by: first.by, ...(first.at ? { at: first.at } : {}), commands: es.map((e) => e.cmd), undone: !active.has(g), sounds, songs, instruments };
   });
   if (!o.peek && !explicit) writeCursor(w, o.agent, cursor);
   return { changes, omitted: wanted.length - shown.length, from, cursor, explicit };
@@ -201,7 +261,17 @@ export function formatChanges(r: ChangesResult, o: ChangesOptions): string {
       if (s.numbers.length) lines.push(`    numbers: ${s.numbers.join('; ')}`);
       if (s.view) lines.push(`    compare view (before above, after below): ${s.view}`);
     }
-    if (!c.sounds.length) lines.push('  (no sound differs after it)');
+    for (const s of c.songs) {
+      lines.push(`  song ${s.id} (${s.kind}):`);
+      for (const p of s.settings) lines.push(`    ${p}`);
+      for (const p of s.notes) lines.push(`    ${p}`);
+      for (const v of s.views) lines.push(`    notes before/after (red went, green came): ${v}`);
+    }
+    for (const i of c.instruments) {
+      lines.push(`  instrument ${i.id} (${i.kind}):`);
+      for (const p of i.lines) lines.push(`    ${p}`);
+    }
+    if (!c.sounds.length && !c.songs.length && !c.instruments.length) lines.push('  (nothing differs after it)');
   }
   lines.push('', 'These are other hands\' edits: carry on from them, and do not undo or overwrite one silently. If you disagree, say so (reply, or ask the person) before changing it back.');
   return lines.join('\n');

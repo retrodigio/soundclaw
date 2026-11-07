@@ -57,7 +57,7 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   const id = nextRequestId(reqs);
   const text = (q.note ?? '').trim();
   const tags = [...new Set(q.tags ?? [])];
-  for (const t of tags) if (!isFeedbackTag(t)) throw new ProjectError(`no tag '${t}' (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good)`);
+  for (const t of tags) if (!isFeedbackTag(t)) throw new ProjectError(`no tag '${t}' (a sound: too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good; a song: too busy, too sparse, too loud, too repetitive, wrong mood, good)`);
   if (!w.hasSong(q.sound)) w.sound(q.sound); // throws when there is no such sound or song
   if (q.other !== undefined) {
     if (!tags.includes(SIMILAR_TAG)) throw new ProjectError(`other names the sound a '${SIMILAR_TAG}' tag points at`);

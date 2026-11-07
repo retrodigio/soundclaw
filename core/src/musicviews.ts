@@ -10,6 +10,8 @@ import { BANDS, type BandMap, type RenderMatchResult } from './musicchecks.ts';
 import type { SongRender } from './songrender.ts';
 import type { SongDoc } from './song.ts';
 import { noteLabel } from './music.ts';
+import type { Pattern } from './pattern.ts';
+import { rollNotes, type RollNote } from './songedit.ts';
 
 const BG: Rgb = [20, 22, 28];
 const GRID: Rgb = [46, 50, 60];
@@ -149,5 +151,63 @@ export function mixView(song: SongDoc, map: BandMap, duration: number, o: MusicV
   }
   ruler(c, LEFT, w, y - 4, from, to);
   c.text('ROWS LOW TO HIGH: SUB LOW MID HIGH AIR   AMBER: TWO CHANNELS SHARE THE BAND', LEFT, H - 10, DIM);
+  return { png: c.png(), width: W, height: H };
+}
+
+/**
+ * The written notes of a pattern before and after an edit (what `changes` shows a person did), one
+ * panel per side and a row per channel that changed: notes that went are red in the before panel,
+ * notes that came are green in the after panel, the rest blue. Steps across; pitch up (drum hits
+ * by word).
+ */
+export function patternChangeView(before: Pattern | undefined, after: Pattern | undefined, title: string): Image {
+  const steps = Math.max(before?.steps ?? 0, after?.steps ?? 0, 1);
+  const names = [...new Set([...(before?.channels ?? []), ...(after?.channels ?? [])].map((c) => c.name))];
+  const notesOf = (p: Pattern | undefined, n: string): RollNote[] => rollNotes(p?.channels.find((c) => c.name === n));
+  const key = (x: RollNote): string => `${x.step}/${x.len}/${x.midi ?? x.drum}/${x.vel}/${JSON.stringify(x.fx)}/${x.accidental}`;
+  const rows = names.map((n) => {
+    const a = notesOf(before, n), b = notesOf(after, n);
+    const ka = new Set(a.map(key)), kb = new Set(b.map(key));
+    const all = [...a, ...b];
+    const pitched = all.some((x) => x.midi !== null);
+    const mids = all.filter((x) => x.midi !== null).map((x) => x.midi!);
+    const drums = [...new Set(all.filter((x) => x.drum !== null).map((x) => x.drum!))];
+    const lo = mids.length ? Math.min(...mids) - 1 : 0, hi = mids.length ? Math.max(...mids) + 1 : 0;
+    return { n, a, b, ka, kb, pitched, lo, hi, drums, changed: a.some((x) => !kb.has(key(x))) || b.some((x) => !ka.has(key(x))) };
+  }).filter((r) => r.changed);
+  const rowH = (r: (typeof rows)[number]): number => (r.pitched ? Math.max(40, Math.min(140, (r.hi - r.lo + 1) * 7)) : Math.max(18, r.drums.length * 12));
+  const panelH = rows.reduce((s, r) => s + rowH(r) + 6, 0) + 14;
+  const H = TOP + 2 * panelH + 26;
+  const c = new Canvas(W, H, BG);
+  const w = W - LEFT - RIGHT;
+  const xOf = (s: number): number => LEFT + (s / steps) * (w - 1);
+  c.text(title.toUpperCase(), LEFT, 7, TEXT);
+  const panel = (side: 'before' | 'after', y0: number): void => {
+    c.text(side.toUpperCase(), LEFT - 6, y0, side === 'before' ? RED : GREEN, { align: 'right' });
+    let y = y0 + 12;
+    for (const r of rows) {
+      const h = rowH(r);
+      c.rect(LEFT, y, w, h, [26, 29, 37]);
+      for (let s = 0; s <= steps; s += 4) c.vline(Math.round(xOf(s)), y, y + h - 1, GRID);
+      c.text(r.n, LEFT - 6, y + 2, TEXT, { align: 'right' });
+      const list = side === 'before' ? r.a : r.b;
+      const other = side === 'before' ? r.kb : r.ka;
+      for (const x of list) {
+        const changed = !other.has(key(x));
+        const col: Rgb = changed ? (side === 'before' ? RED : GREEN) : BLUE;
+        const fill: Rgb = changed ? (side === 'before' ? [120, 40, 40] : [40, 110, 60]) : BLUE_FILL;
+        const yy = x.midi !== null ? y + h - ((x.midi - r.lo + 0.5) / (r.hi - r.lo + 1)) * h : y + 6 + r.drums.indexOf(x.drum!) * 12;
+        const x0 = xOf(x.step), x1 = xOf(x.step + x.len) - 1;
+        c.rect(x0, yy - 3, Math.max(3, x1 - x0), 6, fill);
+        c.hline(Math.round(x0), Math.round(Math.max(x0 + 2, x1)), Math.round(yy - 3), col);
+        if (changed) c.text(x.midi !== null ? noteLabel(x.midi) : x.drum!, x0 + 2, yy - 12, col);
+      }
+      y += h + 6;
+    }
+  };
+  panel('before', TOP);
+  panel('after', TOP + panelH);
+  for (let s = 0; s <= steps; s += 4) c.text(String(s), xOf(s), H - 22, DIM, { align: 'center' });
+  c.text('STEPS  RED WENT  GREEN CAME  BLUE UNCHANGED', LEFT, H - 10, DIM);
   return { png: c.png(), width: W, height: H };
 }

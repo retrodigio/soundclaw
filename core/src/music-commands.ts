@@ -7,6 +7,7 @@
 //   instrument layer|fx|env <…> <id> …        the layer, fx and env commands, on the instrument's template
 //   instrument copy|rename <id> <to>   instrument remove <id>
 //   pattern set <song>.<name> "<pattern text>"  (a block under `pattern <song>.<name> steps=.. tpb=..` in scripts)
+//   pattern note add|remove|move|len|set <song>.<name> <channel> <step> …   one note at a time (songedit.ts)
 //   pattern remove|copy|rename <song>.<name> [<new name>]
 //   song new <id> [tempo=] [swing=] [time=4/4] [key=C:major] [class=] ...    song set <id> <key>=<value> ...
 //   song channel add|set <song> <name> inst=<instrument> | kit=<k:instrument,…>|default  [gain=] [pan=] [layer=]
@@ -29,6 +30,7 @@ import {
   MAX_CHANNELS, DEFAULT_LAYER, LAYER_NAME_RE, SECTION_RE, SONG_ID_RE, SWING, TEMPO, cloneSong, newSong, songProblems, type Channel, type SongDoc,
 } from './song.ts';
 import { applyLayerCommand } from './layer-ops.ts';
+import { applyNoteEdit, noteEditText, parseNoteEdit, type NoteEdit } from './songedit.ts';
 import { applyCommand, parse } from './commands.ts';
 import { bibleCommands, projectKey } from './musicstyle.ts';
 import { STINGER_TEMPLATES, stingerCommands } from './stingers.ts';
@@ -47,6 +49,7 @@ export type MusicCommand =
   | { op: 'inst-remove'; id: string; text: string }
   | { op: 'pattern-set'; song: string; name: string; pattern: Pattern; text: string }
   | { op: 'pattern-remove'; song: string; name: string; text: string }
+  | { op: 'pattern-note'; song: string; name: string; edit: NoteEdit; text: string }
   | { op: 'pattern-copy' | 'pattern-rename'; song: string; name: string; to: string; text: string }
   | { op: 'song-new'; id: string; values: [string, SongValue][]; fromBible: string | null; template: string | null; text: string }
   | { op: 'song-set'; id: string; values: [string, SongValue][]; text: string }
@@ -222,7 +225,7 @@ export const BLOCK_MARK = '\u0001';
 
 function parsePatternCmd(head: Token, rest: Token[], line: number): MusicCommand {
   const [verb, ...args] = rest;
-  if (!verb) throw new DiagError(line, head.col, 'pattern: set, remove, copy or rename (or a block: pattern <song>.<name> steps=16 tpb=4, then indented rows)');
+  if (!verb) throw new DiagError(line, head.col, 'pattern: set, note, remove, copy or rename (or a block: pattern <song>.<name> steps=16 tpb=4, then indented rows)');
   if (verb.v === 'set') {
     const { song, name } = patRef(args[0], line, 'pattern set');
     const body = args[1];
@@ -241,6 +244,10 @@ function parsePatternCmd(head: Token, rest: Token[], line: number): MusicCommand
     const pattern = { ...r.pattern, name };
     return { op: 'pattern-set', song, name, pattern, text: `pattern set ${song}.${name} ${quote(formatPattern(pattern))}` };
   }
+  if (verb.v === 'note') {
+    const { song, name, edit } = parseNoteEdit(args, line, (t) => patRef(t, line, 'pattern note'));
+    return { op: 'pattern-note', song, name, edit, text: noteEditText(song, name, edit) };
+  }
   if (verb.v === 'remove') {
     const { song, name } = patRef(args[0], line, 'pattern remove');
     return { op: 'pattern-remove', song, name, text: `pattern remove ${song}.${name}` };
@@ -250,7 +257,7 @@ function parsePatternCmd(head: Token, rest: Token[], line: number): MusicCommand
     const to = checkIn(args[1], line, `pattern ${verb.v} ${song}.${name}`, PATTERN_NAME_RE, 'new pattern name');
     return { op: verb.v === 'copy' ? 'pattern-copy' : 'pattern-rename', song, name, to, text: `pattern ${verb.v} ${song}.${name} ${to}` };
   }
-  throw new DiagError(line, verb.col, `unknown pattern command '${verb.v}' (set, remove, copy, rename)`);
+  throw new DiagError(line, verb.col, `unknown pattern command '${verb.v}' (set, note, remove, copy, rename)`);
 }
 
 const songValue = (key: string, v: string): [string, SongValue] => {
@@ -562,6 +569,14 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
       const s = songOf(lib, c.song);
       if (!s.patterns.has(c.name) && s.patterns.size >= 64) throw new Error(`a song has at most 64 patterns`);
       s.patterns.set(c.name, c.pattern);
+      lib.songs.set(c.song, s);
+      return undefined;
+    }
+    case 'pattern-note': {
+      const s = songOf(lib, c.song);
+      const p = s.patterns.get(c.name);
+      if (!p) throw new Error(`song ${c.song} has no pattern '${c.name}' (patterns: ${[...s.patterns.keys()].join(', ') || 'none'})`);
+      s.patterns.set(c.name, applyNoteEdit(p, c.edit, s));
       lib.songs.set(c.song, s);
       return undefined;
     }

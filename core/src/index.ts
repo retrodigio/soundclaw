@@ -33,6 +33,7 @@ export * from './instrument.ts';
 export * from './song.ts';
 export * from './songrender.ts';
 export * from './music-commands.ts';
+export * from './songedit.ts';
 export * from './musicchecks.ts';
 export * from './midi.ts';
 export * from './musicviews.ts';

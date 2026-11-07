@@ -38,6 +38,39 @@ describe('changes', () => {
     expect(text).toContain('do not undo or overwrite one silently');
   });
 
+  it('shows what a person changed in a song: the notes that went and came, settings, and a before/after notes PNG', () => {
+    run(`song new tune tempo=120 key=C:major
+song channel add tune lead inst=square_lead
+song channel add tune drums kit=default
+pattern tune.p steps=8 tpb=2
+  lead: C5 - . E5 . . . .
+  drums: k . s . k . s .
+song section add tune A p`);
+    collectChanges(f.w, { agent: claude });
+    run('pattern note move tune.p lead 3 step=5 note=G5\npattern note add tune.p drums 1 h\nsong set tune tempo=126', ana);
+    const r = collectChanges(f.w, { agent: claude, by: 'human' });
+    const c = r.changes[0]!;
+    expect(c.commands).toEqual(['pattern note move tune.p lead 3 step=5 note=G5', 'pattern note add tune.p drums 1 h', 'song set tune tempo=126']);
+    const s = c.songs[0]!;
+    expect(s).toMatchObject({ id: 'tune', kind: 'edited' });
+    expect(s.settings).toEqual(['− tempo 120', '+ tempo 126']);
+    expect(s.notes).toEqual(['p.lead: − E5 at 3; + G5 at 5', 'p.drums: + h at 1']);
+    expect(s.views).toHaveLength(1);
+    expect(readFileSync(s.views[0]!).subarray(1, 4).toString()).toBe('PNG');
+    const text = changesText(f.w, { agent: claude, since: '0', by: 'human' });
+    expect(text).toContain('song tune (edited):');
+    expect(text).toContain('p.lead: − E5 at 3; + G5 at 5');
+    expect(text).toContain('notes before/after');
+  });
+
+  it('takes the song tags as listening feedback on a song', () => {
+    run('song new tune tempo=120\nsong channel add tune lead inst=square_lead\npattern tune.p steps=4 tpb=1\n  lead: C5 . E5 .\nsong section add tune A p');
+    const q = personRequest(f.w, ana, { action: 'request', kind: 'change', sound: 'tune', note: '', tags: ['too busy', 'wrong mood'] });
+    expect(q).toMatchObject({ sound: 'tune', kind: 'change', note: 'too busy, wrong mood', tags: ['too busy', 'wrong mood'] });
+    expect(f.w.song('tune').status).toBe('rejected');
+    expect(() => personRequest(f.w, ana, { action: 'request', kind: 'change', sound: 'tune', note: '', tags: ['too fast'] })).toThrow(/a song: too busy/);
+  });
+
   it('keeps a cursor per agent: reading moves it, peek and since do not, another agent has its own', () => {
     run(SETUP);
     run('sound set beep punch=0.4', ana);

@@ -642,6 +642,30 @@ In a script a pattern is a block: the header `pattern <song>.<name> steps=<n> tp
 - **Note lists.** `lead= 0:C5*2 4:E5v90 6:G5` (step, note, `*` length in steps) is another way to write a row; it prints as the grid.
 - **Normal form.** The grid, aligned in columns, flats written as sharps, comments dropped; format(parse(x)) is stable. Problems are reported with the line and column: `demo.sclaw:4:14: error: 'Q5' is not a note (like C5, C#5, Db3, C5v80, E5~slide, G4!)`.
 
+#### One note at a time
+
+```
+pattern note add <song>.<pattern> <channel> <step> <note|chord|hit> [len=<steps>]
+pattern note remove <song>.<pattern> <channel> <step> [<note|hit>]
+pattern note move <song>.<pattern> <channel> <step> [<note|hit>] [step=<to>] [note=<to>]
+pattern note len <song>.<pattern> <channel> <step> <steps>
+pattern note set <song>.<pattern> <channel> <step> [<note|hit>] [vel=<1..127>] [fx=~slide~vib~arp(0,4,7)|none] [accidental=yes|no]
+```
+
+Small edits by the step a note starts on (steps count from 0); the music editor writes exactly these, and an agent can too. A row holds one sounding thing per step (a note, a chord, a hit) and its holds, so:
+
+- `add` writes the note over what it lands on: a note holding into it is cut where it begins, a note that starts under it goes. A note added where a note or chord already starts joins it as a chord (the chord takes `len=` when given, else keeps its length); the same pitch is replaced. A hit (`k`, `s`, `oh`) is one step and replaces what is at the step. A channel the pattern has no row for gets one.
+- `remove` takes one pitch out of a chord (name it), or the whole note, chord or hit (its holds become rests).
+- `move` keeps the length, velocity and effects; `note=` moves a chord as a whole (its lowest note goes to `note=`), or renames a hit (`note=oh`).
+- `len` sets how many steps a note or chord lasts (what it grows over goes, as with `add`).
+- `set` changes the velocity, effects or `!` mark of a note, or of every note of a chord when no pitch is named (a hit has a velocity only).
+
+```
+pattern note add explore.verse lead 4 E5v90~vib len=2
+pattern note move explore.verse lead 4 step=6 note=G5
+pattern note add explore.verse drums 3 oh
+```
+
 #### Songs
 
 ```
@@ -1064,7 +1088,22 @@ g2 #3 human:ana 2026-11-06T10:00:01Z
   agents, `--by human:ana` one author.
 - The newest 12 changes are detailed; older ones are counted.
 - A group a later undo took out of effect is marked. An `undo` by a person is a change too.
-- Call it before editing a sound a person has touched, and never undo a person's edit silently: say
+- For a **song** a group changed: the settings, channels and sections that differ (`− tempo 120`, `+ tempo 126`),
+  per pattern the notes that went and came (`verse.lead: − E5 at 3; + G5 at 5 (2 steps)`), and a before/after
+  view of the written notes of each changed pattern (`change-<group>-<song>-<pattern>.png`: red went, green came).
+  For an **instrument**: the lines of its file that differ.
+
+```
+g7 #31-#32 human:ana 2026-11-07T09:12:40Z
+  pattern note move tune.verse lead 3 step=5 note=G5
+  pattern note add tune.verse drums 1 h
+  song tune (edited):
+    verse.lead: − E5 at 3; + G5 at 5
+    verse.drums: + h at 1
+    notes before/after (red went, green came): demo.sclaw/.cache/views/change-g7-tune-verse.png
+```
+
+- Call it before editing a sound or song a person has touched, and never undo a person's edit silently: say
   so (a reply, a question) before changing it back.
 
 ### Import and export
@@ -1141,13 +1180,14 @@ write behind its back. Read-only commands (`list`, `history`, `render`, `view`, 
 
 ### The dashboard's pages
 
-`soundclaw serve` prints the watch address; the page has four views, all written to by commands as `human:<name>` (what a person does is on the history):
+`soundclaw serve` prints the watch address; the page has five views, all written to by commands as `human:<name>` (what a person does is on the history):
 
 | Address | Page |
 |---|---|
 | `#/` | the cards (play, waveform, spectrogram, checks, Approve, Ask for changes, Feedback, Edit) and, above them, a tile for each set |
 | `#/sound/<id>` | the editor (classic sliders, or layers, envelopes and effects), with the **Loop** panel: a loop box (`sound loop <id> 4 …` / `off`), the length and the crossfade (each a `sound loop` command), **Play looped** (repeats until stopped) and the numbers of the seam |
 | `#/set/<set>` | a set: its members in a row (each with waveform, spectrogram, loudness, check badge, Play), **Play in sequence** (with a gap, in ms), **Regen with a new seed** (`set regen <set> seed=<n>`, the seed chosen by the page), the spread rules, the distance matrix (pairs outside the limits outlined) and the set-spread verdict |
+| `#/song/<id>` | the music editor: the song order (sections as blocks to drag into a new order, repeats, intro and ending, the loop region as a band on a bar ruler with handles to drag), tempo, swing, key and time, the channels (instrument, gain, pan, mute and solo for listening, game layer) with each instrument's editor (note envelope, velocity, root, range, pitch check, and its voice with the sound editor's controls; a built-in is copied into the project first), the pattern grid (every channel; a drum channel as a row per hit to click or paint), the piano roll of a melodic channel (the key's notes shaded, notes outside it marked; click to add, drag to move, drag the end to lengthen, shift-drag to select, Delete, a velocity lane, slide/vibrato/arp from the menu), the helpers (the rows a helper would write shown before **Apply** runs the same command), and playback: **Play**, **from cursor** (a click on the ruler or a step), **selection** (the notes picked, or the pattern, repeating) and **Loop**, with the cursor lit across the grid, the roll and the ruler. Every edit is the command an agent would write (`pattern note …`, `song …`, `instrument …`), one gesture one history entry; after an edit only the changed channel renders again, and a playing song plays on from where it was |
 | `#/audition`, `#/audition/<set>` | the batch audition page: every sound (or a set's members) as a compact card with Play, the check badge, Approve, Ask and Feedback; **Play all** with a gap; filters by set, status, checks and feedback tag; the keyboard: ← → ↑ ↓ move the selection, **space** plays it, **a** approves it (`sound mark … approved`), **r** opens the note for Ask for changes (shortcuts are off while you type) |
 
 Approvals, asks and feedback from the audition page are the same requests as on the cards: they reach a waiting agent through `await`.

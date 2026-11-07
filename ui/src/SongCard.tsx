@@ -1,9 +1,10 @@
 // One song as a card: its numbers and check badge (measured on the server), play and loop buttons, the
 // patterns in the order they play with the step sounding now lit, and mute/solo for each channel (for
-// listening on this page only: nothing is written). The full editor is the next step.
+// listening on this page only: nothing is written), listening feedback (tags and a few words, as a
+// request the agent gets through await), and the way into the song's editor.
 
 import { useEffect, useRef, useState } from 'react';
-import { arrange, channelNotes, formatCell, type SongDoc, type Pattern } from '@soundclaw/core';
+import { SONG_FEEDBACK_TAGS, arrange, channelNotes, formatCell, type SongDoc, type Pattern } from '@soundclaw/core';
 import type { Store } from './store.ts';
 
 interface Report {
@@ -45,7 +46,36 @@ function PatternGrid({ pattern, active, instance }: { pattern: Pattern; active: 
   );
 }
 
+const slug = (t: string): string => t.replace(/[^a-z]+/g, '-');
+
+/** Listening feedback on a song: quick tags (too busy, too sparse, too loud, too repetitive, wrong mood, good) and a few words. */
+function SongFeedback({ store, song }: { store: Store; song: SongDoc }) {
+  const [tags, setTags] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const [sent, setSent] = useState<string | null>(null);
+  const toggle = (t: string) => setTags((xs) => (xs.includes(t) ? xs.filter((x) => x !== t) : [...xs, t]));
+  const send = async () => {
+    const r = await store.feedback(song.id, tags, note);
+    if (r.ok) { setTags([]); setNote(''); setProblem(null); setSent(r.request?.id ?? 'sent'); } else setProblem(r.error ?? 'refused');
+  };
+  return (
+    <div className="feedback" data-testid={`feedback-${song.id}`}>
+      <div className="tags">
+        {SONG_FEEDBACK_TAGS.map((t) => (
+          <button key={t} className={`tag${tags.includes(t) ? ' on' : ''}${t === 'good' ? ' good' : ''}`} aria-pressed={tags.includes(t)} data-testid={`tag-${song.id}-${slug(t)}`} onClick={() => toggle(t)}>{t}</button>
+        ))}
+      </div>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="A few words, if the tags are not enough (a time helps: 0:12 the bass is muddy)" data-testid={`feedback-text-${song.id}`} />
+      <button disabled={!tags.length && !note.trim()} data-testid={`feedback-send-${song.id}`} onClick={() => void send()}>Send feedback</button>
+      {sent && <span className="dim" data-testid={`feedback-sent-${song.id}`}>sent ({sent})</span>}
+      {problem && <div className="error" data-testid={`feedback-error-${song.id}`}>{problem}</div>}
+    </div>
+  );
+}
+
 export function SongCard({ store, song }: { store: Store; song: SongDoc }) {
+  const [feeding, setFeeding] = useState(false);
   const report = useReport(store, song, store.token);
   const [pos, setPos] = useState<{ instance: number; pattern: string; step: number } | null>(null);
   const raf = useRef(0);
@@ -96,7 +126,10 @@ export function SongCard({ store, song }: { store: Store; song: SongDoc }) {
         <button data-testid={`song-loop-${song.id}`} data-plays={store.songsPlayed.filter((p) => p.id === song.id && p.mode === 'loop').length} data-playing={playing && mode === 'loop'} disabled={busy || !arr?.loop} title={arr?.loop ? 'The loop region, repeating' : 'The song has no loop region'} onClick={() => void store.playSong(song.id, 'loop')}>
           {playing && mode === 'loop' ? '■ Stop loop' : '⟲ Loop'}
         </button>
+        <a className="button" href={`#/song/${song.id}`} data-testid={`song-edit-${song.id}`}>Edit</a>
+        <button data-testid={`song-feedback-${song.id}`} aria-pressed={feeding} onClick={() => setFeeding((f) => !f)}>Feedback</button>
       </div>
+      {feeding && <SongFeedback store={store} song={song} />}
       <div className="channels" data-testid={`song-channels-${song.id}`}>
         {song.channels.map((c, i) => (
           <span key={c.name} className={`channel layer-${c.layer}`} data-testid={`song-channel-${song.id}-${c.name}`} data-audible={store.songAudible(song).includes(c.name)}>

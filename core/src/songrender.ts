@@ -15,7 +15,7 @@ import { drumInstrument, channelNotes, DEFAULT_LAYER, type Arrangement, type Cha
 import { instrumentKey, noteLength, renderNote, velocityGain, type Instrument } from './instrument.ts';
 import { sha256Text } from './sha256.ts';
 import { RENDER_VERSION, SAMPLE_RATE } from './sound.ts';
-import { applyFxChain, panGains, type SampleBank } from './synth.ts';
+import { applyFxChain, panGains, type LimiterMemo, type SampleBank } from './synth.ts';
 
 export interface PartStore {
   get(key: string): Float32Array | null;
@@ -31,6 +31,14 @@ export interface SongRenderOptions {
   loops?: number;
   /** Render only these channels (the others are silent): for looking at one part alone. */
   only?: readonly string[];
+  /**
+   * Rendered notes kept between renders (by instrument, pitch, length and effects), so a channel whose
+   * notes changed is summed again from the notes it already had, rendering only the new ones. The page
+   * keeps one; the samples are the same with or without it.
+   */
+  notes?: Map<string, Float32Array[]>;
+  /** What a limiter at the head of the master chain worked out last render (left, right): kept by the page per song and mode. */
+  limiter?: { value: LimiterMemo | null }[];
 }
 
 export interface ChannelAudio {
@@ -99,7 +107,7 @@ function renderChannelAudio(song: SongDoc, ch: Channel, ev: readonly NoteEv[], N
   const hit = o.store?.get(key);
   if (hit && hit.length === 2 * N) { cache.hit = true; return [hit.subarray(0, N), hit.subarray(N)]; }
 
-  const notes = new Map<string, Float32Array[]>();
+  const notes = o.notes ?? new Map<string, Float32Array[]>();
   const placed: { at: number; buf: Float32Array[]; g: number }[] = [];
   let size = N;
   for (const e of ev) {
@@ -194,22 +202,25 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
     if (k.hit) cached++;
     parts.push({ name: ch.name, layer: ch.layer || DEFAULT_LAYER, channels: audio });
   }
-  const { pre, mix } = mixParts(song, parts, N, wrap);
-  // stems: the channels of each layer, in the order the layers first appear, scaled by the song's gain
-  const layerNames = [...new Set(parts.map((p) => p.layer))];
-  const stems = layerNames.map((layer) => {
+  const { pre, mix } = mixParts(song, parts, N, wrap, o.limiter);
+  // stems: the channels of each layer, in the order the layers first appear, scaled by the song's gain (worked out when first asked for)
+  let stems: SongRender['stems'] | null = null;
+  const makeStems = (): SongRender['stems'] => [...new Set(parts.map((p) => p.layer))].map((layer) => {
     const sum: [Float64Array, Float64Array] = [new Float64Array(N), new Float64Array(N)];
     for (const p of parts) if (p.layer === layer) for (let c = 0; c < 2; c++) { const a = p.channels[c]!, d = sum[c]!; for (let i = 0; i < N; i++) d[i] = d[i]! + a[i]! * song.gain; }
     return { layer, channels: [Float32Array.from(sum[0]), Float32Array.from(sum[1])] as [Float32Array, Float32Array] };
   });
-  return { mode, length: N, window, mix, pre, parts, stems, events, key: sha256Text(keys.join(',') + `|${song.gain}|${song.master.length}`), cached };
+  return {
+    mode, length: N, window, mix, pre, parts, events, key: sha256Text(keys.join(',') + `|${song.gain}|${song.master.length}`), cached,
+    get stems() { return (stems ??= makeStems()); },
+  };
 }
 
 /** Seconds -> samples the way events are placed. */
 export const sampleAt = (t: number): number => Math.round(t * SR);
 
 /** The channels summed with the song's gain, before and after the master chain. In a loop the chain runs over the region twice and the second pass is kept. */
-export function mixParts(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean): { pre: [Float32Array, Float32Array]; mix: [Float32Array, Float32Array] } {
+export function mixParts(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean, limiter?: { value: LimiterMemo | null }[]): { pre: [Float32Array, Float32Array]; mix: [Float32Array, Float32Array] } {
   const preD: [Float64Array, Float64Array] = [new Float64Array(N), new Float64Array(N)];
   for (const p of parts) for (let c = 0; c < 2; c++) { const a = p.channels[c]!, d = preD[c]!; for (let i = 0; i < N; i++) d[i] = d[i]! + a[i]!; }
   if (song.gain !== 1) for (const d of preD) for (let i = 0; i < N; i++) d[i] = d[i]! * song.gain;
@@ -219,11 +230,11 @@ export function mixParts(song: SongDoc, parts: readonly ChannelAudio[], N: numbe
   else if (wrap) {
     const twice: [Float64Array, Float64Array] = [new Float64Array(2 * N), new Float64Array(2 * N)];
     for (let c = 0; c < 2; c++) { twice[c]!.set(preD[c]!); twice[c]!.set(preD[c]!, N); }
-    applyFxChain(twice, song.master);
+    applyFxChain(twice, song.master, limiter);
     mixD = [twice[0]!.subarray(N), twice[1]!.subarray(N)];
   } else {
     mixD = [Float64Array.from(preD[0]), Float64Array.from(preD[1])];
-    applyFxChain(mixD, song.master);
+    applyFxChain(mixD, song.master, limiter);
   }
   return { pre, mix: [Float32Array.from(mixD[0]), Float32Array.from(mixD[1])] };
 }

@@ -72,6 +72,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         instrument layer|fx|env <as the sound commands> ...   (built-ins to play as they are: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open)
         song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song set <id> ...   song channel add|set <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=]
         pattern <song>.<name> steps=16 tpb=4 [bar=8], then indented rows:  lead: C5 . E5 - | G5v80 . E5~slide .      pattern set|remove|copy|rename <song>.<name> ...
+        pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> ...   (one note at a time: add C5 len=2, move step= note=, set vel= fx=)
         song section add|set|remove <song> <name> <pattern>... [x<n>]   song order|intro|ending|loop|fx|copy|rename|remove|mark <song> ...   (music: docs/commands.md)
         song set <id> tags=a,b kind=song|stinger   song channel set <song> <ch> harmony=yes   song new <id> from-bible=<entry> | kind=stinger template=victory|game-over|level-up|item-get
         helpers (they write notes into <pattern>, and go on the tape with the rows they wrote; docs/commands.md "Composition helpers"):

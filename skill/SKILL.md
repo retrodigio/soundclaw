@@ -211,8 +211,15 @@ duty needs a high-pass), `key`, `range`, `render-match` (every note's onset with
 advisory ones to pass. `export <song> --loop` is the seamless loop, `--stems` one aligned file per game layer (before the master
 chain: they sum to the mix), `--format ogg|midi`; `midi import` brings a MIDI file in as a song. People mute and solo channels on
 the song card for listening; that is not stored, and a request from a person on a song is a `song mark <id> rejected` with their
-note. Change a pattern with `pattern set <song>.<name> "<text>"` (or the block form in a script); the history shows a person's edits
-like any other.
+note. Change a pattern with `pattern set <song>.<name> "<text>"` (or the block form in a script), or one note at a time with
+`pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> …` (`pattern note move tune.verse lead 4 step=6 note=G5`).
+
+**A person edits songs too**, in the music editor (`#/song/<id>`: the piano roll, the grid, the song order, the loop region,
+the instruments, the helpers). Every edit they make is one of these same commands on the history as `human:<name>`. **Call
+`changes` before you edit a song a person has touched**: it lists, per pattern, the notes they took out and put in
+(`verse.lead: − E5 at 3; + G5 at 5`), the settings and sections they changed, and a before/after picture of the written notes.
+Work from their version; do not rewrite a row they edited with a helper (helpers replace the whole row) without asking.
+Feedback on a song card comes as tags (too busy, too sparse, too loud, too repetitive, wrong mood, good) with a note.
 
 ## Loudness classes: one target does not fit a whole game
 

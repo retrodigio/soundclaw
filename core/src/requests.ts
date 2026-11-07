@@ -75,7 +75,7 @@ export function requestProblem(reqs: ReadonlyMap<string, WorkRequest>, r: Reques
     if (!(REQUEST_KINDS as readonly string[]).includes(r.kind)) return `a request's kind is ${REQUEST_KINDS.join(', ')}`;
     if (typeof r.note !== 'string') return 'a request has a note (it may be empty)';
     if (!r.note.trim()) return 'a change request says what should change';
-    if (r.tags !== undefined && (!Array.isArray(r.tags) || r.tags.some((t) => typeof t !== 'string' || !isFeedbackTag(t)))) return 'tags are from the list on the card (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good)';
+    if (r.tags !== undefined && (!Array.isArray(r.tags) || r.tags.some((t) => typeof t !== 'string' || !isFeedbackTag(t)))) return 'tags are from the list on the card (a sound: too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good; a song: too busy, too sparse, too loud, too repetitive, wrong mood, good)';
     if (r.other !== undefined && (typeof r.other !== 'string' || !NAME_RE.test(r.other))) return 'the other sound is a sound id';
     if (r.kind === 'feedback' && !(r.tags?.length && r.tags.every((t) => t === 'good'))) return 'a feedback request carries the tag good and nothing else';
     return null;

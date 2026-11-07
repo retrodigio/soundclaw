@@ -6,6 +6,7 @@ import { ListenerChip } from './Listening.tsx';
 import { SetPage } from './SetPage.tsx';
 import { SoundCard } from './SoundCard.tsx';
 import { SongCard } from './SongCard.tsx';
+import { SongEditor } from './SongEditor.tsx';
 import type { Store } from './store.ts';
 
 function History({ tape }: { tape: TapeEntry[] }) {
@@ -54,6 +55,7 @@ export function App({ store }: { store: Store }) {
       {store.error && <div className="error banner" data-testid="error" role="alert">{store.error} <button className="link" onClick={() => { store.error = null; store.changed(); }}>dismiss</button></div>}
       <main>
         {store.route.kind === 'sound' ? <Editor key={store.route.id} store={store} id={store.route.id} />
+          : store.route.kind === 'song' ? <SongEditor key={store.route.id} store={store} id={store.route.id} />
           : store.route.kind === 'audition' ? <AuditionPage key={store.route.set ?? 'all'} store={store} setId={store.route.set} />
           : store.route.kind === 'set' ? (() => {
             const set = store.sets.find((x) => x.id === (store.route as { id: string }).id);

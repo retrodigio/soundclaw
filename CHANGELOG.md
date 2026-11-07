@@ -24,6 +24,24 @@ All notable changes to SoundClaw are listed here. The format follows
 - **Dashboard**: song cards with play, the loop playing repeatedly, the pattern text read-only with the current step lit, and mute/solo for listening (not stored).
 - The command text now reads `\n` in a quoted word as a line break (the pattern text on the tape).
 
+### The music editor
+- **A song's page** (`#/song/<id>`): the pattern grid (every channel; drum channels as a row per hit, painted by click or drag), the
+  piano roll of a melodic channel (the key's notes shaded, out-of-key notes marked; click to add, drag to move, drag the end to
+  lengthen, shift-drag to select, Delete, a velocity lane, slide/vibrato/arp from a small menu), the instrument panel (instrument,
+  gain, pan, mute/solo for listening, game layer; an instrument's note envelope, velocity, root, range, pitch check and its voice with
+  the sound editor's controls), the song order (sections as blocks to drag, repeats, intro and ending, the loop region on a bar ruler
+  with handles), tempo, swing, key and time, and the helpers with a preview of the rows before Apply.
+- **Playback with a cursor** across the grid, the roll and the ruler: play, play from the cursor, the selection repeating, the loop
+  region repeating. After an edit only the changed channel renders again (its unchanged notes come from a cache, and the master
+  limiter works out again only around the samples that changed, to the same bytes): one note change in a 35 s six-channel song
+  plays again in about a third of a second.
+- **Every edit is a command** an agent would write, one gesture one history entry: the new `pattern note add|remove|move|len|set`
+  (one note at a time; the page never sends a pattern's whole text), `song order|section|loop|intro|ending|set|channel set`,
+  `instrument set|layer|fx|env`.
+- **`changes` covers songs and instruments**: per pattern the notes that went and came, the settings and sections that differ, and a
+  before/after picture of the written notes.
+- **Feedback tags on song cards**: too busy, too sparse, too loud, too repetitive, wrong mood, good; they reach the agent through `await`.
+
 ### Composition helpers
 - **Helpers that write notes** into a pattern and go on the history tape with every option resolved and the rows they wrote
   (`written="…"`), so a replay puts back exactly those notes: `chords`, `bass`, `arp`, `drums`, `humanise`, `motif write|sequence`.

@@ -175,6 +175,16 @@ function parseCell(tok: string, at: number): Cell {
   return { kind: 'notes', notes };
 }
 
+/** One grid token (a note, chord, hit, rest or hold) on its own; throws a plain Error. */
+export function parseCellText(tok: string): Cell {
+  try { return parseCell(tok, 0); } catch (e) { if (e instanceof Fail) throw new Error(e.message); throw e; }
+}
+
+/** Effects as written after a note (`~slide~vib(6,0.5)`); throws a plain Error. */
+export function parseFxText(text: string): NoteFx {
+  try { return parseFx(text.startsWith('~') ? text : `~${text}`, 0); } catch (e) { if (e instanceof Fail) throw new Error(e.message); throw e; }
+}
+
 interface Tok {
   text: string;
   col: number;

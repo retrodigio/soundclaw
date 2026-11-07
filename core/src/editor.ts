@@ -129,8 +129,12 @@ export const FEEDBACK_TAGS = ['too loud', 'too quiet', 'too long', 'too short', 
 export type FeedbackTag = (typeof FEEDBACK_TAGS)[number];
 export const SIMILAR_TAG: FeedbackTag = 'too similar to another sound';
 
-export function isFeedbackTag(t: string): t is FeedbackTag {
-  return (FEEDBACK_TAGS as readonly string[]).includes(t);
+/** The quick tags on a song's card. */
+export const SONG_FEEDBACK_TAGS = ['too busy', 'too sparse', 'too loud', 'too repetitive', 'wrong mood', 'good'] as const;
+export type SongFeedbackTag = (typeof SONG_FEEDBACK_TAGS)[number];
+
+export function isFeedbackTag(t: string): t is FeedbackTag | SongFeedbackTag {
+  return (FEEDBACK_TAGS as readonly string[]).includes(t) || (SONG_FEEDBACK_TAGS as readonly string[]).includes(t);
 }
 
 /** The words a request carries when a person sent tags and no text. */
