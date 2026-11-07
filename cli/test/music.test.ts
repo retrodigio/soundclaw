@@ -71,9 +71,12 @@ describe('views, render, list and export', () => {
     r = sc(['view', proj, 's', 'mix', '--from', '0', '--to', '2', '--channels', 'lead']);
     expect(r.code, r.err).toBe(0);
     expect(r.out).toMatch(/mix view saved/);
-    r = sc(['view', proj, 's', 'compare', 'x']);
+    r = sc(['view', proj, 's', 'frobnicate']);
     expect(r.code).toBe(2);
     expect(r.err).toMatch(/a song has the views notes, mix, wave, spec, loop/);
+    r = sc(['view', proj, 's', 'compare', 'x']);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/no sound, song or audio file 'x'/);
   }, 60_000);
 
   it('render and describe print the numbers; --json is one document', () => {

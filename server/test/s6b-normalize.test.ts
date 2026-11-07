@@ -15,7 +15,7 @@ const PAT = `pattern lay.a steps=16 tpb=4
   pad: C4+E4+G4 - - - - - - - G3+B3+D4 - - - - - - -
   lead: C5 . E5 . G5 - - . A4 . . . G4 . E4 .
   drums: k . h . s . h . k k h . s . h h
-song section add lay A a x4
+song section add lay A a x2
 `;
 const LAYERED = (gains: string) => `song new lay tempo=120 key=C:major class=music
 song channel add lay bass inst=triangle_bass layer=base gain=${gains.split(',')[0]}
