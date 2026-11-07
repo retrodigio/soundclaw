@@ -321,7 +321,7 @@ parameter's range. Setting a fixed value with `layer set` or `fx set` removes th
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
-| `size` | 0 to 1 | 0.5 | - | room size (0 small … 1 large); the tail is about 0.3 + 2.2 × size seconds |
+| `size` | 0 to 1 | 0.5 | - | room size (0 small … 1 large); the tail is the time to fall 60 dB: about 0.6 s at 0, 1.3 s at 0.5, 11 s at 1 |
 | `damp` | 0 to 1 | 0.5 | - | how fast the highs die away |
 | `mix` | 0 to 1 | 0.3 | yes | dry/wet |
 
@@ -354,8 +354,17 @@ parameter's range. Setting a fixed value with `layer set` or `fx set` removes th
 
 An automatic length is as long as the layers that sound (not muted; if any is soloed, those) and their effects' tails, then
 trimmed where the sound has died away: the last sample within 60.3 dB of the peak, **wherever that is, inside a layer's own source too**
-(a source longer than its envelope no longer leaves silence at the end), closed with a 3 ms fade; a run of less than 1 ms is left alone. A classic
-layer is never cut (it is the classic voice as it is, so `sound layer-up` keeps the very samples).
+(a source longer than its envelope no longer leaves silence at the end), closed with a 3 ms fade; a run of less than 1 ms is left alone. If the
+fade would leave nothing above that level (the first few milliseconds of one more echo, say), the sound ends where the audible part before it did.
+A classic layer, and a sample layer with no envelope and no trim, are never cut (they are the file or the classic voice as it is, so
+`sound layer-up` keeps the very samples).
+
+**One definition of "died away".** `duration=auto` and the `tail` check use the same floor, 60.3 dB under the sound's peak in the loudest
+channel (60 dB, plus 0.3 dB so that an exponential decay that ends at −60 dB counts as ended). The sound ends at its last sample above it, and the
+check's "silence at the end" is what follows the last sample above it, so a sound with `duration=auto` passes `tail` (its end is the 3 ms fade).
+The room an effect is given to ring in is long enough for that: a delay gets its echoes until the feedback has taken them 66 dB down (an envelope
+on the feedback counts at its highest point), a reverb the time its longest comb filter takes to fall 60 dB (about 0.6 s at `size` 0, 1.3 s at 0.5, 11 s at 1);
+each is capped at 60 s. A fixed `duration` shorter than that cuts the tail, and the check says so.
 
 **Limiter.** A layered sound is exported through a look-ahead peak limiter (about 1 ms) whose ceiling is the style's
 `truePeakMax` (default −0.1 dBTP, kept 0.1 dB inside it): no sample and no point between samples (4× oversampled) goes above it, and

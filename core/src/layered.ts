@@ -141,7 +141,7 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
     fxNum('mix', 0, 1, 0.35, '', 'dry/wet', true),
   ],
   reverb: [
-    fxNum('size', 0, 1, 0.5, '', 'room size (0 small … 1 large); the tail is about 0.3 + 2.2 × size seconds'),
+    fxNum('size', 0, 1, 0.5, '', 'room size (0 small … 1 large); the tail is the time to fall 60 dB: about 0.6 s at 0, 1.3 s at 0.5, 11 s at 1'),
     fxNum('damp', 0, 1, 0.5, '', 'how fast the highs die away'),
     fxNum('mix', 0, 1, 0.3, '', 'dry/wet', true),
   ],

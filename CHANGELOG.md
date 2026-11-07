@@ -11,10 +11,15 @@ All notable changes to SoundClaw are listed here. The format follows
   of a reference equals the file. A stereo file stays stereo through `side=left` / `side=right` on two hard-panned layers (`sample import`
   prints the two commands; `measure` agrees with ffmpeg's `ebur128` within 0.2 LU). Files at 48 or 96 kHz (any rate) are converted to
   44,100 Hz with a Blackman-windowed sinc that keeps their loudness within 0.2 LU, and the import states the method. Sample names keep their
-  case and are unique ignoring case. Renders of sample layers changed, so `RENDER_VERSION` is 3 and three layered goldens were regenerated
+  case and are unique ignoring case. Renders of sample layers changed, so the render version moved and three layered goldens were regenerated
   (`sample-plain`, `sample-trim-pitch-reverse`, `sample-pitch-envelope`).
 - **Sets**: in `set-spread` a member's own `loudness=` replaces the set's target for that member, and the check reports the per-member targets.
 - **Bursts**: `bursts(times=... level=a,b,c)` takes a level for each hit.
+- **Tails**: `duration=auto` and the `tail` check share one floor (60.3 dB under the peak, `DIED_AWAY`); a delay is given its echoes down to
+  66 dB and a reverb its real 60 dB decay time (the largest rings for about 11 s, not 2.5), so delay and reverb sounds with `duration=auto` pass
+  `tail`. Renders of delay and reverb sounds, and of sounds with a late faint piece, changed: `RENDER_VERSION` is 4 and 20 layered goldens were
+  regenerated (`master-chain`, `amp-adsr`, `fx-delay`, `fx-reverb`, and the recipes footstep 1-2, door 1-3, magic 1-3, creak 1, bell 1 and 3,
+  voice-vowel 1-2, voice-cluck 2, voice-giggle 2-3).
 - **Measuring**: a classic sound is measured as its exported WAV holds it (`trunc(s * 32000)` of 32768), so `measure` agrees with the file
   within 0.05 dB and with ffmpeg's `ebur128`; the clip check counts a run at that level as full scale.
 - **Normalize**: a layered sound that gain 4 cannot bring to its target gets the rest from the new `out` (dB, after the master chain, up to

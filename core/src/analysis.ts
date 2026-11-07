@@ -5,7 +5,7 @@
 // of the deterministic render: they may use Math.sin/cos/log, and the last digit may differ
 // between platforms (they are printed rounded).
 
-import { SAMPLE_RATE } from './sound.ts';
+import { DIED_AWAY, SAMPLE_RATE } from './sound.ts';
 
 export type Samples = Float32Array | Float64Array;
 
@@ -480,7 +480,7 @@ export function analyze(input: Samples | readonly Samples[]): Analysis {
   const env = rmsEnvelope(m, win, hop);
   let envMax = 0;
   for (const v of env) envMax = Math.max(envMax, v);
-  const floor60 = peak * 0.001;
+  const floor60 = peak * DIED_AWAY; // the same floor `duration=auto` ends a sound at
   let firstLoud = 0;
   while (firstLoud < n && m[firstLoud]! < floor60) firstLoud++;
   let lastLoud = n - 1;

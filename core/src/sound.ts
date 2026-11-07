@@ -8,8 +8,10 @@ import { sha256Text } from './sha256.ts';
 import { SOUND_SPECS, cloneLayered, layeredBody, serializeLayered, type LayeredSound } from './layered.ts';
 
 export const SAMPLE_RATE = 44100;
+/** A sound has died away where it is 60.3 dB under its peak (10^(-60.3/20)): `duration=auto` ends a sound at its last sample above this, and the `tail` check's silence is what comes after the last sample above it. One definition for both (the 0.3 dB is so that an exponential decay that ends at -60 dB counts as ended). */
+export const DIED_AWAY = 0.0009660508789898133;
 /** Bump when the renderer's output for the same document changes: cached renders are keyed by it. */
-export const RENDER_VERSION = 3;
+export const RENDER_VERSION = 4;
 
 /** Ids are case-sensitive as written (file stems in engines are), and unique ignoring case so two never share a file on a case-insensitive disk. */
 export const SOUND_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;

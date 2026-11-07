@@ -61,7 +61,7 @@ describe('layered recipes', () => {
         expect(runChecks(ch, analyze(ch))).toHaveLength(6);
       }
     }
-  });
+  }, 90_000);
 
   it('magic is stereo; the others are mono', () => {
     expect(renderChannels(make('magic', 1))).toHaveLength(2);
@@ -118,7 +118,7 @@ describe('the one-shot recipes are tuned to their loudness class', () => {
         const checks = runChecks(ch, a, soundStyle(s, [], DEFAULT_STYLE));
         expect(checks).toHaveLength(6);
         expect(checks.filter((c) => !c.pass).map((c) => `${n} ${seed} ${c.name}: ${c.value}`)).toEqual([]);
-        expect(a.duration, `${n} ${seed}`).toBeGreaterThan(n === 'ui-click' ? 0.06 : 0.1);
+        expect(a.duration, `${n} ${seed}`).toBeGreaterThan(n === 'ui-click' ? 0.06 : n === 'footstep' ? 0.08 : 0.1);
         expect(a.duration).toBeLessThan(n === 'bell' ? 3 : n === 'glass-shatter' ? 3.6 : 2.2);
         if (n === 'ui-click') expect(a.duration).toBeLessThanOrEqual(0.2);
         if (n === 'bell') { expect(a.duration).toBeGreaterThan(1.1); }

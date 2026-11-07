@@ -12,7 +12,7 @@ import {
 import { TAU, exp2, log2, sineCycles, sinRad, tanPi } from './mathx.ts';
 import { hashText } from './generators.ts';
 import { resample } from './resample.ts';
-import { SAMPLE_RATE } from './sound.ts';
+import { DIED_AWAY, SAMPLE_RATE } from './sound.ts';
 
 const SR = SAMPLE_RATE;
 
@@ -381,19 +381,32 @@ function shape(kind: string, v: number): number {
 const COMBS = [1116, 1188, 1277, 1356];
 const ALLPASS = [556, 441];
 
-/** The seconds an effect keeps sounding after its input stops (so the sound is long enough to hold it). */
+/** The longest tail one effect is given room for, seconds. */
+const MAX_FX_TAIL = 60;
+
+/**
+ * The seconds an effect keeps sounding after its input stops, which is the room the sound is given to hold it (an automatic length then
+ * ends the sound where it is 60.3 dB down, so this only has to be long enough; the `tail` check asks for the same 60 dB).
+ * A delay: the echoes until the feedback has taken them 66 dB down (an envelope on the feedback counts at its highest point).
+ * A reverb: the time its longest comb filter takes to fall 60 dB at the room's feedback (0.7 + 0.28 size), about 0.6 s at size 0,
+ * 1.3 s at 0.5 and 11 s at 1. Computed with the bit-built log2, so every machine gets the same length.
+ */
 export function fxTail(f: Fx): number {
   const mixOn = f.envs.mix !== undefined || (f.p.mix as number) > 0;
   if (f.kind === 'delay' && mixOn) {
-    let taps = 1;
-    let level = f.p.feedback as number;
-    if (f.envs.feedback) level = 0.9;
-    while (level > 0.001 && taps < 12) { level *= f.envs.feedback ? 0.9 : (f.p.feedback as number); taps++; }
-    return (f.p.time as number) * taps;
+    const fb = f.envs.feedback ? Math.max(...f.envs.feedback.map((p) => p.v)) : (f.p.feedback as number);
+    const taps = fb > 0 ? 1 + Math.ceil(-LOG2_LEVEL_66DB / -log2(fb)) : 1;
+    return Math.min(MAX_FX_TAIL, (f.p.time as number) * taps);
   }
-  if (f.kind === 'reverb' && mixOn) return 0.3 + 2.2 * (f.p.size as number);
+  if (f.kind === 'reverb' && mixOn) {
+    const fb = 0.7 + 0.28 * (f.p.size as number);
+    return Math.min(MAX_FX_TAIL, (COMBS[COMBS.length - 1]! + 23) / SR * (EXP_DECAY_60DB / -log2(fb)) + 0.05);
+  }
   return 0;
 }
+
+// log2 of 10^(-66/20) = 0.0005012: how far down the last echo is when a delay stops being given room
+const LOG2_LEVEL_66DB = -10.9487;
 
 const LOG2E = 1.4426950408889634;
 const DB_TO_LOG2 = 0.16609640474436813; // 2^(dB * this) = 10^(dB / 20)
@@ -683,7 +696,7 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
     // An automatic length ends where the sound has died away: the last sample within 60.3 dB of the peak, wherever that is (inside a layer's source too). The layers' lengths and the effects' tails only said how much room to leave.
     let peak = 0;
     for (const ch of mix) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(ch[i]!));
-    const floor = peak * 0.0009660508789898133;
+    const floor = peak * DIED_AWAY;
     let last = 0;
     for (const ch of mix) for (let i = n - 1; i > last; i--) if (Math.abs(ch[i]!) >= floor) { last = i; break; }
     // A classic layer is the classic voice as it is (layer-up keeps the very samples), so the sound is never cut inside one.
@@ -691,6 +704,20 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
     for (const b of built) if (b.layer.kind === 'classic' || playsAsIs(b.layer)) floorEnd = Math.max(floorEnd, b.offset + b.src);
     // (a run of less than 1 ms at the end is not worth a cut: the sound keeps the length its layers give it)
     end = Math.max(1, Math.min(n, Math.max(n - last - 1 > 44 ? last + 1 : n, floorEnd)));
+    // The 3 ms fade below can leave nothing above the floor in a short piece at the very end (the first part of a late echo or of a reverb's
+    // last ripple): the piece is then inaudible and the sound ends where the audible part before it did, so that `trailingSilence` (what the
+    // `tail` check measures from the same floor) is the 3 ms of fade and not the gap.
+    while (end < n && end > floorEnd + 1) {
+      const fade = Math.min(132, end - floorEnd + 1);
+      let faded = false;
+      let before = -1;
+      for (const ch of mix) {
+        for (let i = end - 1; i >= end - fade && !faded; i--) if (Math.abs(ch[i]!) * ((end - 1 - i) / fade) >= floor) faded = true;
+        for (let i = end - fade - 1; i > before; i--) if (Math.abs(ch[i]!) >= floor) { before = i; break; }
+      }
+      if (faded || before < floorEnd) break;
+      end = before + 1;
+    }
     if (end < n && end > floorEnd) {
       // the sound was cut where it is 60 dB down (inside a layer's source too, but not a classic layer's, or where a tail was still just audible): close it with a 3 ms fade, so it ends at zero
       const fade = Math.min(132, end - floorEnd + 1);
