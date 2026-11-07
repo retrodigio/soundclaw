@@ -12,7 +12,7 @@ import {
   movePoint, peaks, renderParts, roundSpec, sliderPosition, sliderValue, CURVES, type Curve, type Env, type Fx, type FxKind, type Layer, type LayeredSound, type PSpec, type Scheduler, type SourceKind, type Value,
 } from '@soundclaw/core';
 import { download } from './download.ts';
-import { Spectrogram } from './Spectrogram.tsx';
+import { MelSpectrogram } from './Spectrogram.tsx';
 import { LoudnessClass } from './LoudnessClass.tsx';
 import type { RunResult, Store } from './store.ts';
 import { Waveform } from './Waveform.tsx';
@@ -204,28 +204,32 @@ function EnvEditor({ run, sound, target, onTarget, targets, span }: { run(cmds: 
 
 function LayerStrips({ store, sound }: { store: Store; sound: LayeredSound }) {
   const key = store.keyOf(sound);
-  const parts = useMemo(() => { try { return renderParts(sound, store.sampleBank); } catch { return null; } }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  // each layer on its own, rendered in the worker (a long sound's layers take seconds)
+  const [strips, setStrips] = useState<{ key: string; strips: { min: number[]; max: number[] }[] } | null>(null);
+  useEffect(() => {
+    let live = true;
+    store.layerStrips(sound).then((s) => { if (live) setStrips({ key, strips: s }); }, () => undefined);
+    return () => { live = false; };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const refs = useRef<(HTMLCanvasElement | null)[]>([]);
   useEffect(() => {
-    if (!parts) return;
-    parts.parts.forEach((p, i) => {
+    if (!strips) return;
+    strips.strips.forEach((p, i) => {
       const c = refs.current[i];
       const g = c?.getContext('2d');
       if (!c || !g) return;
       g.clearRect(0, 0, c.width, c.height);
       g.fillStyle = '#58c4a6';
-      const mono = p.channels.length === 1 ? p.channels[0]! : Float32Array.from(p.channels[0]!, (v, k) => (v + p.channels[1]![k]!) / 2);
-      const pk = peaks(mono, c.width);
       const mid = c.height / 2;
-      for (let x = 0; x < c.width; x++) g.fillRect(x, mid - pk.max[x]! * mid, 1, Math.max(1, (pk.max[x]! - pk.min[x]!) * mid));
+      for (let x = 0; x < c.width; x++) g.fillRect(x, mid - p.max[x]! * mid, 1, Math.max(1, (p.max[x]! - p.min[x]!) * mid));
     });
-  }, [parts]);
-  if (!parts) return null;
+  }, [strips]);
+  if (!strips || strips.strips.length !== sound.layers.length) return null;
   return (
     <div className="strips" data-testid="layer-strips">
-      {parts.parts.map((p, i) => (
-        <div key={p.layer.salt} className="strip"><span className="dim">{p.index + 1} {layerLabel(p.layer)}</span>
-          <canvas ref={(el) => { refs.current[i] = el; }} width={360} height={26} data-testid={`strip-${p.index + 1}`} /></div>
+      {strips.strips.map((_, i) => (
+        <div key={sound.layers[i]!.salt} className="strip"><span className="dim">{i + 1} {layerLabel(sound.layers[i]!)}</span>
+          <canvas ref={(el) => { refs.current[i] = el; }} width={360} height={26} data-testid={`strip-${i + 1}`} /></div>
       ))}
     </div>
   );
@@ -361,7 +365,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
         <h2>{voice ? `voice of ${sound.id}` : sound.id}</h2>
         {!voice && <span className={`chip status-${sound.status}`}>{sound.status}</span>}
         <span className="dim" data-testid="editor-numbers">
-          {measured.analysis.duration.toFixed(2)} s · {Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · centroid {measured.analysis.centroid.mean.toFixed(0)} Hz{stereo ? ' · stereo' : ''}
+          {measured.pending ? 'measuring…' : `${measured.analysis.duration.toFixed(2)} s · ${Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · centroid ${measured.analysis.centroid.mean.toFixed(0)} Hz`}{stereo ? ' · stereo' : ''}
         </span>
         {!voice && <LoudnessClass store={store} sound={sound} />}
         <span className="spacer" />
@@ -451,7 +455,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
         <div className="side-col">
           <section className="panel" aria-label="Sound">
             <Waveform samples={store.render(sound)} id={id} />
-            <Spectrogram spec={measured.spec} id={id} />
+            {!measured.pending && <MelSpectrogram spec={measured.spec} id={id} />}
             <LayerStrips store={store} sound={sound} />
             <div className="dim hash">samples {store.hashOf(sound).slice(0, 12)}</div>
           </section>

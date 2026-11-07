@@ -192,26 +192,34 @@ test('the browser renders every kind of layer exactly as Node does (samples, che
     await page.goto(`${agent.url}&name=ana`);
     await expect(page.getByTestId('connection')).toHaveAttribute('data-status', 'open');
     await expect(page.getByTestId('card-mix')).toBeVisible();
-    // let the page fetch the sample before measuring
-    await expect.poll(async () => page.evaluate(() => {
-      const s = (window as unknown as { soundclaw: { sampleBank: { get(n: string): unknown } } }).soundclaw;
-      return !!s.sampleBank.get('chirp');
-    })).toBe(true);
     for (const id of ['mix', 'waves', 'door', 'sparkle']) {
       const bytes = new Uint8Array(await (await fetch(`http://127.0.0.1:${agent.port}/api/render/${id}.f32?token=${agent.token}`)).arrayBuffer());
       const server = floatsFromBytes(bytes);
-      const mine = await page.evaluate((sid) => {
-        const s = (window as unknown as { soundclaw: { sounds: { id: string }[]; hashOf(s: unknown): string; channels(s: unknown): Float32Array[] } }).soundclaw;
+      // what the page plays (rendered in its worker, which fetches the samples it needs) is the Node render
+      await page.getByTestId(`play-${id}`).click();
+      await expect(page.getByTestId(`play-${id}`)).toHaveAttribute('data-plays', '1');
+      const played = await page.evaluate((sid) => {
+        const s = (window as unknown as { soundclaw: { played: { id: string; hash: string; samples: number }[] } }).soundclaw;
+        return s.played.filter((p) => p.id === sid).at(-1)!;
+      }, id);
+      expect(played.hash, `${id} played`).toBe(samplesHash(server));
+      // the editors render on the page's own thread, once the samples are here: the same bytes
+      const mine = await page.evaluate(async (sid) => {
+        const s = (window as unknown as { soundclaw: { sounds: { id: string }[]; hashOf(s: unknown): string; channels(s: unknown): Float32Array[]; ensureSamples(s: unknown): Promise<void> } }).soundclaw;
         const sound = s.sounds.find((x) => x.id === sid)!;
+        await s.ensureSamples(sound);
         return { hash: s.hashOf(sound), channels: s.channels(sound).length };
       }, id);
       expect(mine.hash, id).toBe(samplesHash(server));
       expect(mine.channels).toBe(id === 'mix' || id === 'sparkle' ? 2 : 1);
       // the card's check badge is what the CLI says
       const cli = await agent.cli(['check', agent.dir, id]);
+      await expect(page.getByTestId(`check-${id}`)).toHaveAttribute('data-pass', /true|false/);
       const failing = (await page.getByTestId(`check-${id}`).getAttribute('data-failing')) ?? '';
       const cliFailing = [...cli.out.matchAll(/^ {2}(\w+)\s+FAIL/gm)].map((m) => m[1]).join(',');
       expect(failing, id).toBe(cliFailing);
+      // and the card's hash is the render's
+      await expect(page.getByTestId(`card-${id}`)).toHaveAttribute('data-hash', samplesHash(server));
     }
     // the WAV a person downloads is the one the server exports, limiter included
     const pageWav = await page.evaluate(() => {

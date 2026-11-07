@@ -1,13 +1,33 @@
 // A spectrogram thumbnail: the sound's mel spectrogram, one pixel column per slice of time, low
-// frequencies at the bottom, 80 dB below the loudest cell.
+// frequencies at the bottom, 80 dB below the loudest cell. The cards draw the bytes the server
+// worked out (one per cell, 0 to 255 over the 80 dB).
 
 import { useEffect, useRef } from 'react';
 import { INFERNO, SPEC_RANGE_DB, specMax, ramp, type MelSpec } from '@soundclaw/core';
+import type { CardInfo } from '@soundclaw/server/protocol';
 
 export const SPEC_W = 240;
 export const SPEC_H = 48;
 
-export function Spectrogram({ spec, id }: { spec: MelSpec; id: string }) {
+export function Spectrogram({ spec, id }: { spec?: CardInfo['spec']; id: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    const g = c?.getContext('2d');
+    if (!c || !g || !spec) return;
+    const bytes = Uint8Array.from(atob(spec.data), (ch) => ch.charCodeAt(0));
+    const img = g.createImageData(spec.w, spec.h);
+    for (let i = 0; i < spec.w * spec.h; i++) {
+      const [r, gg, b] = ramp(INFERNO, bytes[i]! / 255);
+      img.data[i * 4] = r; img.data[i * 4 + 1] = gg; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+  }, [spec]);
+  return <canvas ref={ref} className="spec" width={SPEC_W} height={SPEC_H} data-testid={`spec-${id}`} {...(spec ? { 'data-frames': spec.frames, 'data-bands': spec.bands } : {})} aria-label={`spectrogram of ${id}`} />;
+}
+
+/** A spectrogram drawn from a spectrogram measured here (the editors, which render the sound they edit). */
+export function MelSpectrogram({ spec, id }: { spec: MelSpec; id: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current;

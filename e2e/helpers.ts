@@ -21,14 +21,18 @@ export interface Agent {
   cli(args: string[]): Promise<Done>;
   /** Start `soundclaw <args>` in the background (an await). */
   background(args: string[]): { done: Promise<Done>; kill(): void };
+  /** What the server has written to its error output so far. */
+  log(): string;
   close(): Promise<void>;
 }
 
-export async function startAgent(): Promise<Agent> {
+/** A server on a temporary project: made by `new`, or by `build(dir)` (a project made in this process, e.g. a large one). */
+export async function startAgent(o: { build?: (dir: string) => void } = {}): Promise<Agent> {
   const root = mkdtempSync(join(tmpdir(), 'soundclaw-e2e-'));
   const dir = join(root, 'demo.sclaw');
   const env = { ...process.env, SOUNDCLAW_STATE_DIR: join(root, 'state') };
-  execFileSync(process.execPath, [BIN, 'new', dir], { env });
+  if (o.build) o.build(dir);
+  else execFileSync(process.execPath, [BIN, 'new', dir], { env });
   const server = spawn(process.execPath, [BIN, 'serve', '--project', dir, '--port', '0', '--no-mcp'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   const children = new Set<ChildProcess>();
   let stderr = '';
@@ -50,6 +54,7 @@ export async function startAgent(): Promise<Agent> {
   };
   return {
     dir, url, token: new URL(url).searchParams.get('token')!, port: Number(new URL(url).port),
+    log: () => stderr,
     cli: (args) => run(args).done,
     background: (args) => { const r = run(args); return { done: r.done, kill: () => r.child.kill('SIGTERM') }; },
     close: async () => {

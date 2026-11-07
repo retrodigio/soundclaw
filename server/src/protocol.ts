@@ -6,13 +6,58 @@ import type { SampleInfo } from './samples.ts';
 import type { Diag, Instrument, SetDoc, SongJson, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
 
 export type { Presence, SampleInfo };
+
+/** What the list shows about a sound's last known render: the numbers and the checks (the server works them out in a worker thread and keeps them). */
+export interface CardLite {
+  /** Hash of the rendered samples; the CLI and MCP print its first 12 digits. */
+  hash: string;
+  duration: number;
+  /** null: silence (minus infinity). */
+  lufs: number | null;
+  truePeakDb: number | null;
+  pass: boolean;
+  failing: string[];
+  /** The one-line checks summary (the badge's tooltip). */
+  summary: string;
+}
+
+/** A card's thumbnails: the waveform's peaks per pixel column and the spectrogram as one byte per cell (0 to 255 over its 80 dB). */
+export interface CardInfo extends CardLite {
+  /** Names the render, the loudness rule and the style this was worked out for (changes when any of them does). */
+  key: string;
+  peak: number;
+  wave: { min: number[]; max: number[] };
+  spec: { w: number; h: number; frames: number; bands: number; /** base64, rows from the top, h × w bytes. */ data: string };
+}
+
+/** One line of the sound list: all the page needs to show it before it has the sound's document. */
+export interface SoundSummary {
+  id: string;
+  voice: Sound['voice'];
+  status: Sound['status'];
+  /** The card key for the sound as it stands; `info` is for that key, when the server knows it yet. */
+  key: string;
+  /** A few words about what the sound is made of (`3 layers: osc, sample, sample`). */
+  label: string;
+  info?: CardLite;
+}
+
+/** Projects with more sounds than this send the list first and the documents on demand. */
+export const LEAN_AT = 100;
 export { HUMAN_RE } from '@soundclaw/core';
 
 /** Everything a page needs to start: sent on connect. */
 export interface Snapshot {
   project: { name: string; dir: string; /** The server user's home folder, so the page can show the folder as ~/…. */ home?: string };
-  /** Every sound's document; the page renders them with the same core the agent's renders use. */
+  /** The list: every sound's id, voice, status and last known numbers. */
+  index: SoundSummary[];
+  /** Sound documents. All of them in a small project; none in a lean one (the page asks for a document when it opens the sound: GET /api/sound/<id>.json). */
   sounds: Sound[];
+  lean: boolean;
+  /** Whether undo and redo would do anything (the page may hold only the end of the tape). */
+  history: { canUndo: boolean; canRedo: boolean };
+  /** How many entries the tape has; `tape` holds the newest ones (GET /api/tape?before=<seq> has the earlier ones). */
+  tapeTotal: number;
   /** The sets: named groups of sounds with a loudness target (their members are sounds above). */
   sets: SetDoc[];
   /** The songs (patterns as a list) and the project's instruments; the page renders songs with the same core, the built-in instruments included. */
@@ -37,7 +82,9 @@ export type PersonRequest =
 export type ServerMessage =
   | { type: 'hello'; snapshot: Snapshot }
   /** One applied batch (one undo group): its tape entries, and the sounds as they now stand. */
-  | { type: 'batch'; by: string; group: string; entries: TapeEntry[]; sounds: Sound[]; sets: SetDoc[]; songs: SongJson[]; instruments: Instrument[] }
+  | { type: 'batch'; by: string; group: string; entries: TapeEntry[]; index: SoundSummary[]; /** The documents the batch touched (all of them in a small project). */ sounds: Sound[]; /** Sounds that are gone. */ removed: string[]; lean: boolean; history: { canUndo: boolean; canRedo: boolean }; sets: SetDoc[]; songs: SongJson[]; instruments: Instrument[] }
+  /** Cards the server has worked out since (for the list's badges): id, the key it is for, and the numbers. */
+  | { type: 'cards'; cards: { id: string; key: string; info: CardLite }[] }
   /** The answer to one page's `run` (only to that page; the batch itself goes to every page). */
   | { type: 'result'; id: number; ok: true; group: string | null; seq: number | null }
   | { type: 'result'; id: number; ok: false; errors: Diag[] }

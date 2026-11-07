@@ -109,8 +109,8 @@ onsets. It has no native dependencies and is tested against synthetic signals wi
 is a *measurement*, not part of the render: it may use `Math.sin`, and the last digit may differ
 between platforms (numbers are printed rounded). `core/src/checks.ts` holds the six checks and the
 project style; `core/src/views.ts` draws the PNG views through `core/src/png.ts`, a small PNG
-encoder (its own deflate) with a 5×7 font. The dashboard measures with the same code in the
-browser, so a card's check badge and the CLI agree.
+encoder (its own deflate) with a 5×7 font. A card's numbers and check badge come from the server,
+which works them out with the same code, so they and the CLI agree (see "How the dashboard scales").
 
 A **content-hash render cache** (`server/src/cache.ts`) keeps samples under the SHA-256 of the
 document's audio-relevant text plus the renderer's version; it lives in memory and in
@@ -160,8 +160,40 @@ and WebSocket server on `127.0.0.1` for the dashboard (and MCP over HTTP at `/mc
   same folder is refused.
 - **Single writer.** HTTP, WebSocket, MCP and forwarded CLI commands all go through
   `writer.enqueue`.
-- **Live view.** Every applied batch is broadcast with its tape entries and the sounds as they now
-  stand. The page keeps a copy and re-renders what changed.
+- **Live view.** Every applied batch is broadcast with its tape entries, the sound list as it now
+  stands and the documents the batch touched. The page keeps a copy and re-renders what changed.
+
+## How the dashboard scales
+
+A project of hundreds of sounds, a hundred samples (some of them half a minute long) and thousands of
+commands on the tape opens at once, because the page never does the work of a list. The rules:
+
+- **The list comes first.** The state frame (`hello`) carries `index`: for each sound its id, voice,
+  status, a few words about what it is made of, the key of its card and, when the server already knows
+  them, the numbers and check result of its last render. A project with more than 100 sounds is
+  *lean*: no sound documents in the frame (the page asks for `GET /api/sound/<id>.json` when it opens
+  one) and only the newest 200 tape entries (`GET /api/tape?before=<seq>` has the earlier ones, and the
+  frame says whether undo and redo would do anything, since the page does not hold the whole tape). A
+  batch carries the list and only the documents it touched. A small project still gets everything.
+- **Thumbnails are the server's.** A card's waveform peaks and spectrogram bytes, its duration,
+  loudness and checks are a *card*, worked out by worker threads (`server/src/thumbs.ts`, so the server's
+  own thread never renders for a page), kept in memory and in `.cache/thumbs/` by a key that holds the
+  render's content hash, the loudness rule and the style, and served as `GET /api/card/<id>.json` (about
+  16 KB). A page asks for the cards that are on, or near, the screen, four at a time, newest request
+  first; a quiet pass works out the rest when no page is waiting, announcing each result so the list's
+  badges and the checks filter fill in. The browser draws what it is sent and renders nothing for a card.
+- **Playing renders in a Web Worker** (`ui/src/render.worker.ts`), which fetches the samples the sound
+  names (and only those) and renders with the same core as Node: the hash of what the page plays
+  equals the Node render's, and the test says so for a stereo 30 s loop with sample layers. A second
+  worker does the editor's long measurements and layer strips, so playing never waits behind them.
+  The editors still render the one open sound on the page's thread (a sound under 3 s; a longer
+  one is measured in the worker and the editor shows "measuring…" until the numbers come).
+- **Long lists are paged and filtered.** The sound list and the audition page show 48 cards and more
+  as you scroll, with filters on name prefix, voice, status, checks and tag. The set page measures its
+  spread on the server (`GET /api/set/<id>.json`). The cards re-render only when something they show
+  has changed.
+- Samples are looked at by name, size and time stamp, and what was worked out about them (their
+  hashes) is kept in `.cache/samples.json`, so starting on a hundred samples does not read them.
 
 ## Requests, await and presence
 

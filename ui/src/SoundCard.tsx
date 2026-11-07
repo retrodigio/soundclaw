@@ -3,12 +3,12 @@
 // The requests on the sound show where they stand: sent, seen by an agent, claimed, blocked
 // (answer it here), done.
 
-import { useState } from 'react';
-import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, isStereo, layerLabel, tagsNote, checkSummary, checksPass, type Sound, type WorkRequest } from '@soundclaw/core';
+import { memo, useState } from 'react';
+import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, isStereo, layerLabel, tagsNote, type Sound, type WorkRequest } from '@soundclaw/core';
+import type { SoundSummary } from '@soundclaw/server/protocol';
+import { CardImages } from './CardImages.tsx';
 import { NoListener, unattended, useNow } from './Listening.tsx';
 import type { Store } from './store.ts';
-import { Spectrogram } from './Spectrogram.tsx';
-import { Waveform } from './Waveform.tsx';
 
 const fmt = (n: number) => String(n);
 
@@ -45,14 +45,14 @@ export function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
 const slug = (t: string): string => t.replace(/[^a-z]+/g, '-');
 
 /** Listening feedback: click quick tags, add a few words, send. It reaches the agent as a request with the tags. */
-export function Feedback({ store, sound }: { store: Store; sound: Sound }) {
+export function Feedback({ store, sound }: { store: Store; sound: { id: string } }) {
   const [tags, setTags] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [other, setOther] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const similar = tags.includes(SIMILAR_TAG);
   const toggle = (t: string) => setTags((xs) => (xs.includes(t) ? xs.filter((x) => x !== t) : [...xs, t]));
-  const others = store.sounds.filter((x) => x.id !== sound.id);
+  const others = store.index.filter((x) => x.id !== sound.id);
   const send = async () => {
     const r = await store.feedback(sound.id, tags, note, similar && other ? other : undefined);
     if (r.ok) { setTags([]); setNote(''); setOther(''); setProblem(null); } else setProblem(r.error ?? 'refused');
@@ -77,60 +77,74 @@ export function Feedback({ store, sound }: { store: Store; sound: Sound }) {
   );
 }
 
-export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
+export interface SoundCardProps {
+  store: Store;
+  sound: SoundSummary;
+  /** The document, when the page has it (always in a small project; in a lean one once the sound has been opened). */
+  doc: Sound | undefined;
+  playing: boolean;
+  plays: number;
+  mine: WorkRequest[];
+  /** What a request's row shows besides the request itself (who is listening). */
+  presence: string;
+}
+
+/** Renders again only when something this card shows changed: the list updates often while the server works out the cards. */
+export const SoundCard = memo(function SoundCard({ store, sound, doc, playing, plays, mine }: SoundCardProps) {
   const [asking, setAsking] = useState(false);
   const [feeding, setFeeding] = useState(false);
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
-  const samples = store.render(sound);
-  const measured = store.measure(sound);
-  const pass = checksPass(measured.checks);
-  const failing = measured.checks.filter((k) => !k.pass);
-  const playing = store.playing === sound.id;
-  const plays = store.played.filter((p) => p.id === sound.id && !p.slot).length;
-  const mine = store.requests.filter((q) => q.sound === sound.id);
+  // the numbers the list knows (the last known render), else those of the card fetched for it
+  const held = store.cardOf(sound.id);
+  const info = sound.info ?? held;
+  const pass = info?.pass;
+  const failing = info?.failing ?? [];
   const send = async () => {
     const r = await store.askForChanges(sound.id, note);
     if (r.ok) { setAsking(false); setNote(''); setProblem(null); } else setProblem(r.error ?? 'refused');
   };
   return (
-    <article className="card" data-testid={`card-${sound.id}`} data-status={sound.status} data-hash={store.hashOf(sound)}>
+    <article className="card" data-testid={`card-${sound.id}`} data-status={sound.status} data-hash={info?.hash ?? ''}>
       <header>
         <h2>{sound.id}</h2>
-        <span className={`chip check-${pass ? 'pass' : 'fail'}`} data-testid={`check-${sound.id}`} data-pass={pass} data-failing={failing.map((k) => k.name).join(',')} title={checkSummary(measured.checks)}>
-          {pass ? '✓ checks pass' : `✗ ${failing.map((k) => k.name).join(', ')}`}
+        <span className={`chip check-${pass === undefined ? 'pending' : pass ? 'pass' : 'fail'}`} data-testid={`check-${sound.id}`} {...(pass === undefined ? {} : { 'data-pass': pass })} data-failing={failing.join(',')} title={info?.summary ?? 'not checked yet'}>
+          {pass === undefined ? '… checking' : pass ? '✓ checks pass' : `✗ ${failing.join(', ')}`}
         </span>
         <span className={`chip status-${sound.status}`} data-testid={`status-${sound.id}`}>{sound.status}</span>
       </header>
-      <Waveform samples={samples} id={sound.id} />
-      <Spectrogram spec={measured.spec} id={sound.id} />
-      {sound.voice === 'tone' ? (
-        <div className="params" data-testid={`params-${sound.id}`}>
-          <span>{fmt(sound.frequency)} Hz</span><span>{fmt(sound.duration)} s</span><span>volume {fmt(sound.volume)}</span>
+      <CardImages store={store} id={sound.id} soundKey={sound.key} />
+      {!doc ? (
+        <div className="params" data-testid={`params-${sound.id}`} data-voice={sound.voice} title="Edit opens the sound's editor.">
+          <span className="dim">{sound.voice} · {sound.label}</span>
         </div>
-      ) : sound.voice === 'layered' ? (
+      ) : doc.voice === 'tone' ? (
+        <div className="params" data-testid={`params-${sound.id}`}>
+          <span>{fmt(doc.frequency)} Hz</span><span>{fmt(doc.duration)} s</span><span>volume {fmt(doc.volume)}</span>
+        </div>
+      ) : doc.voice === 'layered' ? (
         <div className="params layered" data-testid={`params-${sound.id}`} data-voice="layered" title="A layered sound: its layers and master effects. Edit opens the layer editor.">
-          {sound.layers.length === 0 && <span className="dim">no layers yet</span>}
-          {sound.layers.map((l, i) => (
+          {doc.layers.length === 0 && <span className="dim">no layers yet</span>}
+          {doc.layers.map((l, i) => (
             <span key={l.salt} className={l.mute ? 'dim' : 'changed'} data-testid={`layer-${sound.id}-${i + 1}`}>{i + 1} {layerLabel(l)}{l.mute ? ' (muted)' : ''}{l.solo ? ' (solo)' : ''}{l.fx.length ? ` + ${l.fx.map((f) => f.kind).join(', ')}` : ''}</span>
           ))}
-          {sound.master.length > 0 && <span className="changed" data-testid={`master-${sound.id}`}>master: {sound.master.map((f) => f.kind).join(', ')}</span>}
-          {isStereo(sound) && <span className="changed" data-testid={`stereo-${sound.id}`}>stereo</span>}
+          {doc.master.length > 0 && <span className="changed" data-testid={`master-${sound.id}`}>master: {doc.master.map((f) => f.kind).join(', ')}</span>}
+          {isStereo(doc) && <span className="changed" data-testid={`stereo-${sound.id}`}>stereo</span>}
         </div>
       ) : (
         <div className="params classic" data-testid={`params-${sound.id}`} data-voice="classic" title="The classic voice's 25 parameters; Edit opens the sliders. Changed from the default in bold.">
           {CLASSIC_FIELDS.map((f) => (
-            <span key={f.name} className={sound.patch[f.name] === f.default ? 'dim' : 'changed'} data-testid={`param-${sound.id}-${f.name}`} title={f.help}>
-              {f.name} {f.name === 'wave' ? WAVE_NAMES[sound.patch.wave] : fmt(sound.patch[f.name])}
+            <span key={f.name} className={doc.patch[f.name] === f.default ? 'dim' : 'changed'} data-testid={`param-${sound.id}-${f.name}`} title={f.help}>
+              {f.name} {f.name === 'wave' ? WAVE_NAMES[doc.patch.wave] : fmt(doc.patch[f.name])}
             </span>
           ))}
-          {sound.patch.seed !== undefined && <span className="changed" data-testid={`param-${sound.id}-seed`}>seed {sound.patch.seed}</span>}
+          {doc.patch.seed !== undefined && <span className="changed" data-testid={`param-${sound.id}-seed`}>seed {doc.patch.seed}</span>}
         </div>
       )}
       <div className="dim analysis" data-testid={`numbers-${sound.id}`}>
-        {measured.analysis.duration.toFixed(2)} s · {Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · {Number.isFinite(measured.analysis.truePeakDb) ? measured.analysis.truePeakDb.toFixed(1) : '−∞'} dBTP
+        {info ? `${info.duration.toFixed(2)} s · ${info.lufs !== null ? info.lufs.toFixed(1) : '−∞'} LUFS · ${info.truePeakDb !== null ? info.truePeakDb.toFixed(1) : '−∞'} dBTP` : '…'}
       </div>
-      <div className="dim hash" title="Hash of the rendered samples; the CLI and MCP print the same first 12 digits">samples {store.hashOf(sound).slice(0, 12)}</div>
+      <div className="dim hash" title="Hash of the rendered samples; the CLI and MCP print the same first 12 digits">samples {(info?.hash ?? '').slice(0, 12)}</div>
       <div className="card-actions">
         <button className="play" data-testid={`play-${sound.id}`} data-plays={plays} data-playing={playing} onClick={() => void store.play(sound.id)} aria-label={`${playing ? 'Stop' : 'Play'} ${sound.id}`}>
           {playing ? '■ Stop' : '▶ Play'}
@@ -151,4 +165,5 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
       {mine.map((q) => <RequestRow key={q.id} store={store} q={q} />)}
     </article>
   );
-}
+}, (a, b) => a.sound === b.sound && a.doc === b.doc && a.playing === b.playing && a.plays === b.plays && a.presence === b.presence && a.store === b.store
+  && a.mine.length === b.mine.length && JSON.stringify(a.mine) === JSON.stringify(b.mine));

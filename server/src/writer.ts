@@ -6,7 +6,7 @@
 import { BIBLE_FILE, STYLE_FILE, musicGuide, type MusicGuide } from '@soundclaw/core';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
+import { activeGroups, renderKey, AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, sha256Text, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
@@ -14,7 +14,8 @@ import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
 import { normalizePlan } from './normalize.ts';
 import { SongBench, type SongMeasured } from './songs.ts';
-import type { ServerMessage, Snapshot } from './protocol.ts';
+import { LEAN_AT, type CardLite, type ServerMessage, type Snapshot, type SoundSummary } from './protocol.ts';
+import { Thumbs } from './thumbs.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
 
 export interface RunRequest {
@@ -41,6 +42,9 @@ export interface WriterOptions {
   now?: () => string;
 }
 
+/** The newest tape entries a lean snapshot carries. */
+const TAPE_PAGE = 200;
+
 const utcNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The sound a tape command is about (its first argument), if any. */
@@ -60,6 +64,8 @@ export class Writer {
   readonly bench: SongBench;
   /** The project's imported samples (samples/*.wav). */
   readonly samples: SampleStore;
+  /** The cards (numbers, checks, thumbnails) worked out in worker threads. */
+  readonly thumbs: Thumbs;
   /** What the checks are held to: the project's `style`, else the defaults. */
   readonly style: Style;
   private readonly measured = new Map<string, Measured>();
@@ -75,6 +81,7 @@ export class Writer {
     this.cache = new RenderCache(project.dir);
     this.bench = new SongBench(this);
     this.samples = new SampleStore(project.dir);
+    this.thumbs = new Thumbs(this);
     try {
       this.style = resolveStyle(project.json.style);
     } catch (e) {
@@ -338,16 +345,75 @@ export class Writer {
     return es;
   }
 
+  private readonly specs = new WeakMap<Sound, { epoch: string; spec: { key: string; style: Style; basis: string } }>();
+
+  /** What a card's key depends on besides the sound: the sets (targets and classes) and the samples' bytes. */
+  private specEpoch(): string {
+    return `${[...this.library.sets.values()].map(serializeSet).join('\n')}|${this.samples.list().map((i) => i.sha256).join(',')}`;
+  }
+
+  /** What a sound's card is held to and kept by: the render, the loudness rule and the style (a set's target or a family's offset included). */
+  cardSpec(s: Sound, epoch: string = this.specEpoch()): { key: string; style: Style; basis: string } {
+    const have = this.specs.get(s);
+    if (have && have.epoch === epoch) return have.spec;
+    const rule = loudnessFor(s, this.library.sets.values(), this.style);
+    const style = soundStyle(s, this.library.sets.values(), this.style);
+    const loop = s.voice === 'layered' && !!s.loop;
+    const render = renderKey(s, (n) => this.samples.hash(n) ?? 'missing');
+    const spec = { key: sha256Text(`${render}|${JSON.stringify(style)}|${rule.basis}|${loop ? 'loop' : ''}`), style, basis: rule.basis };
+    this.specs.set(s, { epoch, spec });
+    return spec;
+  }
+
+  /** Every sound with its card spec. */
+  cardSpecs(): { s: Sound; spec: { key: string; style: Style; basis: string } }[] {
+    const epoch = this.specEpoch();
+    return this.sounds().map((s) => ({ s, spec: this.cardSpec(s, epoch) }));
+  }
+
+  /** The sound list: what the page shows before it has any document, with the numbers the server already knows. */
+  index(): SoundSummary[] {
+    return this.cardSpecs().map(({ s, spec }) => {
+      const info = this.thumbs.lite(spec.key);
+      const kinds = s.voice === 'layered' ? s.layers.map((l) => l.kind) : [];
+      const label = s.voice === 'layered' ? `${s.layers.length} layer${s.layers.length === 1 ? '' : 's'}${kinds.length ? `: ${kinds.join(', ')}` : ''}${s.loop ? ` · loop ${s.loop.length} s` : ''}` : s.voice;
+      return { id: s.id, voice: s.voice, status: s.status, key: spec.key, label, ...(info ? { info } : {}) };
+    });
+  }
+
+  /** Whether undo and redo would do anything. */
+  historyState(): { canUndo: boolean; canRedo: boolean } {
+    const active = activeGroups(this.entries);
+    return { canUndo: this.entries.some((e) => active.has(e.group) && !/^(undo|redo) /.test(e.cmd)), canRedo: this.entries.some((e) => active.has(e.group) && e.cmd.startsWith('undo ')) };
+  }
+
+  /** The tape's entries before `seq` (the newest `limit` of them), for the page's "earlier" button. */
+  tapePage(before: number | null, limit: number): TapeEntry[] {
+    const upto = before === null ? this.entries : this.entries.filter((e) => e.seq < before);
+    return upto.slice(-limit);
+  }
+
+  /** Tell the watchers cards are ready (the list's badges). */
+  cardsReady(cards: { id: string; key: string; info: CardLite }[]): void {
+    this.emit({ type: 'cards', cards });
+  }
+
+  /** The sound documents a page gets at once, and the tape entries: all in a small project, the list and the newest entries in a lean one. */
   snapshot(): Snapshot {
+    const lean = this.library.size > LEAN_AT;
     return {
       project: { name: this.project.json.name, dir: this.project.dir },
-      sounds: this.sounds(),
+      index: this.index(),
+      sounds: lean ? [] : this.sounds(),
+      lean,
+      history: this.historyState(),
+      tapeTotal: this.entries.length,
       sets: this.sets(),
       songs: this.songs().map(songToJson),
       instruments: this.instruments(),
       samples: this.samples.list(),
       style: this.style,
-      tape: [...this.entries],
+      tape: lean ? this.entries.slice(-TAPE_PAGE) : [...this.entries],
       requests: [...readRequests(this.project).values()],
       presence: this.hub.presence(),
     };
@@ -469,7 +535,10 @@ export class Writer {
     const touchedSongs = [...new Set([...before.songs.keys(), ...next.songs.keys()])].filter((id) => songText2(before, id) !== songText2(next, id)).sort();
     const instText = (lib: Library, id: string) => (lib.instruments.has(id) ? JSON.stringify(lib.instruments.get(id)) : null);
     const touchedInstruments = [...new Set([...before.instruments.keys(), ...next.instruments.keys()])].filter((id) => instText(before, id) !== instText(next, id)).sort();
-    this.emit({ type: 'batch', by: req.by, group, entries: added, sounds: this.sounds(), sets: this.sets(), songs: this.songs().map(songToJson), instruments: this.instruments() });
+    if (this.listeners.size) {
+      const lean = next.size > LEAN_AT;
+      this.emit({ type: 'batch', by: req.by, group, entries: added, index: this.index(), sounds: lean ? touched.filter((id) => next.has(id)).map((id) => next.get(id)!) : this.sounds(), removed: touched.filter((id) => !next.has(id)), lean, history: this.historyState(), sets: this.sets(), songs: this.songs().map(songToJson), instruments: this.instruments() });
+    }
     this.hub.marks(req.by, added, at);
     return { ok: true, group, added, touched, touchedSets, touchedSongs, touchedInstruments, warnings };
   }

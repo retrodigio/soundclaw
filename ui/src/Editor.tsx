@@ -9,7 +9,7 @@ import {
   Coalescer, EDITOR_GROUPS, GENERATOR_NAMES, MUTATE_AMOUNT, WAVE_NAMES, classicField, csvFileText, diffPatch, patchFileText, resetCommand, restoreCommand, roundParam, setCommand,
   type ClassicKey, type ClassicPatch, type Edits, type Scheduler, type Sound,
 } from '@soundclaw/core';
-import { Spectrogram } from './Spectrogram.tsx';
+import { MelSpectrogram } from './Spectrogram.tsx';
 import { LoudnessClass } from './LoudnessClass.tsx';
 import type { Store } from './store.ts';
 import { download } from './download.ts';
@@ -65,7 +65,9 @@ function Slider({ name, value, onMove, onRelease, onReset }: SliderProps) {
 }
 
 function Numbers({ store, sound }: { store: Store; sound: Sound }) {
-  const a = store.measure(sound).analysis;
+  const m = store.measure(sound);
+  if (m.pending) return <span className="dim" data-testid="editor-numbers">measuring…</span>;
+  const a = m.analysis;
   const hz = (v: number | null) => (v === null ? '—' : `${v.toFixed(0)} Hz`);
   return (
     <span className="dim" data-testid="editor-numbers">
@@ -78,7 +80,7 @@ function AB({ store, sound }: { store: Store; sound: Sound }) {
   const pin = store.pinned(sound.id);
   const others = store.sounds.filter((s) => s.id !== sound.id);
   const keep = pin && sound.voice === 'classic' && pin.sound.voice === 'classic' ? restoreCommand(sound.id, sound.patch, pin.sound.patch) : null;
-  const num = (s: Sound) => { const a = store.measure(s).analysis; return [a.duration.toFixed(2), Number.isFinite(a.lufs) ? a.lufs.toFixed(1) : '−∞', a.centroid.mean.toFixed(0), a.pitch.start === null ? '—' : a.pitch.start.toFixed(0)]; };
+  const num = (s: Sound) => { const m = store.measure(s); if (m.pending) return ['…', '…', '…', '…']; const a = m.analysis; return [a.duration.toFixed(2), Number.isFinite(a.lufs) ? a.lufs.toFixed(1) : '−∞', a.centroid.mean.toFixed(0), a.pitch.start === null ? '—' : a.pitch.start.toFixed(0)]; };
   return (
     <section className="panel" data-testid="ab" aria-label="A/B">
       <h3>A / B</h3>
@@ -232,7 +234,7 @@ function ClassicEditor({ store, id }: { store: Store; id: string }) {
         <div className="side-col">
           <section className="panel" aria-label="Sound">
             <Waveform samples={store.render(preview)} id={id} />
-            <Spectrogram spec={measured.spec} id={id} />
+            {!measured.pending && <MelSpectrogram spec={measured.spec} id={id} />}
             <div className="dim hash">samples {store.hashOf(sound).slice(0, 12)}</div>
           </section>
 

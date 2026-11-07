@@ -6,6 +6,23 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### The dashboard on large projects
+- **A project of 400 sounds, 100 samples and 3,000 commands opens at once.** The page used to fetch every sample and render and measure
+  every sound on its own thread before it listed anything (a 60-sound slice took 88 s and froze the tab; the whole project never finished).
+  Now the list appears from the state frame (about 0.3 s for 400 sounds), thumbnails come from the server's cache as cards come into view,
+  and scrolling never blocks (the longest task after the first paint was under 100 ms).
+- **Cards come from the server.** Waveform peaks, the spectrogram, duration, loudness and the checks are worked out in worker threads, kept in
+  `.cache/thumbs` by content, and served small (`/api/card/<id>.json`); the list's check badges and filters fill in as a quiet pass works through the
+  project.
+- **Playing renders in a Web Worker** that fetches only the samples the sound names; the editors measure long sounds there too. What the page plays
+  is still the Node render, bit for bit.
+- **The state frame for big projects** (more than 100 sounds): the list first, sound documents on demand, the newest 200 tape entries (earlier ones
+  on a button), batches that carry only what they touched.
+- **Lists are paged and filterable**: the sounds and the audition page show 48 cards and more as you scroll, with filters on name prefix, voice, status,
+  checks and tag.
+- Samples' hashes are kept in `.cache/samples.json` (starting a server on a hundred samples took seconds); the render cache writes files whole and
+  renames them into place, so a worker never reads half a file.
+
 ### Fixes from the first real use of the music tools
 - **`render-match` no longer forces musical compromises.** A note that touches the one before it has no rise in level to find; its onset is now found
   in the change of pitch (and a note of the same pitch as the one before has none to find). `instrument set <id> legato=yes` declares a legato voice

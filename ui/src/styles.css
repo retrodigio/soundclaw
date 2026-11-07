@@ -236,3 +236,6 @@ svg.vel-lane { display: block; background: #101114; margin-top: 2px; touch-actio
 .helper-preview pre { background: #121316; padding: 6px; border-radius: 6px; font-size: 11px; overflow-x: auto; margin: 2px 0; }
 .helper-preview code { display: block; word-break: break-all; margin-bottom: 4px; }
 .row.wrap { flex-wrap: wrap; }
+.more { display: flex; justify-content: center; padding: 14px; }
+.chip.check-pending { opacity: 0.6; }
+.thumbs { display: flex; flex-direction: column; gap: 4px; }

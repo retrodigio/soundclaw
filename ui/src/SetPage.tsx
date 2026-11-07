@@ -3,27 +3,26 @@
 // distance matrix, with the set-spread verdict.
 
 import { useState } from 'react';
-import { checksPass, formatSpread, type SetDoc, type Sound } from '@soundclaw/core';
+import { formatSpread, type SetDoc } from '@soundclaw/core';
+import type { SoundSummary } from '@soundclaw/server/protocol';
+import { CardImages } from './CardImages.tsx';
 import type { Store } from './store.ts';
-import { Spectrogram } from './Spectrogram.tsx';
-import { Waveform } from './Waveform.tsx';
 
 const randomSeed = (): number => Math.floor(Math.random() * 4294967296);
 
-function Member({ store, sound, index }: { store: Store; sound: Sound; index: number }) {
-  const m = store.measure(sound);
-  const pass = checksPass(m.checks);
+function Member({ store, sound, index }: { store: Store; sound: SoundSummary; index: number }) {
+  const info = sound.info ?? store.cardOf(sound.id);
+  const pass = info?.pass;
   const playing = store.playing === sound.id;
   const current = store.sequence?.ids[store.sequence.index] === sound.id;
   return (
-    <article className={`card member${current ? ' current' : ''}`} data-testid={`member-${sound.id}`} data-current={current} data-hash={store.hashOf(sound)}>
+    <article className={`card member${current ? ' current' : ''}`} data-testid={`member-${sound.id}`} data-current={current} data-hash={info?.hash ?? ''}>
       <header>
         <h2>{index + 1} {sound.id}</h2>
-        <span className={`chip check-${pass ? 'pass' : 'fail'}`} data-testid={`member-check-${sound.id}`} data-pass={pass}>{pass ? '✓' : `✗ ${m.checks.filter((k) => !k.pass).map((k) => k.name).join(', ')}`}</span>
+        <span className={`chip check-${pass === undefined ? 'pending' : pass ? 'pass' : 'fail'}`} data-testid={`member-check-${sound.id}`} {...(pass === undefined ? {} : { 'data-pass': pass })}>{pass === undefined ? '…' : pass ? '✓' : `✗ ${info!.failing.join(', ')}`}</span>
       </header>
-      <Waveform samples={store.render(sound)} id={sound.id} />
-      <Spectrogram spec={m.spec} id={sound.id} />
-      <div className="dim analysis" data-testid={`member-numbers-${sound.id}`}>{m.analysis.duration.toFixed(2)} s · {Number.isFinite(m.analysis.lufs) ? m.analysis.lufs.toFixed(1) : '−∞'} LUFS</div>
+      <CardImages store={store} id={sound.id} soundKey={sound.key} />
+      <div className="dim analysis" data-testid={`member-numbers-${sound.id}`}>{info ? `${info.duration.toFixed(2)} s · ${info.lufs !== null ? info.lufs.toFixed(1) : '−∞'} LUFS` : '…'}</div>
       <div className="card-actions">
         <button className="play" data-testid={`member-play-${sound.id}`} data-playing={playing} onClick={() => void store.play(sound.id)}>{playing ? '■ Stop' : '▶ Play'}</button>
         <a className="button" href={`#/sound/${sound.id}`} data-testid={`member-edit-${sound.id}`}>Edit</a>
@@ -34,8 +33,8 @@ function Member({ store, sound, index }: { store: Store; sound: Sound; index: nu
 
 export function SetPage({ store, set }: { store: Store; set: SetDoc }) {
   const [gap, setGap] = useState(400);
-  const members = set.members.map((id) => store.sounds.find((s) => s.id === id)).filter((s): s is Sound => !!s);
-  const measure = members.length >= 2 ? store.measureSet(set) : null;
+  const members = set.members.map((id) => store.summary(id)).filter((s): s is SoundSummary => !!s);
+  const measure = members.length >= 2 ? store.setMeasure(set) : null;
   const sequencing = store.sequence !== null;
   const style = store.style;
   return (

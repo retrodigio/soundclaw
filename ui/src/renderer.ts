@@ -1,0 +1,67 @@
+// The page's side of the render worker: ask for a sound's channels, get them when the worker has
+// rendered them. The page's own thread does no rendering for playback.
+
+import type { Sound, Style } from '@soundclaw/core';
+import type { SampleInfo } from '@soundclaw/server/protocol';
+import type { MeasureReply, RenderReply, RenderRequest, StripPeaks } from './render.worker.ts';
+
+export interface Rendered { key: string; channels: Float32Array[]; hash: string; ms: number }
+
+/** The samples a sound names (layers that play a file). */
+export function samplesNamed(s: Sound, all: readonly SampleInfo[]): SampleInfo[] {
+  if (s.voice !== 'layered') return [];
+  const names = new Set<string>();
+  for (const l of s.layers) if (l.kind === 'sample' && l.p.sample) names.add(String(l.p.sample));
+  return all.filter((x) => names.has(x.name));
+}
+
+/** Playing has a worker of its own: it never waits behind a long measurement. */
+type Lane = 'play' | 'work';
+
+export class Renderer {
+  private workers: Record<Lane, Worker | null> = { play: null, work: null };
+  private n = 0;
+  private waiting = new Map<number, { resolve(r: Rendered | MeasureReply | StripPeaks[]): void; reject(e: Error): void }>();
+
+  private start(lane: Lane): Worker {
+    if (this.workers[lane]) return this.workers[lane]!;
+    const w = new Worker(new URL('./render.worker.ts', import.meta.url), { type: 'module' });
+    w.onmessage = (ev: MessageEvent<RenderReply>) => {
+      const m = ev.data;
+      const f = this.waiting.get(m.id);
+      this.waiting.delete(m.id);
+      if (!f) return;
+      if (m.ok) f.resolve('measure' in m ? m.measure : 'strips' in m ? m.strips : { key: m.key, channels: m.channels, hash: m.hash, ms: m.ms });
+      else f.reject(new Error(m.error));
+    };
+    w.onerror = (e) => {
+      for (const f of this.waiting.values()) f.reject(new Error(e.message || 'the render worker failed'));
+      this.waiting.clear();
+      this.workers[lane] = null;
+    };
+    this.workers[lane] = w;
+    return w;
+  }
+
+  private ask(lane: Lane, q: Omit<RenderRequest, 'id' | 'samples'>, samples: readonly SampleInfo[]): Promise<Rendered | MeasureReply | StripPeaks[]> {
+    const id = ++this.n;
+    return new Promise((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject });
+      this.start(lane).postMessage({ ...q, id, samples: samplesNamed(q.sound, samples).map((x) => ({ name: x.name, sha256: x.sha256 })) } satisfies RenderRequest);
+    });
+  }
+
+  render(sound: Sound, samples: readonly SampleInfo[], token: string): Promise<Rendered> {
+    return this.ask('play', { sound, token, op: 'render' }, samples) as Promise<Rendered>;
+  }
+
+  /** Each layer of a layered sound on its own, as peaks (the editor's layer strips). */
+  strips(sound: Sound, samples: readonly SampleInfo[], token: string): Promise<StripPeaks[]> {
+    return this.ask('work', { sound, token, op: 'strips' }, samples) as Promise<StripPeaks[]>;
+  }
+
+  /** The numbers, checks and spectrogram of a sound, worked out in the worker (a long sound takes seconds). */
+  measure(sound: Sound, samples: readonly SampleInfo[], token: string, style: Style, basis: string): Promise<MeasureReply> {
+    return this.ask('work', { sound, token, op: 'measure', style, basis }, samples) as Promise<MeasureReply>;
+  }
+}

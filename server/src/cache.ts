@@ -2,8 +2,9 @@
 // made them (core's renderKey, which includes the renderer's version). A hit returns exactly the
 // samples a fresh render would. Kept in memory and in <project>/.cache/renders (ignored by git).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { threadId } from 'node:worker_threads';
 import { channelCount, floatBytes, floatsFromBytes, joinChannels, mixdown, renderChannels, renderKey, splitChannels, type SampleBank, type Sound } from '@soundclaw/core';
 
 const MEMORY_ENTRIES = 64;
@@ -60,7 +61,9 @@ export class RenderCache {
     const f = this.file(key);
     if (!f) return;
     mkdirSync(this.dir!, { recursive: true });
-    writeFileSync(f, floatBytes(samples));
+    // written whole and renamed into place: a worker thread may be reading the same key
+    writeFileSync(`${f}.${process.pid}.${threadId}.tmp`, floatBytes(samples));
+    renameSync(`${f}.${process.pid}.${threadId}.tmp`, f);
   }
 
   private remember(key: string, samples: Float32Array): void {

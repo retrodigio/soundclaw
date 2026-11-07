@@ -1,7 +1,7 @@
 // The project's samples: WAV files in <project>/samples/, imported with `sample import`. A sample
 // layer names one; its bytes' SHA-256 is part of the render key, so a changed file renders again.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { readSampleWav, resampleMethod, sha256Hex, type SampleBank, type SampleData } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -34,22 +34,54 @@ export const SAMPLE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/;
 interface Entry {
   stamp: string;
   info: SampleInfo;
-  data: SampleData;
+  /** The decoded audio: read when a render needs it, not when the list is asked for. */
+  data?: SampleData;
 }
 
 export class SampleStore implements SampleBank {
   readonly dir: string;
   private readonly entries = new Map<string, Entry>();
 
+  /** What was worked out about each file (by its size and time stamp), kept between runs: hashing a hundred files takes seconds. */
+  private readonly infoFile: string;
+  private known: Record<string, { stamp: string; info: SampleInfo }> | null = null;
+  private dirty = false;
+
   constructor(projectDir: string) {
     this.dir = join(projectDir, 'samples');
+    this.infoFile = join(projectDir, '.cache', 'samples.json');
+  }
+
+  private knownInfo(name: string, stamp: string): SampleInfo | undefined {
+    if (!this.known) {
+      try {
+        this.known = existsSync(this.infoFile) ? (JSON.parse(readFileSync(this.infoFile, 'utf8')) as typeof this.known) : {};
+      } catch {
+        this.known = {};
+      }
+    }
+    const k = this.known![name];
+    return k && k.stamp === stamp ? k.info : undefined;
+  }
+
+  /** Write the info kept for the files, if it changed. */
+  flush(): void {
+    if (!this.dirty || !this.known) return;
+    this.dirty = false;
+    try {
+      mkdirSync(join(this.dir, '..', '.cache'), { recursive: true });
+      writeFileSync(`${this.infoFile}.${process.pid}.tmp`, JSON.stringify(this.known));
+      renameSync(`${this.infoFile}.${process.pid}.tmp`, this.infoFile);
+    } catch {
+      // the cache is only a speed-up
+    }
   }
 
   private file(name: string): string {
     return join(this.dir, `${name}.wav`);
   }
 
-  private load(name: string): Entry | undefined {
+  private load(name: string, withData = false): Entry | undefined {
     if (!SAMPLE_NAME_RE.test(name)) return undefined;
     const f = this.file(name);
     // exact case: on a disk that ignores case `Boom` must not find boom.wav
@@ -57,29 +89,46 @@ export class SampleStore implements SampleBank {
     const st = statSync(f);
     const stamp = `${st.mtimeMs}:${st.size}`;
     const have = this.entries.get(name);
-    if (have && have.stamp === stamp) return have;
+    if (have && have.stamp === stamp && (have.data || !withData)) return have;
     try {
+      const known = have?.stamp === stamp ? have.info : this.knownInfo(name, stamp);
+      if (known && !withData) {
+        const e: Entry = { stamp, info: known };
+        this.entries.set(name, e);
+        return e;
+      }
       const bytes = new Uint8Array(readFileSync(f));
       const w = readSampleWav(bytes);
-      const e: Entry = { stamp, info: { name, sha256: sha256Hex(bytes), rate: w.rate, frames: w.frames, seconds: w.frames / w.rate, channels: w.channels, bytes: bytes.length }, data: { rate: w.rate, data: w.data, ...(w.left && w.right ? { left: w.left, right: w.right } : {}) } };
+      const info = known ?? { name, sha256: sha256Hex(bytes), rate: w.rate, frames: w.frames, seconds: w.frames / w.rate, channels: w.channels, bytes: bytes.length };
+      const e: Entry = { stamp, info, data: { rate: w.rate, data: w.data, ...(w.left && w.right ? { left: w.left, right: w.right } : {}) } };
       this.entries.set(name, e);
+      if (!known) { (this.known ??= {})[name] = { stamp, info }; this.dirty = true; }
       return e;
     } catch {
       return undefined;
     }
   }
 
+  private nameList: { stamp: number; names: string[] } | null = null;
+
   names(): string[] {
     if (!existsSync(this.dir)) return [];
-    return readdirSync(this.dir).filter((f) => f.endsWith('.wav') && SAMPLE_NAME_RE.test(f.slice(0, -4))).map((f) => f.slice(0, -4)).sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : a < b ? -1 : 1));
+    // the folder's listing is kept until the folder changes (it is asked for once for each sample looked at)
+    const stamp = statSync(this.dir).mtimeMs;
+    if (this.nameList?.stamp === stamp) return this.nameList.names;
+    const names = readdirSync(this.dir).filter((f) => f.endsWith('.wav') && SAMPLE_NAME_RE.test(f.slice(0, -4))).map((f) => f.slice(0, -4)).sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : a < b ? -1 : 1));
+    this.nameList = { stamp, names };
+    return names;
   }
 
   list(): SampleInfo[] {
-    return this.names().flatMap((n) => { const e = this.load(n); return e ? [e.info] : []; });
+    const all = this.names().flatMap((n) => { const e = this.load(n); return e ? [e.info] : []; });
+    this.flush();
+    return all;
   }
 
   get(name: string): SampleData | undefined {
-    return this.load(name)?.data;
+    return this.load(name, true)?.data;
   }
 
   hash(name: string): string | undefined {
@@ -136,6 +185,7 @@ export class SampleStore implements SampleBank {
     const other = this.names().find((n) => n !== name && n.toLowerCase() === name.toLowerCase());
     if (other) throw new ProjectError(`sample '${name}' clashes with the sample '${other}': names are unique ignoring case; give a different name (as=<name>)`);
     const dest = this.file(name);
+    this.nameList = null;
     let created = true;
     if (existsSync(dest)) {
       const old = new Uint8Array(readFileSync(dest));
@@ -147,6 +197,8 @@ export class SampleStore implements SampleBank {
       else writeFileSync(dest, bytes);
     }
     void w;
-    return { info: this.load(name)!.info, created };
+    const info = this.load(name)!.info;
+    this.flush();
+    return { info, created };
   }
 }

@@ -133,6 +133,7 @@ export interface WatchOptions {
 export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
+  o.writer.samples.list(); // the samples' hashes are worked out (or read from the cache) now, not when the first page connects
   const host = o.host ?? '127.0.0.1';
   const uiDir = findUiDir();
   const sockets = new Set<WsConnection>();
@@ -142,6 +143,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   const broadcast = (m: ServerMessage): void => {
     const text = JSON.stringify(m);
     for (const s of sockets) s.send(text);
+    if (m.type === 'batch' && sockets.size) setImmediate(() => o.writer.thumbs.warm());
   };
   const unsubscribe = o.writer.on(broadcast);
   const mcpHandler = o.mcp ? createMcpHandler(() => o.mcp!(), { onerror: () => undefined }) : null;
@@ -254,6 +256,40 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       }).catch((e: unknown) => json(res, 500, { error: (e as Error).message }));
       return;
     }
+    const cm = /^\/api\/card\/([A-Za-z][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);
+    if (cm) {
+      // A sound's card (numbers, checks, thumbnails), worked out by a worker thread and kept by the render's content.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      if (!o.writer.has(cm[1]!)) { json(res, 404, { error: `no sound '${cm[1]}'` }); return; }
+      o.writer.thumbs.card(cm[1]!).then((c) => { if (!res.writableEnded) json(res, 200, c); }, (e: unknown) => { if (!res.writableEnded) json(res, 500, { error: (e as Error).message }); });
+      return;
+    }
+    const dm = /^\/api\/sound\/([A-Za-z][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);
+    if (dm) {
+      // A sound's document (a lean snapshot carries the list only).
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      if (!o.writer.has(dm[1]!)) { json(res, 404, { error: `no sound '${dm[1]}'` }); return; }
+      json(res, 200, o.writer.sound(dm[1]!));
+      return;
+    }
+    if (url.pathname === '/api/tape') {
+      // The tape's entries before ?before= (a seq), the newest ?limit= of them.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      const before = url.searchParams.get('before');
+      const limit = Math.max(1, Math.min(2000, Number(url.searchParams.get('limit') ?? 500) || 500));
+      json(res, 200, { entries: o.writer.tapePage(before === null ? null : Number(before), limit), total: o.writer.tape().length });
+      return;
+    }
+    const stm = /^\/api\/set\/([A-Za-z][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);
+    if (stm) {
+      // A set's distance matrix and verdict, measured on the server.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      o.writer.enqueue(() => {
+        if (!o.writer.hasSet(stm[1]!)) { json(res, 404, { error: `no set '${stm[1]}'` }); return; }
+        json(res, 200, o.writer.measureSetDoc(stm[1]!));
+      }).catch((e: unknown) => json(res, 500, { error: (e as Error).message }));
+      return;
+    }
     if (url.pathname === '/api/samples') {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       json(res, 200, o.writer.samples.list());
@@ -323,6 +359,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
     const ws = acceptWebSocket(req, socket);
     if (!ws) return;
     sockets.add(ws);
+    setImmediate(() => o.writer.thumbs.warm());
     ws.onclose = () => sockets.delete(ws);
     ws.onmessage = (text) => {
       let m: ClientMessage;
@@ -358,6 +395,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   }
   if (lastErr) {
     unsubscribe();
+    void o.writer.thumbs.close();
     throw lastErr;
   }
   port = (server.address() as AddressInfo).port;
@@ -368,6 +406,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
     close: () => new Promise<void>((resolve) => {
       unsubscribe();
       o.writer.hub.close();
+      void o.writer.thumbs.close();
       void mcpHandler?.close();
       for (const s of sockets) s.close(1001);
       server.close(() => resolve());

@@ -54,10 +54,10 @@ test('a classic sound has the menu too, and the card badge follows the class', a
   await page.getByTestId('loudness-class').selectOption('ui');
   await expect(page.getByTestId('loudness-target')).toHaveText('-28.0 LUFS ±3');
   await page.getByTestId('back').click();
-  const after = await page.getByTestId('check-beep').getAttribute('data-failing');
   expect(typeof before).toBe('string');
-  expect(typeof after).toBe('string');
-  expect((after ?? '').includes('loudness')).toBe(((await agent.cli(['check', agent.dir, 'beep'])).out.match(/loudness\s+FAIL/) ?? []).length > 0);
+  // the server works the card out for the new class, and the badge follows
+  const cliFails = ((await agent.cli(['check', agent.dir, 'beep'])).out.match(/loudness\s+FAIL/) ?? []).length > 0;
+  await expect.poll(async () => ((await page.getByTestId('check-beep').getAttribute('data-failing')) ?? '').includes('loudness')).toBe(cliFails);
 });
 
 test('copy, rename and remove from the command line show on the cards at once, and undo brings them back', async ({ page }) => {

@@ -3,23 +3,21 @@
 // (tag, status, check) and the keyboard: arrows move, space plays, a approves, r asks for changes.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { checksPass, type Sound } from '@soundclaw/core';
+import type { SoundSummary } from '@soundclaw/server/protocol';
+import { CardImages } from './CardImages.tsx';
+import { FilterBar, NO_FILTERS, matches, useMore, type Filters } from './SoundList.tsx';
 import { Feedback } from './SoundCard.tsx';
 import type { Store } from './store.ts';
-import { Waveform } from './Waveform.tsx';
-
-type StatusFilter = 'any' | 'draft' | 'approved' | 'rejected';
-type CheckFilter = 'any' | 'pass' | 'fail';
 
 function typing(t: EventTarget | null): boolean {
   const e = t as HTMLElement | null;
   return !!e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT' || e.isContentEditable);
 }
 
-function Card({ store, sound, selected, asking, onSelect, onAsk }: { store: Store; sound: Sound; selected: boolean; asking: boolean; onSelect(): void; onAsk(open: boolean): void }) {
-  const m = store.measure(sound);
-  const pass = checksPass(m.checks);
-  const failing = m.checks.filter((k) => !k.pass).map((k) => k.name);
+function Card({ store, sound, selected, asking, onSelect, onAsk }: { store: Store; sound: SoundSummary; selected: boolean; asking: boolean; onSelect(): void; onAsk(open: boolean): void }) {
+  const info = sound.info ?? store.cardOf(sound.id);
+  const pass = info?.pass;
+  const failing = info?.failing ?? [];
   const playing = store.playing === sound.id;
   const current = store.sequence?.ids[store.sequence.index] === sound.id;
   const [feeding, setFeeding] = useState(false);
@@ -35,14 +33,14 @@ function Card({ store, sound, selected, asking, onSelect, onAsk }: { store: Stor
     if (r.ok) { onAsk(false); setNote(''); setProblem(null); } else setProblem(r.error ?? 'refused');
   };
   return (
-    <article ref={ref} className={`card aud${selected ? ' selected' : ''}${current ? ' current' : ''}`} data-testid={`aud-${sound.id}`} data-selected={selected} data-current={current} data-status={sound.status} data-pass={pass} onClick={onSelect}>
+    <article ref={ref} className={`card aud${selected ? ' selected' : ''}${current ? ' current' : ''}`} data-testid={`aud-${sound.id}`} data-selected={selected} data-current={current} data-status={sound.status} {...(pass === undefined ? {} : { 'data-pass': pass })} onClick={onSelect}>
       <header>
         <h2>{sound.id}</h2>
-        <span className={`chip check-${pass ? 'pass' : 'fail'}`} data-testid={`aud-check-${sound.id}`} data-pass={pass} data-failing={failing.join(',')} title={failing.join(', ')}>{pass ? '✓' : `✗ ${failing.join(', ')}`}</span>
+        <span className={`chip check-${pass === undefined ? 'pending' : pass ? 'pass' : 'fail'}`} data-testid={`aud-check-${sound.id}`} {...(pass === undefined ? {} : { 'data-pass': pass })} data-failing={failing.join(',')} title={failing.join(', ')}>{pass === undefined ? '…' : pass ? '✓' : `✗ ${failing.join(', ')}`}</span>
         <span className={`chip status-${sound.status}`} data-testid={`aud-status-${sound.id}`}>{sound.status}</span>
       </header>
-      <Waveform samples={store.render(sound)} id={`aud-${sound.id}`} />
-      <div className="dim analysis">{m.analysis.duration.toFixed(2)} s · {Number.isFinite(m.analysis.lufs) ? m.analysis.lufs.toFixed(1) : '−∞'} LUFS{tags.length ? ` · ${tags.join(', ')}` : ''}</div>
+      <CardImages store={store} id={sound.id} soundKey={sound.key} waveId={`aud-${sound.id}`} spec={false} />
+      <div className="dim analysis">{info ? `${info.duration.toFixed(2)} s · ${info.lufs !== null ? info.lufs.toFixed(1) : '−∞'} LUFS` : '…'}{tags.length ? ` · ${tags.join(', ')}` : ''}</div>
       <div className="card-actions">
         <button className="play" data-testid={`aud-play-${sound.id}`} data-playing={playing} onClick={(e) => { e.stopPropagation(); onSelect(); void store.play(sound.id); }}>{playing ? '■' : '▶'}</button>
         <button data-testid={`aud-approve-${sound.id}`} disabled={sound.status === 'approved'} onClick={(e) => { e.stopPropagation(); void store.approve(sound.id); }}>Approve</button>
@@ -64,24 +62,25 @@ function Card({ store, sound, selected, asking, onSelect, onAsk }: { store: Stor
 
 export function AuditionPage({ store, setId }: { store: Store; setId: string | null }) {
   const set = setId ? store.sets.find((s) => s.id === setId) ?? null : null;
-  const [status, setStatus] = useState<StatusFilter>('any');
-  const [check, setCheck] = useState<CheckFilter>('any');
-  const [tag, setTag] = useState('');
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [gap, setGap] = useState(500);
   const [sel, setSel] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const grid = useRef<HTMLDivElement>(null);
 
-  const pool = set ? set.members.map((id) => store.sounds.find((s) => s.id === id)).filter((s): s is Sound => !!s) : store.sounds;
-  const allTags = useMemo(() => [...new Set(store.requests.filter((q) => pool.some((s) => s.id === q.sound)).flatMap((q) => q.tags ?? []))].sort(), [store.requests, pool.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const shown = pool.filter((s) => {
-    if (status !== 'any' && s.status !== status) return false;
-    if (check !== 'any' && checksPass(store.measure(s).checks) !== (check === 'pass')) return false;
-    if (tag && !store.requests.some((q) => q.sound === s.id && (q.tags ?? []).includes(tag))) return false;
-    return true;
-  });
+  const pool = set ? set.members.map((id) => store.summary(id)).filter((s): s is SoundSummary => !!s) : store.index;
+  const tagMap = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const q of store.requests) if (q.tags?.length) m.set(q.sound, [...(m.get(q.sound) ?? []), ...q.tags]);
+    return m;
+  }, [store.requests]);
+  const allTags = useMemo(() => [...new Set(pool.flatMap((s) => tagMap.get(s.id) ?? []))].sort(), [tagMap, pool.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = pool.filter((s) => matches(s, filters, (id) => tagMap.get(id) ?? []));
   const ids = shown.map((s) => s.id);
   const cur = sel && ids.includes(sel) ? sel : ids[0] ?? null;
+  const { shown: upto, sentinel, more } = useMore(shown.length, JSON.stringify(filters) + (setId ?? ''));
+  // the keyboard may move past the cards drawn so far: draw up to the selection
+  const drawn = Math.max(upto, cur ? ids.indexOf(cur) + 1 : 0);
 
   // the keyboard: arrows move, space plays, a approves, r asks for changes
   const keys = useRef({ ids, cur, store });
@@ -110,6 +109,7 @@ export function AuditionPage({ store, setId }: { store: Store; setId: string | n
 
   const sequencing = store.sequence !== null;
   const counts = { approved: pool.filter((s) => s.status === 'approved').length, rejected: pool.filter((s) => s.status === 'rejected').length };
+  const unchecked = pool.filter((s) => !s.info).length;
   return (
     <section className="audition" data-testid="audition" data-count={shown.length}>
       <header className="editor-head">
@@ -120,36 +120,22 @@ export function AuditionPage({ store, setId }: { store: Store; setId: string | n
         <label className="dim">gap <input type="number" min={0} max={5000} step={50} value={gap} data-testid="aud-gap" style={{ width: '5em' }} onChange={(e) => setGap(Math.max(0, Number(e.target.value)))} /> ms</label>
         <button className="play" data-testid="aud-play-all" data-playing={sequencing} disabled={!shown.length} onClick={() => void (sequencing ? store.stopSequence() : store.playSequence(ids, gap))}>{sequencing ? '■ Stop' : '▶ Play all'}</button>
       </header>
-      <div className="filters row wrap" data-testid="aud-filters">
+      <div className="row wrap">
         <label>set
           <select data-testid="aud-set" value={setId ?? ''} onChange={(e) => { location.hash = e.target.value ? `#/audition/${e.target.value}` : '#/audition'; }}>
             <option value="">all sounds</option>
             {store.sets.map((s) => <option key={s.id} value={s.id}>{s.id}</option>)}
           </select>
         </label>
-        <label>status
-          <select data-testid="aud-filter-status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
-            <option value="any">any</option><option value="draft">draft</option><option value="approved">approved</option><option value="rejected">asked for changes</option>
-          </select>
-        </label>
-        <label>checks
-          <select data-testid="aud-filter-check" value={check} onChange={(e) => setCheck(e.target.value as CheckFilter)}>
-            <option value="any">any</option><option value="pass">pass</option><option value="fail">fail</option>
-          </select>
-        </label>
-        <label>tag
-          <select data-testid="aud-filter-tag" value={tag} onChange={(e) => setTag(e.target.value)}>
-            <option value="">any</option>
-            {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </label>
-        <span className="dim">← → ↑ ↓ move · space plays · a approves · r asks for changes</span>
+        <span className="dim">← → ↑ ↓ move · space plays · a approves · r asks for changes{unchecked ? ` · ${unchecked} not checked yet` : ''}</span>
       </div>
+      <FilterBar filters={filters} set={setFilters} tags={allTags} prefix="aud" />
       {setId && !set && <p className="error">No set “{setId}”.</p>}
       {!shown.length && <p className="dim" data-testid="aud-empty">No sounds match.</p>}
       <div className="aud-grid" ref={grid} data-testid="aud-grid">
-        {shown.map((s) => <Card key={s.id} store={store} sound={s} selected={s.id === cur} asking={asking === s.id} onSelect={() => setSel(s.id)} onAsk={(open) => setAsking(open ? s.id : null)} />)}
+        {shown.slice(0, drawn).map((s) => <Card key={s.id} store={store} sound={s} selected={s.id === cur} asking={asking === s.id} onSelect={() => setSel(s.id)} onAsk={(open) => setAsking(open ? s.id : null)} />)}
       </div>
+      {drawn < shown.length && <div ref={sentinel} className="more" data-testid="aud-more"><button onClick={more}>Show more</button></div>}
     </section>
   );
 }
