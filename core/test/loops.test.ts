@@ -34,13 +34,13 @@ describe('the loop flag', () => {
   });
   it('is refused for a classic sound (saying how), for a bad length and for a crossfade longer than half the loop', () => {
     expect(() => lib('sound new c voice=classic\nsound loop c 2')).toThrow(/layer-up/);
-    expect(parse('sound loop n 0.1').errors[0]!.message).toMatch(/0\.5 to 8 seconds/);
-    expect(parse('sound loop n 9').errors[0]!.message).toMatch(/0\.5 to 8 seconds/);
+    expect(parse('sound loop n 0.05').errors[0]!.message).toMatch(/0\.1 to 120 seconds/);
+    expect(parse('sound loop n 130').errors[0]!.message).toMatch(/0\.1 to 120 seconds/);
     expect(parse('sound loop n 2 fade=1.5').errors[0]!.message).toMatch(/at most half the length/);
     expect(parse('sound loop n').errors[0]!.message).toMatch(/give the loop length/);
   });
   it('changes the render key (and only for a looped sound)', () => {
-    const l = lib('sound new n voice=layered seed=3\nlayer add n osc dur=0.3');
+    const l = lib('sound new n voice=layered seed=3\nlayer add n osc dur=2');
     const plain = renderKey(l.get('n')!);
     applyCommand(l, parse('sound loop n 1').commands[0]!);
     expect(renderKey(l.get('n')!)).not.toBe(plain);

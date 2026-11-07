@@ -3,7 +3,7 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
-import { AUTHOR_RE, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
@@ -40,7 +40,7 @@ const utcNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The sound a tape command is about (its first argument), if any. */
 function soundOf(cmd: string): string | null {
-  return /^(?:sound (?:new|set|mark|patch|generate|mutate|layer-up|classic|loop)|layer (?:add|set|remove|move|mute|solo)|fx (?:add|set|remove|move)|env|family) (\S+)/.exec(cmd)?.[1] ?? null;
+  return /^(?:sound (?:new|set|mark|patch|generate|mutate|layer-up|classic|loop|copy|rename|remove)|layer (?:add|set|remove|move|mute|solo)|fx (?:add|set|remove|move)|env|family) (\S+)/.exec(cmd)?.[1] ?? null;
 }
 
 export class Writer {
@@ -144,14 +144,23 @@ export class Writer {
     return this.library.sets.has(id);
   }
 
+  /** A class a command names must be in the style (a replay does not ask: a style may change). */
+  private checkClassNames(c: Command): void {
+    const names: string[] = [];
+    if (c.op === 'set') for (const [n, v] of c.values) if (n === 'class' && typeof v === 'string' && v !== 'none') names.push(v);
+    if ((c.op === 'set-new' || c.op === 'set-class') && c.class) names.push(c.class);
+    const table = classTable(this.style);
+    for (const n of names) if (!table[n]) throw new Error(`no loudness class '${n}' (classes: ${Object.keys(table).join(', ')}; project.json style.loudnessClasses adds more)`);
+  }
+
   /** The commands (and notes) that match the loudness of the sounds a set or family command made or changed, by gain. */
   private matchAfter(lib: Library, c: Command): { commands: string[]; notes: string[] } {
     const out = { commands: [] as string[], notes: [] as string[] };
     let target: number | null = null;
     let ids: string[] = [];
-    if (c.op === 'set-new' || c.op === 'set-retarget' || c.op === 'set-regen' || c.op === 'set-add') {
+    if (c.op === 'set-new' || c.op === 'set-retarget' || c.op === 'set-regen' || c.op === 'set-add' || c.op === 'set-class') {
       const set = lib.sets.get(c.id)!;
-      target = set.target;
+      target = setTarget(set, this.style);
       ids = c.op === 'set-add' ? c.sounds : c.op === 'set-regen' ? set.generated : set.members;
     } else if (c.op === 'family') {
       const lufs = loudnessOf(lib.get(c.id)!, this.samples);
@@ -175,10 +184,11 @@ export class Writer {
   measureSetDoc(id: string): SetMeasure {
     const set = this.set(id);
     const members = set.members.map((m) => ({ id: m, r: this.render(m), lufs: this.measure(m).analysis.lufs }));
-    const key = `${set.target}|${JSON.stringify(this.style)}|${members.map((m) => m.r.key).join(',')}`;
+    const target = setTarget(set, this.style);
+    const key = `${target}|${JSON.stringify(this.style)}|${members.map((m) => m.r.key).join(',')}`;
     let m = this.setMeasures.get(key);
     if (!m) {
-      m = measureSet(members.map((x) => ({ id: x.id, channels: x.r.channels, lufs: x.lufs })), set.target, this.style);
+      m = measureSet(members.map((x) => ({ id: x.id, channels: x.r.channels, lufs: x.lufs })), target, { ...this.style, loudnessTolerance: this.setTolerance(set) });
       this.setMeasures.set(key, m);
       if (this.setMeasures.size > 32) this.setMeasures.delete(this.setMeasures.keys().next().value!);
     }
@@ -200,15 +210,27 @@ export class Writer {
     return this.measureSound(this.sound(id), this.render(id));
   }
 
+  /** The loudness tolerance of a set's members: their set's class, else the default class. */
+  private setTolerance(set: SetDoc): number {
+    const table = classTable(this.style);
+    return (set.class && table[set.class] ? table[set.class]! : table[this.style.defaultClass]!).tolerance;
+  }
+
+  /** The loudness rule a sound is held to (its class and target, and why). */
+  loudnessRule(s: Sound): LoudnessRule {
+    return loudnessFor(s, this.library.sets.values(), this.style);
+  }
+
   /** The numbers and checks of any sound document (a past state, say), kept by the render's key. */
   measureSound(s: Sound, r: Rendered = this.cache.render(s, this.samples)): Measured {
+    const rule = loudnessFor(s, this.library.sets.values(), this.style);
     const style = soundStyle(s, this.library.sets.values(), this.style);
     const loop = s.voice === 'layered' && !!s.loop;
-    const key = `${r.key}|${style.loudnessTarget}|${loop ? 'loop' : ''}`;
+    const key = `${r.key}|${rule.target}|${rule.tolerance}|${rule.basis}|${loop ? 'loop' : ''}`;
     let m = this.measured.get(key);
     if (!m) {
       const analysis = analyze(r.channels);
-      m = { analysis, checks: runChecks(r.channels, analysis, style, { loop }) };
+      m = { analysis, checks: runChecks(r.channels, analysis, style, { loop, loudnessClass: rule.basis }), rule };
       this.measured.set(key, m);
       if (this.measured.size > 128) this.measured.delete(this.measured.keys().next().value!);
     }
@@ -290,7 +312,19 @@ export class Writer {
       for (const c of parsed.commands) {
         try {
           const before = c.op === 'set' ? next.get(c.id) : undefined;
+          this.checkClassNames(c);
+          const loopCmd = c.op === 'loop' && c.loop ? c : undefined;
+          const loopBefore = loopCmd ? next.get(loopCmd.id) : undefined;
           const normal = applyCommand(next, c);
+          if (loopCmd && loopBefore && loopBefore.voice === 'layered') {
+            const after = next.get(loopCmd.id);
+            if (after && after.voice === 'layered') {
+              loopBefore.layers.forEach((l, i) => {
+                const to = after.layers[i]?.p.dur;
+                if (typeof l.p.dur === 'number' && typeof to === 'number' && to !== l.p.dur) warnings.push(`line ${c.line}: ${loopCmd.id} layer ${i + 1} dur ${l.p.dur} -> ${to} s, to cover the loop and its crossfade (a loop renders length + fade seconds)`);
+              });
+            }
+          }
           if (c.op === 'set' && before && serializeSound(before) === serializeSound(next.get(c.id)!)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
           added.push({ seq: ++seq, by: req.by, at, group, cmd: normal ?? c.text });
           // Loudness matching measures a render; the result goes on the tape as plain `sound set … gain=` commands, so a replay never measures.

@@ -5,7 +5,7 @@ import type { Command } from './commands.ts';
 import { generate, hashText, type GeneratorName } from './generators.ts';
 import { parsePatch } from './classic.ts';
 import {
-  FX_SPECS, MAX_FX, MAX_LAYERS, checkNumber, classicLayer, fmtValue, formatEnv, showValue, formatTarget, layerSpecs, newFx, newLayer, paramNames, parseTarget, parseValue, specOf,
+  FX_SPECS, MAX_FX, MAX_LAYERS, MAX_SOURCE_DURATION, checkNumber, classicLayer, fmtValue, formatEnv, showValue, formatTarget, layerSpecs, newFx, newLayer, paramNames, parseTarget, parseValue, specOf,
   type Env, type Fx, type Layer, type LayeredSound, type PSpec,
 } from './layered.ts';
 import { recipeBody, type RecipeName } from './recipes.ts';
@@ -76,7 +76,7 @@ export function applyLayerCommand(lib: Map<string, Sound>, c: Command): string |
     }
     case 'layer-add': {
       const s = cloneSound(layeredOf(lib, c.id, 'layer add'));
-      if (s.layers.length >= MAX_LAYERS) throw new Error(`${c.id} has ${MAX_LAYERS} layers already (the most a sound has)`);
+      if (s.layers.length >= MAX_LAYERS) throw new Error(`${c.id} has ${MAX_LAYERS} layers already (the most a sound has). Repeated hits belong in one layer: give it an amplitude envelope with bursts(...) (env ${c.id} N.amp "bursts(times=0.1,0.3,0.5)"); different sounds at once are separate sounds`);
       const l = newLayer(c.kind, s.nextSalt);
       const values: Raw = [];
       let preset = null as { cat: string; seed: number | null } | null;
@@ -238,9 +238,30 @@ export function applyRecipe(s: LayeredSound, name: RecipeName, seed: number): La
   const body = recipeBody(name, seed);
   const out: LayeredSound = { ...s, seed, duration: null, gain: 1, ...body };
   if (body.gain === undefined) out.gain = 1;
+  if (body.loudClass) out.loudClass = body.loudClass;
   // A recipe replaces the whole sound: a bed brings its loop, anything else has none, and a family mark no longer applies.
   if (!body.loop) delete out.loop;
   delete out.family;
   return out;
 }
 
+
+/**
+ * A loop renders `length + fade` seconds and folds the part past the end over the start, so a source that stops earlier leaves a hole in
+ * the bed. Making a sound a loop therefore lengthens every layer whose source has a `dur` (osc, fm, ks) to cover offset + dur >= length + fade
+ * + 50 ms (a layer already long enough is left alone), a recipe's layers included. A classic or sample layer has no `dur`: it plays once
+ * inside the loop, which is what a one-shot in a loop is. Returns the layers it lengthened, for the note the writer prints.
+ */
+export function raiseLayersForLoop(s: LayeredSound, loop: { length: number; fade: number }): { layer: number; from: number; to: number }[] {
+  const need = loop.length + loop.fade + 0.05;
+  const out: { layer: number; from: number; to: number }[] = [];
+  s.layers.forEach((l, i) => {
+    const dur = l.p.dur;
+    if (typeof dur !== 'number') return;
+    const offset = l.p.offset as number;
+    if (offset >= loop.length + loop.fade) return;
+    const want = Math.min(MAX_SOURCE_DURATION, Math.round((need - offset) * 1000) / 1000);
+    if (dur < want - 1e-9) { l.p.dur = want; out.push({ layer: i + 1, from: dur, to: want }); }
+  });
+  return out;
+}

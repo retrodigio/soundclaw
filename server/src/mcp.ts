@@ -2,12 +2,13 @@
 // tools; the command language carries the rest. Every call goes through the writer's queue, in
 // the order it arrives.
 
+import { existsSync, statSync } from 'node:fs';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { openRequests } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
-import { checkText, describeText, exportFormat, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
+import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, normalizeCommands, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { ProjectError } from './project.ts';
 import { formatErrors, plural } from './report.ts';
 import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
@@ -36,7 +37,7 @@ Layered sounds (several voices summed; use them when one sfxr voice is not enoug
   layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]   osc: wave sine|square|saw|triangle|pulse|wavetable|white|pink|brown|metal, freq, duty, dur; fm: ops 2-4, algo, ratio1-4, index2-4; ks (pluck): freq, decay, bright; sample: sample=<name>, start, end, pitch, reverse; every layer: offset, gain, pan, filter=off|lp|hp|bp|notch, cutoff, q
   layer set <id> <n> <param>=<value> ...  |  layer remove|move|mute|solo <id> <n> [to=<m> | on|off]   (layers count from 1; source=<kind> changes a layer's source)
   env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | clear   an envelope replaces a fixed value; targets 1.freq 1.amp 1.cutoff 2.pan 1.fx1.mix master.fx1.mix
-  fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb [<param>=<value> ...] [at=<k>]  |  fx set|remove|move <id> [layer=<n>] <k> ...   (no layer= : the master chain)
+  fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit [<param>=<value> ...] [at=<k>]  |  fx set|remove|move <id> [layer=<n>] <k> ...   (no layer= : the master chain)
   sound layer-up <id>   a classic sound becomes layered, same samples   |   sound classic <id> on|off   keep it one classic voice (exports as a synth.csv row)
 Sets, families and loops (game sounds that repeat, or come in several distances, or run for ever):
   set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="1.freq±10% 2.cutoff±15% gain±10%"] [seed=<n>]   count seeded variants (<set>_1 ...) of a classic or layered sound, each a real sound; spread: classic parameter ±amount, or for a layered sound N.<param>, *.<param>, N.amp, N.fxK.<param>, master.fxK.<param>, gain; % is relative. Members are matched to the target LUFS by gain (a classic member's gain is its volume, at most 1: the note says when it falls short). \`view\` set and \`check\` the set (set-spread: not too alike, not too different, loudness within ±1 LU)
@@ -47,6 +48,8 @@ Sets, families and loops (game sounds that repeat, or come in several distances,
   Order: source -> filter -> amp envelope -> effects -> gain -> pan, then the sum -> master gain -> master effects; export adds a limiter. Layered sounds export as WAV only. A layer with pan off centre makes the sound stereo. The \`layers\` view shows each layer; the \`harsh\` check flags sustained 2-5 kHz energy. \`sample\` imports a WAV for sample layers.
   undo [group=<g>] [by=<author>]   |   redo [group=<undo group>] [by=<author>]      run alone, as the only command of the batch
 \`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers, description and checks; \`export\` writes wav (16-bit, 44,100 Hz, mono), patch (sfxr text) or csv (synth.csv) files; \`import\` makes classic sounds from an sfxr csv or patch.
+
+Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-sting\` (or loudness=<LUFS>); the loudness check holds each sound to its class (standard: -16 LUFS ±1) and says which applied. \`normalize\` writes the gain that brings sounds to their class; \`measure\` returns the numbers and checks of many sounds as JSON in one call. Dynamics: \`fx add <id> compress|limit\` (a limiter on the master chain lets a spiky sound be loud without clipping). Many hits in one layer: \`env <id> 1.amp bursts(times=0.1,0.3 ...)\`. \`sound copy|rename|remove <id> ...\` manage sounds.
 
 Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
 
@@ -159,10 +162,11 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     title: 'Render a sound',
     description: 'Render a sound (through the content-hash cache) and return its numbers (samples, peak, rms, a hash of the samples; duration, loudness, true peak, attack, tail, brightness, pitch, onsets), a plain-words description, and the check summary as the last line. The same document always gives the same hash; the dashboard plays exactly these samples.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sound: z.string() }),
+    inputSchema: z.object({ sound: z.string(), json: z.boolean().optional().describe('The result as one JSON object (class, numbers, checks, hash)') }),
   }, (a) => w.enqueue(() => {
     try {
       const r = w.render(a.sound); // first, so the summary does not warm the cache
+      if (a.json) return { content: [text(describeJson(w, a.sound, { renderKey: r.key, cached: r.cached, samplesHash: w.samplesHashOf(a.sound) }))] };
       const head = soundSummary(w, a.sound).split('\n')[0]!;
       return { content: [text(renderText(w, a.sound, `${head}\nrender key ${r.key.slice(0, 12)}${r.cached ? ' (from the render cache)' : ''}`))] };
     } catch (e) {
@@ -192,10 +196,10 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     title: 'Describe a sound',
     description: 'A plain-words summary built only from the measured numbers (length, tonal or noisy, brightness, pitch motion, attack, tail, peak, loudness, onsets), then the numbers and the check summary.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sound: z.string() }),
+    inputSchema: z.object({ sound: z.string(), json: z.boolean().optional().describe('The result as one JSON object') }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(describeText(w, a.sound))] };
+      return { content: [text(a.json ? describeJson(w, a.sound) : describeText(w, a.sound))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -205,10 +209,41 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     title: 'Check sounds',
     description: 'Run the checks (clip, loudness, dc, click, tail, harsh) on sounds, and set-spread on sets (members not too alike, not too different, loudness within ±1 LU); all sounds and sets when none are named: pass or fail with a score, the threshold from the project style, and the exact time ranges flagged. A looping sound\'s click check looks at its seam. `work` done is refused while a sound fails.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names') }),
+    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names'), json: z.boolean().optional().describe('One JSON document with every number and every check (as measure)') }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(checkText(w, a.sounds ?? []).text)] };
+      return { content: [text(a.json ? measureJson(w, a.sounds ?? []).json : checkText(w, a.sounds ?? []).text)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('measure', {
+    title: 'Measure many sounds',
+    description: 'The numbers and the loudness class of many sounds in one call (all sounds when none are named): per sound its class and target, every number describe gives and every check result. ' +
+      'json (default true) returns one JSON document for scripts: {format, pass, sounds: [{id, class: {name, target, tolerance, basis}, numbers, checks, binding}], sets}. A sound\'s class: `sound set <id> class=<name>` or loudness=<LUFS>.',
+    annotations: { readOnlyHint: true },
+    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names (default all)'), json: z.boolean().optional().describe('Default true; false gives text') }),
+  }, (a) => w.enqueue(() => {
+    try {
+      return { content: [text(a.json === false ? measureText(w, a.sounds ?? []).text : measureJson(w, a.sounds ?? []).json)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('normalize', {
+    title: 'Normalize loudness',
+    description: 'Write the gain (a layered sound\'s gain, a classic sound\'s volume) that brings sounds, or a set\'s members, to a loudness, as one undo group. With no `to`, each sound goes to its own class target; ' +
+      '`to` is a class name (the sounds join that class) or target=<LUFS> (the sounds are held to it). A classic sound cannot go above volume 1: the warning says how far it falls short (sound layer-up lets gain go to 4).',
+    inputSchema: z.object({ sounds: z.array(z.string()).min(1).describe('Sound ids and set names'), to: z.string().optional().describe('A class name, or target=<LUFS>') }),
+  }, (a) => w.enqueue(() => {
+    try {
+      const n = normalizeCommands(w, a.sounds, a.to);
+      if (!n.commands) return { content: [text(`${plural(n.ids.length, 'sound')} already at ${n.target}: nothing to write${n.notes.map((x) => `\nwarning: ${x}`).join('')}`)] };
+      const r = w.run({ commands: n.commands, by: AGENT });
+      if (!r.ok) return fail(formatErrors('normalize', r.errors));
+      return { content: [text([...n.notes.map((x) => `warning: ${x}`), `normalized ${plural(n.ids.length, 'sound')} to ${n.target} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd}`)].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -227,7 +262,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       const { commands, ids, warnings, report } = importCommands(a.source, a.id ?? null, a.kind ?? 'sfxr');
       const r = w.run({ commands, by: AGENT });
       if (!r.ok) return fail(formatErrors('import', r.errors));
-      return { content: [text([`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}`, formatImportReport(report), ...warnings.map((x) => `warning: ${x}`), ...r.touched.map((id) => soundSummary(w, id))].join('\n'))] };
+      const approx = report.filter((x) => x.status === 'approximated');
+      return { content: [text([...warnings.map((x) => `warning: ${x}`), `imported ${plural(ids.length, 'sound')}${ids.length <= 8 ? ` (${ids.join(', ')})` : ''} as group ${r.group}: ${report.length - approx.length} exact, ${approx.length} approximated`, formatImportReport(report.length <= 8 ? report : approx), ...(ids.length <= 8 ? r.touched.map((id) => soundSummary(w, id)) : [])].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -235,7 +271,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('sample', {
     title: 'Sample',
-    description: 'Samples for sample layers. import: copy a WAV file (PCM 8/16/24/32-bit or float, any rate, mixed to mono, at most 60 s) into <project>/samples/ under a name (default: the file name); then `layer add <id> sample sample=<name> ...` uses it. list: the samples in the project.',
+    description: 'Samples for sample layers. import: copy a WAV file, or every .wav in a folder (PCM 8/16/24/32-bit or float, any rate, mixed to mono, at most 120 s each), into <project>/samples/ under a name (default: the file name); then `layer add <id> sample sample=<name> ...` uses it. list: the samples in the project.',
     inputSchema: z.object({
       action: z.enum(['import', 'list']),
       file: z.string().optional().describe('import: path of the WAV file'),
@@ -248,6 +284,11 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
         return { content: [text(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, sha256 ${x.sha256.slice(0, 12)}`).join('\n') : 'no samples')] };
       }
       if (!a.file) return fail('import needs file');
+      if (existsSync(a.file) && statSync(a.file).isDirectory()) {
+        const d = w.samples.importDir(a.file);
+        w.samplesChanged();
+        return { content: [text(`${[...d.imported.map((x) => `${x.created ? 'imported' : 'already in the project:'} sample ${x.info.name}: ${x.info.seconds.toFixed(3)} s`), ...d.problems.map((x) => `warning: ${x}`)].join('\n')}\n${plural(d.imported.length, 'sample')} from ${a.file}`)] };
+      }
       const r = w.samples.import(a.file, a.as);
       w.samplesChanged();
       return { content: [text(`${r.created ? 'imported' : 'already in the project:'} sample ${r.info.name}: ${r.info.seconds.toFixed(3)} s, ${r.info.rate} Hz, sha256 ${r.info.sha256.slice(0, 12)}`)] };

@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
 
 export interface Measured {
@@ -34,18 +34,18 @@ export type Pin = { kind: 'snapshot'; sound: Sound; label: string } | { kind: 's
 
 /** The sound the page's route names (#/sound/<id>), or null for the list of cards. */
 export function routeSound(hash: string): string | null {
-  return /^#\/sound\/([a-z][a-z0-9_-]*)$/.exec(hash)?.[1] ?? null;
+  return /^#\/sound\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash)?.[1] ?? null;
 }
 
 /** Where the address points: the cards, a sound's editor, a set's page, or the audition page (all sounds, or one set's). */
 export type Route = { kind: 'cards' } | { kind: 'sound'; id: string } | { kind: 'set'; id: string } | { kind: 'audition'; set: string | null };
 
 export function parseRoute(hash: string): Route {
-  let m = /^#\/sound\/([a-z][a-z0-9_-]*)$/.exec(hash);
+  let m = /^#\/sound\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
   if (m) return { kind: 'sound', id: m[1]! };
-  m = /^#\/set\/([a-z][a-z0-9_-]*)$/.exec(hash);
+  m = /^#\/set\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
   if (m) return { kind: 'set', id: m[1]! };
-  m = /^#\/audition(?:\/([a-z][a-z0-9_-]*))?$/.exec(hash);
+  m = /^#\/audition(?:\/([A-Za-z][A-Za-z0-9_-]*))?$/.exec(hash);
   if (m) return { kind: 'audition', set: m[1] ?? null };
   return { kind: 'cards' };
 }
@@ -338,19 +338,30 @@ export class Store {
     return soundExport(s, this.render(s), { ceilingDb: this.style.truePeakMax, channels: this.channels(s), bank: this.sampleBank }).wav;
   }
 
+  /** The loudness rule the sound is held to: its class and target, and why. */
+  rule(s: Sound): LoudnessRule {
+    return loudnessFor(s, this.sets, this.style);
+  }
+
+  /** The names of the loudness classes the style has. */
+  classNames(): string[] {
+    return Object.keys(classTable(this.style));
+  }
+
   /** The sound's numbers, checks and a spectrogram, measured here with core (the same code the CLI uses), kept by the document's content key. */
   measure(s: Sound): Measured {
     // a set's target (or a family's offset) changes what the loudness check is held to, and a loop is checked at its seam
     const style = soundStyle(s, this.sets, this.style);
+    const rule = loudnessFor(s, this.sets, this.style);
     const loop = s.voice === 'layered' && !!s.loop;
-    const key = `${this.keyOf(s)}|${JSON.stringify(style)}|${loop ? 'loop' : ''}`;
+    const key = `${this.keyOf(s)}|${JSON.stringify(style)}|${rule.basis}|${loop ? 'loop' : ''}`;
     let m = this.measures.get(key);
     if (!m) {
       const ch = this.channels(s);
       const x = mixdown(ch);
       const analysis = analyze(ch);
       const hop = Math.max(256, Math.ceil(x.length / 240));
-      m = { analysis, checks: runChecks(ch, analysis, style, { loop }), spec: melSpectrogram(x, { bands: 48, hop }) };
+      m = { analysis, checks: runChecks(ch, analysis, style, { loop, loudnessClass: rule.basis }), spec: melSpectrogram(x, { bands: 48, hop }) };
       if (this.ready(s)) {
         this.measures.set(key, m);
         if (this.measures.size > 64) this.measures.delete(this.measures.keys().next().value!);

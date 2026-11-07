@@ -14,7 +14,7 @@
 
 import { CLASSIC_FIELDS, type ClassicKey } from './classic.ts';
 import { integratedLoudness, melSpectrogram, type MelSpec } from './analysis.ts';
-import { DEFAULT_STYLE, type CheckResult, type Style } from './checks.ts';
+import { DEFAULT_STYLE, classTable, type CheckResult, type Style } from './checks.ts';
 import { Rng, hashText } from './generators.ts';
 import { FX_SPECS, layerSpecs, parseTarget, specOf, type Env, type LayeredSound, type PSpec } from './layered.ts';
 import { melDistance } from './views.ts';
@@ -37,8 +37,10 @@ export interface SetDoc {
   /** The sound the variants were made from (regen makes them again from its current state). */
   from: string | null;
   seed: number;
-  /** LUFS the members are matched to (null: not matched). */
+  /** LUFS the members are matched to (null: not matched, or matched to the class's target when there is a class). */
   target: number | null;
+  /** The loudness class of the members that have none of their own. */
+  class?: string;
   spread: SpreadRule[];
   /** Every member, in order. */
   members: string[];
@@ -271,12 +273,53 @@ export function matchGain(s: Sound, target: number, bank?: SampleBank): Matched 
 
 // ---- checks of a set --------------------------------------------------------------------------------
 
-/** The style a sound's checks are held to: a set with a target sets the loudness target of its members; a family variant is held to the target plus its offset. */
+/** Which loudness rule holds a sound, and why. */
+export interface LoudnessRule {
+  /** The class whose tolerance applies. */
+  className: string;
+  target: number;
+  tolerance: number;
+  /** In words: `class ui`, `class ui; own loudness`, `class standard; target of set steps`. */
+  basis: string;
+}
+
+/** The set a sound is in (the first that has it). */
+export function setOf(s: Sound, sets: Iterable<SetDoc>): SetDoc | undefined {
+  for (const set of sets) if (set.members.includes(s.id)) return set;
+  return undefined;
+}
+
+/**
+ * The loudness rule of a sound, most specific first: its own `loudness`, its own `class`, the target of its set, the class of its set, the style's
+ * default class. The tolerance is the tolerance of the class that applies (its own, its set's or the default). A family variant (`far`...) is held
+ * to the rule's target plus its offset.
+ */
+export function loudnessFor(s: Sound, sets: Iterable<SetDoc>, style: Style = DEFAULT_STYLE): LoudnessRule {
+  const table = classTable(style);
+  const set = setOf(s, sets);
+  const pick = (name: string | undefined): [string, { target: number; tolerance: number }] | null => (name && table[name] ? [name, table[name]!] : null);
+  const own = pick(s.loudClass);
+  const viaSet = pick(set?.class);
+  const base = own ?? viaSet ?? pick(style.defaultClass) ?? ['standard', table.standard!];
+  let target = base[1].target;
+  let basis = `class ${base[0]}`;
+  if (s.loudness !== undefined) { target = s.loudness; basis += '; own loudness'; }
+  else if (!own && set && set.target !== null) { target = set.target; basis += `; target of set ${set.id}`; }
+  else if (s.loudClass && !own) basis += `; class '${s.loudClass}' is not in the style, the default applies`;
+  if (s.voice === 'layered' && s.family) { target += s.family.offsetDb; basis += `; ${s.family.offsetDb >= 0 ? '+' : ''}${s.family.offsetDb} LU as a ${s.family.kind} variant`; }
+  return { className: base[0], target, tolerance: base[1].tolerance, basis };
+}
+
+/** The style a sound's checks are held to: its loudness rule's target and tolerance in place of the style's. */
 export function soundStyle(s: Sound, sets: Iterable<SetDoc>, style: Style = DEFAULT_STYLE): Style {
-  let target = style.loudnessTarget;
-  for (const set of sets) if (set.target !== null && set.members.includes(s.id)) { target = set.target; break; }
-  if (s.voice === 'layered' && s.family) target += s.family.offsetDb;
-  return target === style.loudnessTarget ? style : { ...style, loudnessTarget: target };
+  const r = loudnessFor(s, sets, style);
+  return r.target === style.loudnessTarget && r.tolerance === style.loudnessTolerance ? style : { ...style, loudnessTarget: r.target, loudnessTolerance: r.tolerance };
+}
+
+/** The LUFS a set's members are matched to: its target, else the target of its class, else none. */
+export function setTarget(set: SetDoc, style: Style): number | null {
+  if (set.target !== null) return set.target;
+  return set.class ? classTable(style)[set.class]?.target ?? null : null;
 }
 
 export interface SetMember {
@@ -340,6 +383,7 @@ export function measureSet(members: readonly SetMember[], target: number | null,
 /** The text of a set's file (sets/<id>.set): one `key value` per line. */
 export function serializeSet(s: SetDoc): string {
   const lines = ['soundclaw set 1', `id ${s.id}`, `from ${s.from ?? 'none'}`, `seed ${s.seed}`, `target ${s.target === null ? 'none' : fmt(s.target)}`, `spread ${s.spread.length ? formatSpread(s.spread) : 'none'}`];
+  if (s.class) lines.push(`class ${s.class}`);
   lines.push(`members ${s.members.join(' ') || 'none'}`, `generated ${s.generated.join(' ') || 'none'}`);
   return lines.join('\n') + '\n';
 }

@@ -40,7 +40,7 @@ describe('the spread text', () => {
 });
 
 const PICKUP = 'sound new coin voice=classic preset=pickup seed=3\n';
-const STEP = 'sound new step voice=layered preset=footstep seed=11\n';
+const STEP = 'sound new step voice=layered seed=11\nlayer add step osc wave=sine freq=110 dur=0.18 gain=0.8\nenv step 1.freq \"0:150 0.1:55@exp\"\nenv step 1.amp \"0:0 0.003:1 0.15:0@exp\"\nlayer add step osc wave=brown dur=0.15 filter=lp cutoff=1200 q=1 gain=0.7\nenv step 2.cutoff \"0:2200 0.12:400@exp\"\nenv step 2.amp \"0:0 0.004:1 0.12:0@exp\"\nlayer add step osc wave=white dur=0.07 offset=0.03 filter=hp cutoff=3500 gain=0.2\nenv step 3.amp \"0:0 0.004:1 0.05:0@exp\"\n';
 
 describe('variants', () => {
   it('are deterministic: the same set command makes the same sounds, another seed others', () => {
@@ -255,7 +255,7 @@ describe('the set-spread check', () => {
 
 describe('families', () => {
   const centroid = (s: Sound) => analyze(renderChannels(s)).centroid.mean;
-  const SRC = 'sound new door voice=layered preset=door seed=7\nfamily door near\nfamily door far\nfamily door muffled as=door_wall\n';
+  const SRC = 'sound new door voice=layered seed=7\nlayer add door osc wave=sine freq=95 dur=0.35 gain=0.9\nenv door 1.freq \"0:110 0.2:42@exp\"\nenv door 1.amp \"0:0 0.003:1 0.3:0@exp\"\nlayer add door osc wave=brown dur=0.3 filter=lp cutoff=600 gain=0.6\nenv door 2.amp \"0:0 0.003:1 0.25:0@exp\"\nlayer add door osc wave=saw dur=0.7 offset=0.2 filter=bp cutoff=2800 q=2 gain=0.7\nenv door 3.amp \"0:0 0.1:1 0.5:0@exp\"\nfx add door reverb size=0.25 damp=0.6 mix=0.1\nfamily door near\nfamily door far\nfamily door muffled as=door_wall\n';
   it('far is darker and, matched to its offset, quieter; muffled is darker; near is a little louder', () => {
     const l = lib(SRC);
     const src = l.get('door')!;

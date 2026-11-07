@@ -89,13 +89,15 @@ export const soundFile = (p: Project, id: string): string => join(p.dir, 'sounds
 
 /** Make sounds/ match the library: write the sounds that changed, remove those that are gone. */
 export function writeSounds(p: Project, lib: Library, before: Library): void {
+  // Remove first: a rename that only changes case (Foo -> foo) is one file on a case-insensitive disk, and must not be deleted after it is written.
+  for (const id of before.keys()) if (!lib.has(id)) rmSync(soundFile(p, id), { force: true });
+  const present = new Set(readdirSync(join(p.dir, 'sounds')));
   for (const [id, s] of lib) {
     const text = serializeSound(s);
     const prev = before.get(id);
-    if (prev && serializeSound(prev) === text && existsSync(soundFile(p, id))) continue;
+    if (prev && serializeSound(prev) === text && present.has(`${id}.sfx`)) continue;
     writeFileSync(soundFile(p, id), text);
   }
-  for (const id of before.keys()) if (!lib.has(id)) rmSync(soundFile(p, id), { force: true });
 }
 
 export const setFile = (p: Project, id: string): string => join(p.dir, 'sets', `${id}.set`);
@@ -103,13 +105,13 @@ export const setFile = (p: Project, id: string): string => join(p.dir, 'sets', `
 /** Make sets/ match the library's sets, the same way. */
 export function writeSets(p: Project, lib: Library, before: Library): void {
   mkdirSync(join(p.dir, 'sets'), { recursive: true });
+  for (const id of before.sets.keys()) if (!lib.sets.has(id)) rmSync(setFile(p, id), { force: true });
   for (const [id, s] of lib.sets) {
     const text = serializeSet(s);
     const prev = before.sets.get(id);
     if (prev && serializeSet(prev) === text && existsSync(setFile(p, id))) continue;
     writeFileSync(setFile(p, id), text);
   }
-  for (const id of before.sets.keys()) if (!lib.sets.has(id)) rmSync(setFile(p, id), { force: true });
 }
 
 export function listSoundFiles(p: Project): string[] {

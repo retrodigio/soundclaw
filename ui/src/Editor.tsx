@@ -10,6 +10,7 @@ import {
   type ClassicKey, type ClassicPatch, type Edits, type Scheduler, type Sound,
 } from '@soundclaw/core';
 import { Spectrogram } from './Spectrogram.tsx';
+import { LoudnessClass } from './LoudnessClass.tsx';
 import type { Store } from './store.ts';
 import { download } from './download.ts';
 import { LayeredEditor } from './LayeredEditor.tsx';
@@ -194,6 +195,7 @@ function ClassicEditor({ store, id }: { store: Store; id: string }) {
         <h2>{sound.id}</h2>
         <span className={`chip status-${sound.status}`}>{sound.status}</span>
         <Numbers store={store} sound={sound} />
+        <LoudnessClass store={store} sound={sound} />
         <span className="spacer" />
         <button className="play" data-testid="editor-play" data-playing={playing} onClick={() => void store.play(id)}>{playing ? '■ Stop' : '▶ Play'} <span className="dim">space</span></button>
         <button data-testid="editor-stop" onClick={() => store.stop()} disabled={!store.playing}>■ Stop</button>

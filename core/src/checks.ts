@@ -5,11 +5,37 @@
 import { SAMPLE_RATE } from './sound.ts';
 import { stft, type Analysis, type Samples } from './analysis.ts';
 
+/** A loudness class: the target a sound of this kind is held to (LUFS) and how far off is allowed (LU). */
+export interface LoudnessClass {
+  target: number;
+  tolerance: number;
+}
+
+/**
+ * The classes a project starts with (project.json `style.loudnessClasses` adds to or replaces them). A game's sounds are
+ * not all equally loud: a UI tick sits far under an explosion, so one target for every sound is wrong. `standard` is the
+ * style's own loudnessTarget and loudnessTolerance (the class of a sound that names none, while defaultClass is `standard`).
+ */
+export const DEFAULT_CLASSES: Readonly<Record<string, LoudnessClass>> = {
+  ui: { target: -28, tolerance: 3 },
+  foley: { target: -22, tolerance: 2 },
+  impact: { target: -14, tolerance: 2 },
+  ambience: { target: -26, tolerance: 3 },
+  voice: { target: -20, tolerance: 2 },
+  'music-sting': { target: -16, tolerance: 2 },
+};
+
+export const CLASS_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
+
 /** The numbers the checks are held to. A project overrides them in project.json under `style`. */
 export interface Style {
-  /** Integrated loudness target for sounds, LUFS, and how far off is allowed (LU). */
+  /** Integrated loudness target of the `standard` class, LUFS, and how far off is allowed (LU). */
   loudnessTarget: number;
   loudnessTolerance: number;
+  /** The named loudness classes (ui, foley, impact, ...) with their targets and tolerances; `standard` is loudnessTarget/Tolerance. */
+  loudnessClasses: Record<string, LoudnessClass>;
+  /** The class of a sound that has none (and whose set has none). */
+  defaultClass: string;
   /** True peak limit, dBTP. */
   truePeakMax: number;
   /** DC offset limit (fraction of full scale). */
@@ -35,6 +61,8 @@ export interface Style {
 export const DEFAULT_STYLE: Style = {
   loudnessTarget: -16,
   loudnessTolerance: 1,
+  loudnessClasses: { ...DEFAULT_CLASSES },
+  defaultClass: 'standard',
   truePeakMax: -0.1,
   dcMax: 0.005,
   clickMax: 0.02,
@@ -50,16 +78,38 @@ export const DEFAULT_STYLE: Style = {
 /** The style keys and what they mean (for docs and errors). */
 export const STYLE_KEYS = Object.keys(DEFAULT_STYLE) as (keyof Style)[];
 
-/** A style from project.json's `style` object: unknown keys and non-numbers are an error. */
+/** Every loudness class of a style, `standard` included. */
+export function classTable(style: Style): Record<string, LoudnessClass> {
+  return { standard: { target: style.loudnessTarget, tolerance: style.loudnessTolerance }, ...style.loudnessClasses };
+}
+
+/** A style from project.json's `style` object: unknown keys and wrong types are an error. */
 export function resolveStyle(given: unknown): Style {
-  const style = { ...DEFAULT_STYLE };
+  const style: Style = { ...DEFAULT_STYLE, loudnessClasses: { ...DEFAULT_CLASSES } };
   if (given === undefined || given === null) return style;
   if (typeof given !== 'object' || Array.isArray(given)) throw new Error('style must be an object');
   for (const [k, v] of Object.entries(given as Record<string, unknown>)) {
     if (!STYLE_KEYS.includes(k as keyof Style)) throw new Error(`style: unknown key '${k}' (keys: ${STYLE_KEYS.join(', ')})`);
-    if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`style.${k} must be a number`);
-    style[k as keyof Style] = v;
+    if (k === 'defaultClass') {
+      if (typeof v !== 'string') throw new Error('style.defaultClass must be a class name');
+      style.defaultClass = v;
+    } else if (k === 'loudnessClasses') {
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error('style.loudnessClasses must be an object of { "<name>": { "target": <LUFS>, "tolerance": <LU> } }');
+      for (const [name, c] of Object.entries(v as Record<string, unknown>)) {
+        if (!CLASS_NAME_RE.test(name)) throw new Error(`style.loudnessClasses: '${name}' is not a class name (a-z, 0-9 and -, starting with a letter)`);
+        const o = c as { target?: unknown; tolerance?: unknown } | null;
+        if (typeof c !== 'object' || c === null || typeof o!.target !== 'number' || !Number.isFinite(o!.target) || (o!.tolerance !== undefined && (typeof o!.tolerance !== 'number' || !(o!.tolerance >= 0)))) {
+          throw new Error(`style.loudnessClasses.${name} must be { "target": <LUFS>, "tolerance": <LU, default 1> }`);
+        }
+        if (o!.target < -70 || o!.target > 0) throw new Error(`style.loudnessClasses.${name}: the target is LUFS from -70 to 0`);
+        style.loudnessClasses[name] = { target: o!.target, tolerance: (o!.tolerance as number | undefined) ?? 1 };
+      }
+    } else {
+      if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`style.${k} must be a number`);
+      (style as unknown as Record<string, number>)[k] = v;
+    }
   }
+  if (!classTable(style)[style.defaultClass]) throw new Error(`style.defaultClass '${style.defaultClass}' is not a class (classes: ${Object.keys(classTable(style)).join(', ')})`);
   return style;
 }
 
@@ -154,7 +204,12 @@ export const fmtStep = (v: number): string => (Number(v.toFixed(1)) + 0).toFixed
 /** How much louder than a plain click a seam jump has to be to count: it must exceed this many times the local sample-to-sample step. */
 export const SEAM_STEP_FACTOR = 4;
 
+/** An exponential decay that reaches -60 dB at its end counts as finished: the cut-off rule has this much slack (dB). */
+export const TAIL_SLACK_DB = 1;
+
 export interface CheckOptions {
+  /** Which loudness rule applied, as words (`class ui`, `class ui; own loudness`), named in the result. */
+  loudnessClass?: string;
   /** The sound is a loop: the click check looks at the seam, and the tail check does not ask for a fade-out. */
   loop?: boolean;
 }
@@ -203,7 +258,7 @@ export function runChecks(input: Samples | readonly Samples[], a: Analysis, styl
     out.push({
       name: 'loudness', pass, score: Number.isFinite(a.lufs) ? clamp01(1 - Math.max(0, off) / 6) : 0,
       value: Number.isFinite(a.lufs) ? `${f1(a.lufs)} LUFS${pass ? '' : ` (${f1(Math.abs(diff))} LU too ${diff < 0 ? 'quiet' : 'loud'})`}` : 'silent',
-      threshold: `${f1(style.loudnessTarget)} LUFS ±${style.loudnessTolerance}`, ranges: [],
+      threshold: `${f1(style.loudnessTarget)} LUFS ±${style.loudnessTolerance} (${o.loudnessClass ?? 'class standard'})`, ranges: [],
     });
   }
 
@@ -261,18 +316,18 @@ export function runChecks(input: Samples | readonly Samples[], a: Analysis, styl
         penalty += a.leadingSilence / 0.5;
       }
       if (a.trailingSilence > style.silenceMax) {
-        ranges.push({ from: Math.round((d - a.trailingSilence) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `${Math.round(a.trailingSilence * 1000)} ms of silence at the end` });
+        ranges.push({ from: Math.round((d - a.trailingSilence) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `${Math.round(a.trailingSilence * 1000)} ms of silence at the end (under -60 dB; duration=auto ends the sound where it falls below that, or shorten the layers' dur)` });
         penalty += a.trailingSilence / 0.5;
       }
-      if (a.endLevelDb > style.tailFloorDb) {
-        ranges.push({ from: Math.round(Math.max(0, d - 0.001) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `cut at ${f1(a.endLevelDb)} dB below the peak` });
+      if (a.endLevelDb > style.tailFloorDb + TAIL_SLACK_DB) {
+        ranges.push({ from: Math.round(Math.max(0, d - 0.001) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `cut at ${f1(a.endLevelDb)} dB below the peak (end the amplitude envelope at 0, or lengthen the sound)` });
         penalty += 0.5;
       }
     }
     out.push({
       name: 'tail', pass: !ranges.length, score: clamp01(1 - penalty),
       value: a.silent ? 'silent' : `silence ${Math.round(a.leadingSilence * 1000)} ms before, ${Math.round(a.trailingSilence * 1000)} ms after; ends ${Number.isFinite(a.endLevelDb) ? `${f1(a.endLevelDb)} dB re peak` : 'at zero'}`,
-      threshold: `silence at most ${Math.round(style.silenceMax * 1000)} ms; ends below ${f1(style.tailFloorDb)} dB re peak`, ranges,
+      threshold: `silence at most ${Math.round(style.silenceMax * 1000)} ms; ends below ${f1(style.tailFloorDb)} dB re peak (+${TAIL_SLACK_DB} dB slack, so a decay that reaches -60 dB at its end passes)`, ranges,
     });
   }
   // harsh: sustained 2-5 kHz energy
@@ -317,6 +372,20 @@ export function checkSummary(r: readonly CheckResult[]): string {
   return bad.length ? `checks: ${n}/${r.length} pass; failing: ${bad.map((c) => `${c.name} ${c.value}`).join('; ')}` : `checks: ${n}/${r.length} pass`;
 }
 
+/**
+ * When two failing checks pull against each other, the rule that binds: fix this one first, then the other follows. Fixing them in the
+ * wrong order undoes itself (raise the gain to pass loudness and harsh gets worse; lower it for harsh and loudness fails).
+ */
+export function bindingRules(r: readonly CheckResult[]): string[] {
+  const failing = (n: CheckName): CheckResult | undefined => r.find((c) => c.name === n && !c.pass);
+  const loudness = failing('loudness');
+  const tooQuiet = !!loudness && /too quiet/.test(loudness.value);
+  const out: string[] = [];
+  if (failing('harsh') && tooQuiet) out.push('harsh and loudness pull against each other (louder is harsher): lower the 2-5 kHz energy first (a low-pass or a lower-gain bright layer), then raise gain');
+  if (failing('clip') && tooQuiet) out.push('clip and loudness pull against each other (the peak is at the limit and the sound is still too quiet): shave the peaks first (fx add compress or limit on the master chain, or a softer transient), then raise gain');
+  return out;
+}
+
 /** The checks of one sound, one per line, with scores, thresholds and the exact places flagged. */
 export function formatChecks(id: string, r: readonly CheckResult[]): string {
   const lines = [`${id}: ${checksPass(r) ? 'PASS' : 'FAIL'} (${r.filter((c) => c.pass).length}/${r.length} checks pass)`];
@@ -324,5 +393,6 @@ export function formatChecks(id: string, r: readonly CheckResult[]): string {
     lines.push(`  ${c.name.padEnd(8)} ${c.pass ? 'pass' : 'FAIL'}  score ${c.score.toFixed(2)}  ${c.value}; held to ${c.threshold}`);
     for (const g of c.ranges) lines.push(`    flagged ${g.from.toFixed(4)}-${g.to.toFixed(4)} s: ${g.note}`);
   }
+  for (const b of bindingRules(r)) lines.push(`  binding rule: ${b}`);
   return lines.join('\n');
 }

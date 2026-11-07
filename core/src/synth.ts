@@ -34,6 +34,8 @@ type Reader = (i: number) => number;
 
 const EXP_STEEP = 8;
 const EXP_NORM = 1 - 1 / 256; // 1 - 2^-8
+/** An exponential fall to zero is a true exponential that is 60 dB down (a factor of 1000 = 2^9.9658) at the end of its segment, where the envelope then ends: no long run of silence after it. */
+const EXP_DECAY_60DB = 9.965784284662087;
 
 /** The value a segment from (value a) to (value b) has at u in [0, 1]. */
 export function curveValue(a: number, b: number, u: number, curve: Env[number]['curve']): number {
@@ -43,6 +45,7 @@ export function curveValue(a: number, b: number, u: number, curve: Env[number]['
     case 'exp':
       // Geometric between two values of one sign (equal steps of musical pitch, say); otherwise the fast-then-slow fall of a decay.
       if ((a > 0 && b > 0) || (a < 0 && b < 0)) return a * exp2(u * log2(b / a));
+      if (b === 0 && a !== 0) return a * exp2(-EXP_DECAY_60DB * u);
       return a + (b - a) * ((1 - exp2(-EXP_STEEP * u)) / EXP_NORM);
     default: return a + (b - a) * u;
   }
@@ -385,6 +388,71 @@ export function fxTail(f: Fx): number {
   return 0;
 }
 
+const LOG2E = 1.4426950408889634;
+const DB_TO_LOG2 = 0.16609640474436813; // 2^(dB * this) = 10^(dB / 20)
+const LOG2_TO_DB = 6.020599913279624; // 20 * log10(2)
+
+/**
+ * A feed-forward compressor: a peak detector (one pole, `attack` when the level rises and `release` when it falls) in dB, and above
+ * `threshold` the level is cut by (1 - 1/ratio) of the excess; `makeup` dB is added after. No look-ahead, so a transient faster than the
+ * attack gets through (use `limit` for peaks). Only + - * / and the bit-built exp2 and log2: the same bytes on every machine.
+ */
+function runCompressor(buf: Float64Array, f: Fx): void {
+  const n = buf.length;
+  const thr = f.p.threshold as number;
+  const slope = 1 - 1 / (f.p.ratio as number);
+  const ca = exp2(-LOG2E / ((f.p.attack as number) * 0.001 * SR));
+  const cr = exp2(-LOG2E / ((f.p.release as number) * 0.001 * SR));
+  const makeup = exp2((f.p.makeup as number) * DB_TO_LOG2);
+  let env = 0;
+  for (let i = 0; i < n; i++) {
+    const x = buf[i]!;
+    const ax = x < 0 ? -x : x;
+    env = ax > env ? ca * env + (1 - ca) * ax : cr * env + (1 - cr) * ax;
+    const over = env > 1e-9 ? LOG2_TO_DB * log2(env) - thr : -1;
+    buf[i] = over > 0 ? x * makeup * exp2(-over * slope * DB_TO_LOG2) : x * makeup;
+  }
+}
+
+/**
+ * A look-ahead peak limiter: no sample ends above `ceiling`. The gain that a peak needs is reached `lookahead` ms before the peak (a
+ * running minimum over the window, averaged over it so the gain moves smoothly), and comes back with a one-pole `release`. The output has
+ * no delay: the gain was already down when the peak arrives. Sample peaks, not true peaks (the export limiter, which works on 4x
+ * oversampled peaks, still guards the style's true-peak ceiling and changes nothing under it).
+ */
+function runLimiter(buf: Float64Array, f: Fx): void {
+  const n = buf.length;
+  const ceil = exp2((f.p.ceiling as number) * DB_TO_LOG2);
+  const need = new Float64Array(n).fill(1);
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    const ax = buf[i]! < 0 ? -buf[i]! : buf[i]!;
+    if (ax > ceil) { need[i] = ceil / ax; any = true; }
+  }
+  if (!any) return;
+  const W = Math.max(1, Math.round((f.p.lookahead as number) * 0.001 * SR));
+  // m[j] = the least gain needed in [j, j + W - 1] (a monotonic queue)
+  const m = new Float64Array(n);
+  const q = new Int32Array(n + W);
+  let head = 0, tail = 0;
+  for (let j = n - 1; j >= 0; j--) {
+    while (tail > head && need[q[tail - 1]!]! >= need[j]!) tail--;
+    q[tail++] = j;
+    while (q[head]! > j + W - 1) head++;
+    m[j] = need[q[head]!]!;
+  }
+  const cr = exp2(-LOG2E / ((f.p.release as number) * 0.001 * SR));
+  let sum = W * m[0]!;
+  let r = 1;
+  for (let i = 0; i < n; i++) {
+    if (i > 0) sum += m[i]! - (i - W >= 0 ? m[i - W]! : m[0]!);
+    const a = sum / W;
+    const rel = 1 - (1 - r) * cr;
+    r = a < rel ? a : rel;
+    buf[i] = buf[i]! * r;
+  }
+}
+
 function runFx(buf: Float64Array, f: Fx, channel: number): void {
   const n = buf.length;
   const P = (name: string): Reader => param(f.p, f.envs, name);
@@ -440,6 +508,8 @@ function runFx(buf: Float64Array, f: Fx, channel: number): void {
       }
       return;
     }
+    case 'compress': runCompressor(buf, f); return;
+    case 'limit': runLimiter(buf, f); return;
     case 'reverb': {
       const size = f.p.size as number;
       const fb = 0.7 + 0.28 * size;
@@ -597,18 +667,20 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
   });
   let end = n;
   if (s.duration === null) {
-    // An automatic length ends where the sound has died away: the last sample within 60.3 dB of the peak, but never inside a layer's own source. (The effects' tails only said how much room to leave.)
+    // An automatic length ends where the sound has died away: the last sample within 60.3 dB of the peak, wherever that is (inside a layer's source too). The layers' lengths and the effects' tails only said how much room to leave.
     let peak = 0;
     for (const ch of mix) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(ch[i]!));
     const floor = peak * 0.0009660508789898133;
     let last = 0;
     for (const ch of mix) for (let i = n - 1; i > last; i--) if (Math.abs(ch[i]!) >= floor) { last = i; break; }
+    // A classic layer is the classic voice as it is (layer-up keeps the very samples), so the sound is never cut inside one.
     let floorEnd = 1;
-    for (const b of built) floorEnd = Math.max(floorEnd, b.offset + b.src);
-    end = Math.max(1, Math.min(n, Math.max(last + 1, floorEnd)));
+    for (const b of built) if (b.layer.kind === 'classic') floorEnd = Math.max(floorEnd, b.offset + b.src);
+    // (a run of less than 1 ms at the end is not worth a cut: the sound keeps the length its layers give it)
+    end = Math.max(1, Math.min(n, Math.max(n - last - 1 > 44 ? last + 1 : n, floorEnd)));
     if (end < n && end > floorEnd) {
-      // the sound was cut where an effect's tail was still just audible: close it with a 3 ms fade, so it ends at zero
-      const fade = Math.min(132, end - floorEnd);
+      // the sound was cut where it is 60 dB down (inside a layer's source too, but not a classic layer's, or where a tail was still just audible): close it with a 3 ms fade, so it ends at zero
+      const fade = Math.min(132, end - floorEnd + 1);
       for (const ch of mix) for (let i = 0; i < fade; i++) ch[end - 1 - i] = ch[end - 1 - i]! * (i / fade);
     }
   }

@@ -234,7 +234,7 @@ describe('checks', () => {
     const quiet = by(run(good(0.02)), 'loudness');
     expect(quiet.pass).toBe(false);
     expect(quiet.value).toMatch(/LU too quiet/);
-    expect(quiet.threshold).toBe('-16.0 LUFS ±1');
+    expect(quiet.threshold).toBe('-16.0 LUFS ±1 (class standard)');
     expect(by(run(good(0.9)), 'loudness').value).toMatch(/LU too loud/);
     expect(by(run(good(0.02), { ...DEFAULT_STYLE, loudnessTarget: -38, loudnessTolerance: 3 }), 'loudness').pass).toBe(true);
     expect(by(run(new Float32Array(100)), 'loudness')).toMatchObject({ pass: false, score: 0, value: 'silent' });
@@ -264,12 +264,12 @@ describe('checks', () => {
     padded.set(good(0.15, 0.4), Math.round(N * 0.2));
     const c = by(run(padded), 'tail');
     expect(c.pass).toBe(false);
-    expect(c.ranges.map((g) => g.note)).toEqual([expect.stringMatching(/^20\d ms of silence at the start$/), expect.stringMatching(/^40\d ms of silence at the end$/)]);
+    expect(c.ranges.map((g) => g.note)).toEqual([expect.stringMatching(/^20\d ms of silence at the start$/), expect.stringMatching(/^40\d ms of silence at the end \(under -60 dB; duration=auto/)]);
     expect(c.ranges[0]!.from).toBe(0);
     expect(c.ranges[0]!.to).toBeCloseTo(0.2, 2);
     const cut = by(run(sine(440, 0.15, 0.5)), 'tail');
     expect(cut.pass).toBe(false);
-    expect(cut.ranges.at(-1)!.note).toMatch(/^cut at -\d+\.\d dB below the peak$/);
+    expect(cut.ranges.at(-1)!.note).toMatch(/^cut at -\d+\.\d dB below the peak \(end the amplitude/);
     expect(by(run(padded, { ...DEFAULT_STYLE, silenceMax: 1 }), 'tail').pass).toBe(true);
   });
 

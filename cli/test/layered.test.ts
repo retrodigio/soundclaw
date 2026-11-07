@@ -30,7 +30,7 @@ describe('the example script', () => {
   it('builds an impact, a sparkle and a creak, and all three pass every check', () => {
     const r = sc(['run', proj, DEMO]);
     expect(r.code, r.err).toBe(0);
-    expect(r.out).toMatch(/impact: layered 3 layers \[1 osc sine \(pitch envelope\); 2 osc brown; 3 osc square 3200 Hz\], master distort\+reverb → \d+ samples/);
+    expect(r.out).toMatch(/impact: layered 3 layers \[1 osc sine \(pitch envelope\); 2 osc brown; 3 osc square 3200 Hz\], master distort\+reverb\+limit → \d+ samples/);
     expect(r.out).toMatch(/sparkle: layered 5 layers .*, master delay\+reverb, stereo → \d+ samples × 2 channels/);
     const c = sc(['check', proj]);
     expect(c.code).toBe(0);
@@ -101,7 +101,7 @@ describe('views and export', () => {
     const h = sc(['run', '--help']).out;
     for (const w of ['sound new <id> voice=layered', 'sound layer-up <id>', 'sound classic <id> on|off', 'layer add <id>', 'env <id> <target>', 'fx add <id> [layer=<n>]']) expect(h, w).toContain(w);
     expect(sc(['view', '--help']).out).toContain('view <project> <id> layers');
-    expect(sc(['sample', '--help']).out).toContain('sample import <project> <file.wav> [as=<name>]');
+    expect(sc(['sample', '--help']).out).toContain('sample import <project> <file.wav | folder> [as=<name>]');
     expect(sc(['check', '--help']).out).toContain('harsh');
   });
 });

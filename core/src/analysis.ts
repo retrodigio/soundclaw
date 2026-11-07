@@ -39,8 +39,9 @@ export function fft(re: Float64Array, im: Float64Array, inverse = false): void {
     for (; j & bit; bit >>= 1) j ^= bit;
     j ^= bit;
     if (i < j) {
-      [re[i], re[j]] = [re[j]!, re[i]!];
-      [im[i], im[j]] = [im[j]!, im[i]!];
+      const tr = re[i]!, ti = im[i]!;
+      re[i] = re[j]!; im[i] = im[j]!;
+      re[j] = tr; im[j] = ti;
     }
   }
   const { cos, sin } = twiddle(n);
@@ -249,8 +250,25 @@ export function truePeak(x: Samples): number {
   const h = tpFilter;
   let peak = 0;
   for (let i = 0; i < x.length; i++) peak = Math.max(peak, Math.abs(x[i]!));
+  // An interpolated point is a weighted sum of the 50 samples around it, so it cannot exceed (the largest of them) x (the sum of the weights' magnitudes):
+  // a block whose neighbourhood is that far below the peak so far is skipped, which leaves the answer exactly as it was and saves most of the work on a decaying sound.
+  let gain = 0;
+  for (let ph = 0; ph < 4; ph++) {
+    let g = 0;
+    for (let i = 0; i < h.length; i++) if ((((i - TP_HALF) % 4) + 4) % 4 === ph) g += Math.abs(h[i]!);
+    gain = Math.max(gain, g);
+  }
+  const B = 64;
+  const nb = Math.ceil(x.length / B);
+  const bmax = new Float64Array(nb);
+  for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]!); if (a > bmax[(i / B) | 0]!) bmax[(i / B) | 0] = a; }
   // Phases 1..3 between sample i and i+1 (phase 0 is the samples themselves).
   for (let i = 0; i < x.length - 1; i++) {
+    if ((i & (B - 1)) === 0 || i === 0) {
+      const b = (i / B) | 0;
+      const near = Math.max(bmax[b]!, bmax[b - 1] ?? 0, bmax[b + 1] ?? 0);
+      if (near * gain <= peak) { i = Math.min(x.length - 2, (b + 1) * B - 1); continue; }
+    }
     for (let ph = 1; ph < 4; ph++) {
       let acc = 0;
       for (let j = i - 24; j <= i + 25; j++) {
@@ -288,8 +306,10 @@ export function yinPitch(x: Samples, o: { hop?: number; fmin?: number; fmax?: nu
   if (W < 128 || tauMax <= tauMin + 2) return out;
   let peak = 0;
   for (let i = 0; i < x.length; i++) peak = Math.max(peak, Math.abs(x[i]!));
-  const N = nextPow2(2 * W + tauMax);
+  // the correlation is wanted at lags 0..tauMax only, and b is W + tauMax long: a transform of that size has no wrap-around in those lags
+  const N = nextPow2(W + tauMax + 1);
   const ar = new Float64Array(N), ai = new Float64Array(N), br = new Float64Array(N), bi = new Float64Array(N);
+  const cr = new Float64Array(N), ci = new Float64Array(N);
   const d = new Float64Array(tauMax + 1);
   const cm = new Float64Array(tauMax + 1);
   const cum = new Float64Array(W + tauMax + 1);
@@ -305,11 +325,15 @@ export function yinPitch(x: Samples, o: { hop?: number; fmin?: number; fmax?: nu
     const rms = Math.sqrt(energy / W);
     if (rms < peak * 0.003) { out.push({ t, hz: null, clarity: 0 }); continue; }
     // cross-correlation c(τ) = Σ a[j]·b[j+τ] through the FFT: IFFT(conj(A)·B)
-    fft(ar, ai); fft(br, bi);
+    // both segments are real, so one transform of a + i·b gives both spectra: A[k] = (Z[k] + conj Z[N-k]) / 2, B[k] = (Z[k] - conj Z[N-k]) / 2i
+    for (let k = 0; k < N; k++) { cr[k] = ar[k]!; ci[k] = br[k]!; }
+    fft(cr, ci);
     for (let k = 0; k < N; k++) {
-      const r = ar[k]! * br[k]! + ai[k]! * bi[k]!;
-      const i2 = ar[k]! * bi[k]! - ai[k]! * br[k]!;
-      ar[k] = r; ai[k] = i2;
+      const m = (N - k) & (N - 1);
+      const aR = (cr[k]! + cr[m]!) / 2, aI = (ci[k]! - ci[m]!) / 2;
+      const bR = (ci[k]! + ci[m]!) / 2, bI = -(cr[k]! - cr[m]!) / 2;
+      ar[k] = aR * bR + aI * bI;
+      ai[k] = aR * bI - aI * bR;
     }
     fft(ar, ai, true);
     for (let tau = 1; tau <= tauMax; tau++) d[tau] = energy + (cum[W + tau]! - cum[tau]!) - 2 * ar[tau]!;
@@ -502,7 +526,8 @@ export function analyze(input: Samples | readonly Samples[]): Analysis {
   };
 
   // pitch
-  const frames = yinPitch(x, { hop: 256 });
+  // (a long sound is tracked at half the resolution: its pitch frames are 12 ms apart instead of 6)
+  const frames = yinPitch(x, { hop: x.length > 2 * SAMPLE_RATE ? 512 : 256 });
   const voiced = frames.filter((f) => f.hz !== null);
   const hzs = voiced.map((f) => f.hz!);
   const edge = (xs: number[]): number | null => (xs.length ? median(xs) : null);

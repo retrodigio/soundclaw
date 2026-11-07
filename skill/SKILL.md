@@ -1,6 +1,6 @@
 ---
 name: soundclaw
-description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, changes, render, view, describe, check, import, sample, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
+description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, changes, render, view, describe, check, measure, normalize, import, sample, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
 ---
 
 # SoundClaw
@@ -134,8 +134,8 @@ Use these instead of making sounds one at a time whenever a game plays the same 
   loudness plus the rule's offset, and `check` holds it to the style target plus that offset, so a far sound is not "too quiet".
   It is a copy: change the source and the variant does not follow; make it again under another name.
 - **Ambience that runs for ever: a bed.** `sound new rain voice=layered preset=rain` (also `wind`, `fire`, `crowd`) is a looping
-  layered sound that lands near −16 LUFS; or loop any layered sound with `sound loop <id> <seconds> [fade=<s>]`. The seam is made
-  when it renders (the end is crossfaded over the start), so give every layer a `dur` of at least length + fade. `view <id> loop`
+  layered sound; or loop any layered sound with `sound loop <id> <seconds> [fade=<s>]`. The seam is made
+  when it renders (the end is crossfaded over the start), `sound loop` lengthens the `dur` of every osc, fm and ks layer that is shorter than length + fade (0.1 to 120 s) and says which. `view <id> loop`
   shows the seam, and the click check judges the seam (a jump, or a step in level) instead of the first and last sample. For a
   loop that must be exact, export WAV; OGG is lossy at the seam. A tonal loop should hold a whole number of cycles; noise needs nothing.
 - **Handing over to a game:** `export <project> --all --format ogg --to <dir>` (or `--set <set>`) writes the files and a
@@ -148,10 +148,36 @@ Use these instead of making sounds one at a time whenever a game plays the same 
   card with the check badge; the person goes through them with the keyboard (arrows, space, `a` approves, `r` asks for changes) and
   their approvals and requests reach you through `await` as ever. A set has its own page (`#/set/<id>`).
 
+## Loudness classes: one target does not fit a whole game
+
+A UI tick is not as loud as an explosion (a game's sounds span about −8 to −49 LUFS), so **give every sound a class** and the `loudness` check
+holds it to that class: `sound set tick class=ui` (`ui` −28 ±3, `foley` −22 ±2, `impact` −14 ±2, `ambience` −26 ±3, `voice` −20 ±2,
+`music-sting` −16 ±2; a sound with none is `standard`, −16 ±1; the project style can add or change classes). `loudness=<LUFS>` is a
+target for one sound; a set takes a class too (`set new … class=foley`, `set class <set> <name>`). Recipes start their sounds in the
+class they are made for. `check` and `measure` say which class applied.
+
+- **Bring sounds to their level with `normalize <project> <id|set>... [<class> | target=<LUFS>]`**, not by trial and error: it writes the
+  gain (a classic sound's `volume`, which stops at 1: the warning says how far short; `sound layer-up` lets gain go to 4).
+- **Loud and not clipping: put dynamics in the chain, where the checks see them.** `fx add <id> compress threshold=-20 ratio=4`
+  and `fx add <id> limit ceiling=-1` (on the master chain, or `layer=<n>`), then raise `gain`. The checks measure the sound after
+  the master chain; the export limiter only guards the true-peak ceiling and never makes anything louder. When `check` prints a
+  **binding rule** (harsh against loudness: lower the 2–5 kHz energy first, then raise gain; clip against loudness: limit first),
+  fix them in that order.
+- **Many hits in one layer: `bursts(...)`.** A sound has 8 layers at most; rain drops, a ratchet or a clock are one layer with
+  `env <id> 1.amp bursts(times=0.1,0.3,0.55 attack=0.002 decay=0.05 level=1)` or `bursts(count=12 over=2 jitter=0.5 level=0.4..1 seed=7)`.
+- **Decays: end the amplitude envelope at 0 with `@exp`** (`0:0 0.002:1 2.6:0@exp`): it is 60 dB down at its end, which is what `tail`
+  asks for; `sound set <id> duration=auto` then ends the sound where it died away, inside a layer's source too.
+- **Scripts: `measure <project> [ids...] --json` measures many sounds in one process** (starting a process per sound costs about half a second each):
+  `{pass, sounds: [{id, class, numbers, checks, binding}], sets}`. `check`, `describe` and `render` take `--json` too.
+- Manage sounds with commands, not files: `sound copy <id> <new>`, `sound rename <id> <new>` (sets that name it follow),
+  `sound remove <id> [--from-sets]`; all undoable. Ids keep their case (`Door_01`) and are unique ignoring case. A set's members can be
+  named: `set new … names="step_{n}"` or `as=a,b,c`. `sample import <project> <folder>` brings in every WAV in a folder.
+- A long script: `import … --quiet` prints only the warnings and one summary line; `--classic` marks the imported sounds classic.
+
 ## Listening with numbers and pictures
 
 - Start with `check` (CLI: `soundclaw check <project> <sound-or-set>`): six checks (with `harsh`) per sound, `set-spread` per set: clip, loudness (target from the
-  project style, default -16 LUFS ±1, so `volume` is usually the fix), dc, click (a jump at the first
+  sound's loudness class, default -16 LUFS ±1, so `normalize` is usually the fix), dc, click (a jump at the first
   or last sample: use `attack` > 0 and let `decay` reach zero), tail (silence padding, or a sound cut
   off while still loud: a `minFreq` cut or a short decay), harsh (sustained 2–5 kHz energy). It lists the exact time ranges.
 - `view <sound> spec` shows brightness, pitch motion and noise; `wave` the shape and the clipping;
@@ -159,7 +185,7 @@ Use these instead of making sounds one at a time whenever a game plays the same 
   and shows the difference with distance numbers (use it for "more like that one" and to see what a
   `mutate` changed). The image is a PNG; the tool also prints the numbers.
 - `describe <sound>` is the same measurements in plain words.
-- A request's `work done` is refused while the sound's checks fail; fix the sound, then finish.
+- A request's `work done` is refused while the sound's checks fail, and, for a sound in a set of two or more, while the set's `set-spread` fails; fix it, then finish.
 
 ## Requests from people
 

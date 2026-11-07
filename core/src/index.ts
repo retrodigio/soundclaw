@@ -22,6 +22,7 @@ export * from './describe.ts';
 export * from './views.ts';
 export * from './editor.ts';
 export * from './recipes.ts';
+export * from './bursts.ts';
 export * from './sets.ts';
 export * from './families.ts';
 export * from './importers.ts';

@@ -13,6 +13,7 @@ import {
 } from '@soundclaw/core';
 import { download } from './download.ts';
 import { Spectrogram } from './Spectrogram.tsx';
+import { LoudnessClass } from './LoudnessClass.tsx';
 import type { Store } from './store.ts';
 import { Waveform } from './Waveform.tsx';
 
@@ -348,6 +349,7 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
         <span className="dim" data-testid="editor-numbers">
           {measured.analysis.duration.toFixed(2)} s · {Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · centroid {measured.analysis.centroid.mean.toFixed(0)} Hz{stereo ? ' · stereo' : ''}
         </span>
+        <LoudnessClass store={store} sound={sound} />
         <span className="spacer" />
         <button className="play" data-testid="editor-play" data-playing={playing} onClick={() => void store.play(id)}>{playing ? '■ Stop' : '▶ Play'} <span className="dim">space</span></button>
         <button data-testid="editor-stop" onClick={() => store.stop()} disabled={!store.playing}>■ Stop</button>

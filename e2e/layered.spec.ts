@@ -41,7 +41,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await page.getByTestId('add-layer-osc').click();
   await expect(page.getByTestId('layer-row-1')).toBeVisible();
   await fillRange(page, 'ctl-L-1-freq', 159); // 20 * 1000^0.159 = 60 Hz
-  await fillRange(page, 'ctl-L-1-dur', 534); // 0.4 s
+  await fillRange(page, 'ctl-L-1-dur', 392); // 0.4 s (log scale, 0.01 to 123 s)
   // both moves came within the pause: they are written together, as one command
   await expect.poll(async () => (await texts(page)).filter((t) => /^layer set impact 1 freq=\d+(\.\d+)? dur=0\.\d+$/.test(t)).length, { timeout: 8000 }).toBe(1);
 
@@ -50,13 +50,13 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await expect(page.getByTestId('layer-row-2')).toBeVisible();
   await page.getByTestId('ctl-L-2-wave').selectOption('white');
   await page.getByTestId('ctl-L-2-filter').selectOption('lp');
-  await fillRange(page, 'ctl-L-2-dur', 361); // about 0.1 s
+  await fillRange(page, 'ctl-L-2-dur', 245); // about 0.1 s
   await expect.poll(async () => (await texts(page)).some((t) => /^layer set impact 2 .*filter=lp/.test(t))).toBe(true);
 
   // layer 3: a short square click
   await page.getByTestId('add-layer-osc').click();
   await page.getByTestId('ctl-L-3-wave').selectOption('square');
-  await fillRange(page, 'ctl-L-3-dur', 90); // about 0.02 s
+  await fillRange(page, 'ctl-L-3-dur', 74); // about 0.02 s
   await expect.poll(async () => (await texts(page)).some((t) => /^layer set impact 3 .*wave=square/.test(t))).toBe(true);
   await expect(page.getByTestId('layer-row-3')).toBeVisible();
   await expect(page.locator('[data-testid^=layer-row-]')).toHaveCount(3);

@@ -22,7 +22,7 @@ editor writes `sound set` with the parameters in the table's order and the wave 
 
 | Command | Does |
 |---|---|
-| `sound new <id>` | Make a sound. Ids are `a-z`, `0-9`, `_` and `-`, start with a letter, at most 48 characters. A new sound is a 440 Hz, 0.5 s, volume 0.5 sine tone (the placeholder voice). |
+| `sound new <id>` | Make a sound. Ids are `a-z`, `A-Z`, `0-9`, `_` and `-`, start with a letter, at most 48 characters. An id keeps its case as written (file names in engines are case-sensitive) and is unique ignoring case (`Click` and `click` cannot both exist, so two sounds never share a file on a case-insensitive disk). A new sound is a 440 Hz, 0.5 s, volume 0.5 sine tone (the placeholder voice). |
 | `sound new <id> voice=classic [preset=<category>] [seed=<n>]` | Make a classic-voice sound: the 25 sfxr-style parameters at their defaults, or generated from a category (below). `preset=` alone means `voice=classic`. Without `seed=` the seed comes from the category and the id, and is written into the normal form. |
 | `sound set <id> <param>=<value> ...` | Change parameters (those of the sound's voice, below). Values outside a range are errors. `wave=square\|saw\|sine\|noise` takes names. `seed=<n>` fixes the noise stream; `seed=auto` goes back to the hash of the values. |
 | `sound patch <id> "<single-patch text>"` | Replace all 25 values from sfxr patch text: numbers in positional order (an empty field keeps the default) or `name=value` pairs, with an optional version line first (write the line break as `\n` inside the quotes). |
@@ -31,10 +31,15 @@ editor writes `sound set` with the parameters in the table's order and the wave 
 | `sound mark <id> approved\|rejected\|draft ["note"]` | Set the sound's status. People use the dashboard's Approve and Ask for changes buttons, which write this. |
 | `sound new <id> voice=layered [preset=<recipe>] [seed=<n>]` | Make a layered sound: up to 8 layers, envelopes, effects (below). `preset=` takes a layered recipe (`footstep`, `ui-click`, `door`, `magic`) or a classic category (one classic layer). The seed (the sound's noise seed; the recipe's seed too) is written into the normal form. |
 | `sound set <id> duration=<s\|auto> gain=<g> seed=<n>` | On a layered sound: its length (`auto` follows the layers), master level and noise seed. |
-| `sound loop <id> <seconds>\|off [fade=<s>]` | Make a layered sound a looping bed, `<seconds>` long (0.5 to 8), its seam made seamless by a crossfade of `fade` seconds (0.02 to 2, at most half the length, default 0.5); `off` ends it. See "Loops". |
-| `set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="<param>±<amount> ..."] [seed=<n>]` | Make a set of `count` (1 to 32) seeded variants of a classic or layered sound, each a real sound named `<set>_1` … `<set>_<n>`, matched to the loudness target by gain. See "Sets". |
+| `sound set <id> class=<name>\|none loudness=<LUFS>\|auto` | On any sound: its loudness class (what the `loudness` check holds it to: "Loudness classes" below), or a loudness for this sound alone. The class must be in the project's style. |
+| `sound copy <id> <new>` | A copy of the sound under a new id, as a draft, in no set. |
+| `sound rename <id> <new>` | Give the sound a new id (a case-only change is allowed); the sets that name it (members, source) and the variants that name it as their source follow. |
+| `sound remove <id> [--from-sets]` | Remove a sound. Refused while a set names it (as a member or as its source), unless `--from-sets`, which takes it out of those sets first. All three are commands on the history: `undo` brings the sound back. |
+| `sound loop <id> <seconds>\|off [fade=<s>]` | Make a layered sound a looping bed, `<seconds>` long (0.1 to 120), its seam made seamless by a crossfade of `fade` seconds (0.02 to 2, at most half the length, default 0.5); `off` ends it. Layers shorter than length + fade are lengthened (see "Loops"). |
+| `set new <set> from=<sound> count=<n> [target=<LUFS>] [class=<name>] [names="<template>" \| as=<id>,<id>,...] [spread="<param>±<amount> ..."] [seed=<n>]` | Make a set of `count` (1 to 32) seeded variants of a classic or layered sound, each a real sound named `<set>_1` … `<set>_<n>` (or by `names="step_{n}"`, where `{n}` is 1, 2, ..., or by an explicit list `as=`), matched to the loudness target (or the class's) by gain. See "Sets". |
 | `set add <set> <sound>...`, `set remove <set> <sound>...` | Put existing sounds into a set (they are matched to its target), or take them out (they stay as sounds). |
 | `set retarget <set> <LUFS>\|none` | Change the loudness the members are held to and matched to (`-20` or `-20LUFS`), or stop matching. |
+| `set class <set> <name>\|none` | The loudness class of the members that have none of their own; with no target on the set, they are matched to the class's target. |
 | `set regen <set> [seed=<n>] [spread="..."]` | Make the generated members again from the source as it is now, with a new seed (and, if given, new rules). |
 | `family <sound> near\|far\|muffled [as=<id>]` | A copy of the sound as heard near, far away or through a wall (default id `<sound>_<kind>`). See "Families". |
 | `sound layer-up <id>` | A classic sound becomes layered: the classic voice is layer 1, the very same samples. Refused on a sound marked classic. |
@@ -42,7 +47,7 @@ editor writes `sound set` with the parameters in the table's order and the wave 
 | `layer add <id> classic\|osc\|fm\|ks\|sample [<param>=<value> ...] [at=<n>]` | Add a layer with a source (below). A classic layer also takes `preset=<category>` (`presetseed=<n>`) or `patch="<single-patch text>"`. |
 | `layer set <id> <n> <param>=<value> ...` | Change a layer's parameters; `source=<kind>` changes its source (the source's parameters go back to their defaults). A fixed value replaces any envelope on that parameter. |
 | `layer remove\|move\|mute\|solo <id> <n> [to=<m> \| on\|off]` | Remove a layer, move it to a position, mute or solo it (`on` is the default; `off` undoes). If any layer is soloed only soloed layers sound. Layers count from 1. |
-| `env <id> <target> "<breakpoints>"` | An envelope on a parameter (below). Also `adsr(a,d,s,r[,hold])` for an amplitude envelope, and `clear`. |
+| `env <id> <target> "<breakpoints>"` | An envelope on a parameter (below). Also `adsr(a,d,s,r[,hold])` for an amplitude envelope, `bursts(...)` for repeated hits, and `clear`. |
 | `fx add <id> [layer=<n>] <kind> [<param>=<value> ...] [at=<k>]` | Add an effect to a layer's chain (or, without `layer=`, to the master chain). |
 | `fx set\|remove\|move <id> [layer=<n>] <k> ...` | Change an effect's parameters, remove it, or move it to a position (`to=<m>`). Effects count from 1. |
 | `undo [group=<g>] [by=<author>]` | Take a group out of effect: the latest one still in effect, a named one, or an author's latest. |
@@ -137,7 +142,7 @@ voice stays classic. A layered sound is mono until a layer is panned off centre,
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
-| `offset` | 0 to 10 s | 0 | - | when the layer starts, from the start of the sound |
+| `offset` | 0 to 120 s | 0 | - | when the layer starts, from the start of the sound |
 | `gain` | 0 to 4 | 1 | yes | level of the layer (1 = as made) |
 | `pan` | -1 to 1 | 0 | yes | -1 left … 1 right; any layer off centre makes the whole sound stereo |
 | `filter` | `off`, `lp`, `hp`, `bp`, `notch` | off | - | the layer's own filter: off, lp, hp, bp or notch |
@@ -168,7 +173,7 @@ feedback tap: a 93-step pattern, so it has the pitch `freq`). Waves are not band
 | `freq` | 20 to 20000 Hz | 440 | yes | pitch (the pitch of metal noise too; noise ignores it) |
 | `duty` | 0.01 to 0.99 | 0.5 | yes | square and pulse: the high part of each cycle |
 | `table` | text | organ | - | wavetable: organ, bell, reed, hollow, or 4 to 64 numbers like "0,0.5,1,0.5,0,-0.5,-1,-0.5" |
-| `dur` | 0.01 to 10 s | 0.3 | - | length of the source |
+| `dur` | 0.01 to 123 s | 0.3 | - | length of the source |
 
 Wavetables: `organ`, `bell`, `reed`, `hollow` (built from harmonics) or your own: `table=0,0.8,1,0.2,-0.5,-1,-0.3,0`
 (4 to 64 numbers, read with linear interpolation).
@@ -181,7 +186,7 @@ carriers 1 and 3 added; `parallel` all added. Carriers are added at their `level
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
 | `freq` | 20 to 20000 Hz | 440 | yes | base pitch; each operator runs at freq × its ratio |
-| `dur` | 0.01 to 10 s | 0.3 | - | length of the source |
+| `dur` | 0.01 to 123 s | 0.3 | - | length of the source |
 | `ops` | 2 to 4 (whole) | 2 | - | how many operators (2 to 4) |
 | `algo` | `chain`, `fan`, `pairs`, `parallel` | chain | - | chain: 4→3→2→1; fan: 2, 3 and 4 all modulate 1; pairs: 2→1 and 4→3 added; parallel: all added (no modulation). Operator 1 is always a carrier |
 | `ratio1` | 0.25 to 16 | 1 | - | operator 1 frequency ratio |
@@ -203,20 +208,20 @@ the highs fall faster).
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
 | `freq` | 20 to 20000 Hz | 220 | - | pitch of the string |
-| `dur` | 0.01 to 10 s | 1 | - | length of the source |
+| `dur` | 0.01 to 123 s | 1 | - | length of the source |
 | `decay` | 0.05 to 10 s | 1 | - | time for the string to fall by 60 dB |
 | `bright` | 0 to 1 | 0.8 | - | brightness of the pluck (0 dull … 1 bright) |
 
-*sample*: an imported WAV (`soundclaw sample import <project> <file.wav> [as=<name>]`: PCM 8/16/24/32-bit or 32-bit float,
-any rate, stereo mixed to mono, at most 60 s; it is copied to `<project>/samples/`). It plays at its own rate resampled
+*sample*: an imported WAV (`soundclaw sample import <project> <file.wav | folder> [as=<name>]`: PCM 8/16/24/32-bit or 32-bit float,
+any rate, stereo mixed to mono, at most 120 s; it is copied to `<project>/samples/`). It plays at its own rate resampled
 (linear interpolation), trimmed by `start` and `end`, transposed by `pitch` (its length changes with it) and optionally
 backwards. A batch that names a sample that is not in the project is refused. The render key includes the file's hash.
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
 | `sample` | text | none | - | the name of a sample in the project (sample import <project> <file.wav> as=<name>) |
-| `start` | 0 to 60 s | 0 | - | trim: where in the sample to start |
-| `end` | 0 to 60 s | 0 | - | trim: where to stop (0 = the end) |
+| `start` | 0 to 120 s | 0 | - | trim: where in the sample to start |
+| `end` | 0 to 120 s | 0 | - | trim: where to stop (0 = the end) |
 | `pitch` | -48 to 48 semitones | 0 | yes | transposition (the sample's length changes with it) |
 | `reverse` | 0 to 1 (whole) | 0 | - | 1 plays it backwards |
 
@@ -227,14 +232,23 @@ that arrives at it: `0:100 0.2:400@exp 0.5:100@ease`. Before the first point the
 | Curve | The segment arriving at the point |
 |---|---|
 | `lin` (default) | a straight line |
-| `exp` | between two values of the same sign: geometric, equal ratios in equal times (a pitch glide of equal musical steps); towards or from zero or across it: a fast-then-slow fall `(1 − 2^(−8u)) / (1 − 2^−8)`, the shape of a decay |
+| `exp` | between two values of the same sign: geometric, equal ratios in equal times (a pitch glide of equal musical steps); **to zero**: a true exponential decay `a · 2^(−9.966 u)`, which is 60 dB down (a factor of 1000) at the end of its segment, where the envelope then ends, so a decay has no long run of silence after it; from zero, or across it: a fast-then-slow curve `(1 − 2^(−8u)) / (1 − 2^−8)` |
 | `hold` | stays at the earlier value until the point, then jumps |
 | `ease` | smoothstep `u²(3 − 2u)` |
+
+**Repeated hits: `bursts(...)`.** A sound has at most 8 layers, so many hits (rain drops, a machine gun, a clock) belong in one layer's amplitude envelope. `bursts(...)` writes that envelope as breakpoints (the normal form is the breakpoints):
+
+```
+env drops 1.amp bursts(times=0.1,0.35,0.6 attack=0.002 decay=0.05 level=1)
+env drops 1.amp bursts(count=12 over=2 jitter=0.5 attack=0.001 decay=0.04 level=0.4..1 seed=7)
+```
+
+Each hit rises over `attack` seconds (0.0005 to 1) to its level (0 to 4) and falls back to 0 on an exponential curve over `decay` seconds (0.005 to 10; 60 dB down at its end). `times=` gives the hits' start times (they must not overlap: a hit lasts attack + decay). `count=` with `over=` (seconds) spreads that many hits evenly over the time, each moved by up to `jitter` (0 to 1, default 0.5) of its slot, seeded (`seed=`; without one it comes from the settings, so the same text is always the same hits); `level=0.4..1` draws each hit's level from a range (count form). At most 85 hits per envelope (256 breakpoints). Write it without spaces, or in quotes. It works on any target that takes an envelope.
 
 Targets: `N.amp` (the amplitude envelope of layer N, 0 to 4), `N.<param>` (a layer parameter that takes an envelope: see the
 "Envelope" column), `N.fxK.<param>` (the K-th effect of layer N), `master.fxK.<param>`. `env <id> <target> adsr(a,d,s,r[,hold])`
 writes an amplitude envelope as breakpoints (attack linear to 1, decay `exp` to the sustain level, optional hold, release `exp`
-to 0) and the normal form is the breakpoints. `clear` removes an envelope. At most 32 points. Values must be inside the
+to 0) and the normal form is the breakpoints. `clear` removes an envelope. At most 256 points. Values must be inside the
 parameter's range. Setting a fixed value with `layer set` or `fx set` removes that parameter's envelope.
 
 **Effects** (`fx add <id> [layer=<n>] <kind> ...`), at most 8 per chain, run in the order of the list:
@@ -289,22 +303,43 @@ parameter's range. Setting a fixed value with `layer set` or `fx set` removes th
 | `damp` | 0 to 1 | 0.5 | - | how fast the highs die away |
 | `mix` | 0 to 1 | 0.3 | yes | dry/wet |
 
+*compress*: a feed-forward compressor. A peak detector (one pole: `attack` when the level rises, `release` when it falls) measures the level in dB; above `threshold` the level is cut by `1 − 1/ratio` of the excess, and `makeup` dB is added after. A constant 0.5 (−6 dB) over a −18 dB threshold at 4:1 comes out 9 dB lower. It has no look-ahead, so a transient faster than the attack passes through (that is what `limit` is for). Deterministic: only + − × ÷ and the renderer's own `exp2` and `log2`.
+
+| Parameter | Range | Default | Envelope | Meaning |
+|---|---|---|---|---|
+| `threshold` | -60 to 0 dB | -18 | - | level above which the sound is turned down (peak level, dBFS) |
+| `ratio` | 1 to 20 | 4 | - | how much of the level above the threshold is kept: 4 means 4 dB over becomes 1 dB over |
+| `attack` | 0.1 to 200 ms | 5 | - | how fast the detector follows a rise in level |
+| `release` | 5 to 2000 ms | 100 | - | how fast the detector lets go after the level falls |
+| `makeup` | 0 to 24 dB | 0 | - | gain added after compressing |
+
+*limit*: a look-ahead peak limiter: after it no sample is above `ceiling` (sample peaks; the export limiter below still guards the 4×-oversampled true peak). The gain a peak needs is reached `lookahead` ms before the peak (a running minimum over the window, averaged so it moves smoothly) and comes back with a one-pole `release`; under the ceiling the gain is exactly 1, so a quieter sound is left bit for bit as it was. There is no delay. In a stereo sound each channel is limited on its own. Use it on the master chain (or on one layer) so a sparse, spiky sound can be loud without clipping: gain up, then `fx add <id> limit ceiling=-1`.
+
+| Parameter | Range | Default | Envelope | Meaning |
+|---|---|---|---|---|
+| `ceiling` | -24 to 0 dB | -1 | - | no sample goes above this level (dBFS) after the limiter |
+| `release` | 1 to 1000 ms | 50 | - | how fast the gain comes back after a peak |
+| `lookahead` | 0 to 20 ms | 5 | - | how long before a peak the gain starts to come down (0: it drops at once) |
+
 **The sound.** `sound set <id> duration=<s|auto> gain=<g> seed=<n>`:
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
-| `duration` | 0.01 to 10 s | auto | - | length of the sound; `auto` (the default) is as long as the layers and their tails |
+| `duration` | 0.01 to 120 s | auto | - | length of the sound; `auto` (the default) is as long as the layers and their tails |
 | `gain` | 0 to 4 | 1 | - | master level |
 | `seed` | 0 to 4294967295 (whole) | 1 | - | the sound's noise seed (layers derive theirs from it) |
 
 An automatic length is as long as the layers that sound (not muted; if any is soloed, those) and their effects' tails, then
-trimmed where the sound has died away (the last sample within 60.3 dB of the peak, with a 3 ms fade if an effect's tail
-was cut), but never inside a layer's own source.
+trimmed where the sound has died away: the last sample within 60.3 dB of the peak, **wherever that is, inside a layer's own source too**
+(a source longer than its envelope no longer leaves silence at the end), closed with a 3 ms fade; a run of less than 1 ms is left alone. A classic
+layer is never cut (it is the classic voice as it is, so `sound layer-up` keeps the very samples).
 
 **Limiter.** A layered sound is exported through a look-ahead peak limiter (about 1 ms) whose ceiling is the style's
 `truePeakMax` (default −0.1 dBTP, kept 0.1 dB inside it): no sample and no point between samples (4× oversampled) goes above it, and
-under the ceiling it changes nothing. `export` says how much it reduced. The checks measure the sound as rendered, before the
-limiter, so they tell you when the limiter would have to work.
+under the ceiling it changes nothing. `export` says how much it reduced. **The checks measure the sound after the master chain** (every
+layer's and the master's effects, `compress` and `limit` included) and before this export limiter, so they tell you when the limiter would
+have to work. The export limiter does one thing only: it guards the true-peak ceiling. It never makes a sound louder and does not touch a sound
+whose true peak is under the ceiling; to be loud *and* not clip, put `compress` / `limit` in the chain, where the checks see them.
 
 **Stereo.** Pan is constant-power (`cos`/`sin` of the angle; a layer at the centre of a stereo sound has gain 0.707 in each channel,
 so a sound's loudness does not change when one layer is panned). The WAV has two channels; the numbers and checks work on both:
@@ -318,21 +353,82 @@ classic category on a layered sound, which gives it one classic layer). Like the
 
 | Recipe | Layer | Chance | Parameters | Envelopes | Effects |
 |---|---|---|---|---|---|
-| `footstep` a soft thud and a scuff: shoes on a floor | osc | 1 | osc wave sine; freq 90..150; dur 0.17..0.22; gain 0.7..1 | amp 0:0 0.003:1 0.1..0.16:0@exp; freq 0:110..170 0.1:45..65@exp | - |
+| `footstep` a soft thud and a scuff: shoes on a floor (class foley) | osc | 1 | osc wave sine; freq 90..150; dur 0.17..0.22; gain 0.7..1 | amp 0:0 0.003:1 0.1..0.16:0@exp; freq 0:110..170 0.1:45..65@exp | - |
 |  | osc | 1 | osc wave one of brown, pink; dur 0.12..0.2; filter lp; cutoff 900..1800; q 0.7..1.5; gain 0.5..0.9 | amp 0:0 0.004:1 0.09..0.15:0@exp; cutoff 0:1800..2600 0.12:300..500@exp | - |
 |  | osc | 0.6 | osc wave white; offset 0.02..0.06; dur 0.05..0.1; filter hp; cutoff 2500..4500; gain 0.12..0.3 | amp 0:0 0.004:1 0.04..0.07:0@exp | - |
-| `ui-click` a short tick with a bright body: buttons, toggles | osc | 1 | osc wave sine; freq 1800..3000; dur 0.05..0.08; gain 0.6..0.9 | amp 0:1 0.03..0.05:0@exp; freq 0:2200..3200 0.04:1400..1900@exp | - |
+|  | master | 1 | - | - | filter type hp cutoff 40 q 0.707 |
+|  | master | 1 | - | - | compress threshold -24 ratio 6 attack 3 release 120 makeup 7.5 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `ui-click` a short tick with a bright body: buttons, toggles (class ui) | osc | 1 | osc wave sine; freq 1800..3000; dur 0.1..0.12; gain 0.6..0.9 | amp 0:1 0.07..0.1:0@exp; freq 0:2200..3200 0.05:1400..1900@exp | - |
 |  | osc | 1 | osc wave white; dur 0.015; filter hp; cutoff 3000..6000; gain 0.2..0.4 | amp 0:0 0.001:1 0.012:0@exp | - |
 |  | osc | 0.5 | osc wave triangle; freq 2400..4000; offset 0.025..0.045; dur 0.06; gain 0.3..0.5 | amp 0:0 0.002:1 0.05:0@exp | - |
-| `door` a thump, a wooden body, a creak that bends and a latch click | osc | 1 | osc wave sine; freq 80..110; dur 0.35; gain 0.8..1 | amp 0:0 0.003:1 0.25..0.32:0@exp; freq 0:90..120 0.2:35..50@exp | - |
+| `door` a thump, a wooden body, a creak that bends and a latch click (class foley) | osc | 1 | osc wave sine; freq 80..110; dur 0.35; gain 0.8..1 | amp 0:0 0.003:1 0.25..0.32:0@exp; freq 0:90..120 0.2:35..50@exp | - |
 |  | osc | 1 | osc wave brown; dur 0.3; filter lp; cutoff 400..800; gain 0.5..0.8 | amp 0:0 0.003:1 0.2..0.28:0@exp | - |
-|  | osc | 1 | osc wave saw; offset 0.12..0.3; dur 0.62..0.9; filter bp; cutoff 600..900; q 4..9; gain 0.35..0.55 | amp 0:0 0.12:1 0.3..0.4:0.7 0.5..0.6:0@exp; freq 0:160..240 0.25:300..420 0.6:140..200; cutoff 0:500..800 0.6:900..1500 | distort shape soft drive 3..8 mix 0.5 |
+|  | osc | 1 | osc wave saw; offset 0.12..0.3; dur 0.62..0.9; filter bp; cutoff 600..900; q 4..9; gain 0.35..0.55 | amp 0:0 0.12:1 0.3..0.4:0.7 0.45..0.55:0@exp; freq 0:160..240 0.25:300..420 0.6:140..200; cutoff 0:500..800 0.6:900..1500 | distort shape soft drive 3..8 mix 0.5 |
 |  | osc | 0.7 | osc wave square; freq 1200..2000; offset 0.35..0.5; dur 0.02; gain 0.25..0.4 | amp 0:0 0.001:1 0.018:0@exp | - |
 |  | master | 1 | - | - | reverb size 0.15..0.35 damp 0.6 mix 0.08..0.15 |
-| `magic` a run of bell tones with a shimmer, spread across the stereo field, with echo and room | fm ×3..5 every 0.04..0.09 s, 0.8× as loud | 1 | fm freq one of 1047, 1319, 1568, 1976, 2349, 2637; ops 2; algo chain; ratio2 1.5..3.5; index2 2..5; dur 0.45..0.8; gain 0.45..0.6; pan -0.5..0.5 | amp 0:0 0.004:1 0.35..0.44:0@exp; index2 0:3..6 0.4:0@exp | - |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 8 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `magic` a run of bell tones with a shimmer, spread across the stereo field, with echo and room (class impact) | fm ×3..5 every 0.04..0.09 s, 0.8× as loud | 1 | fm freq one of 1047, 1319, 1568, 1976, 2349, 2637; ops 2; algo chain; ratio2 1.5..3.5; index2 2..5; dur 0.45..0.8; gain 0.45..0.6; pan -0.5..0.5 | amp 0:0 0.004:1 0.35..0.44:0@exp; index2 0:3..6 0.4:0@exp | - |
 |  | osc | 1 | osc wave white; dur 0.4..0.7; filter hp; cutoff 6000..8000; gain 0.08..0.14 | amp 0:0 0.1:1 0.35..0.39:0@exp | - |
 |  | master | 1 | - | - | delay time 0.11..0.19 feedback 0.3..0.45 mix 0.2..0.3 |
-|  | master | 1 | - | - | reverb size 0.5..0.8 damp 0.4 mix 0.2..0.3 |
+|  | master | 1 | - | - | reverb size 0.4..0.6 damp 0.6 mix 0.15..0.25 |
+|  | master | 1 | - | - | compress threshold -20 ratio 8 attack 3 release 120 makeup 8.7 |
+|  | master | 1 | - | - | limit ceiling -6 |
+| `creak` a wooden creak: a rough stick-slip pulse train on a bending pitch, a hollow body under it (class foley) (drawn once for the sound: len 0.7..0.95; lo 120..170) | osc | 1 | osc wave saw; freq lo; dur 3; filter bp; cutoff 700..1200; q 5..9; gain 0.7..1 | freq 0:lo len × 0.5:lo × 1.7@ease len:lo × 1.2@ease; cutoff 0:600..800 len:1200..1800; amp hits (24..30 hits over len s, jitter 0.6, attack 0.004 s, decay 0.02..0.04 s, level 0.4..1) | - |
+|  | osc | 1 | osc wave triangle; freq lo × 2; dur 3; gain 0.15..0.3 | amp 0:0 0.08:1 len × 0.8:0.7 len × 1.05:0@exp; freq 0:lo × 2 len:lo × 3@ease | - |
+|  | osc | 1 | osc wave brown; dur 3; filter lp; cutoff 300..600; gain 0.5..0.8 | amp 0:0 0.1:1 len × 1.05:0@exp | - |
+|  | master | 1 | - | - | distort shape soft drive 2..4 mix 0.4 |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 6.3 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `bell` a struck bell: FM with inharmonic partials and a long ringing tail (class music-sting) (drawn once for the sound: f 200..420; len 1.2..2.6) | fm | 1 | fm freq f; dur 4; ops 2; algo chain; ratio2 2.7..3.6; index2 3; gain 1 | amp 0:0 0.003:1 0.4:0.12@exp len:0@exp; index2 0:1.5..3 len × 0.25:0.2@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 2.01; dur 4; gain 0.3..0.5 | amp 0:0 0.003:1 0.3:0.1@exp len × 0.8:0@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 2.76; dur 4; gain 0.2..0.4 | amp 0:0 0.003:1 0.25:0.1@exp len × 0.55:0@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 5.4; dur 4; gain 0.08..0.18 | amp 0:0 0.002:1 0.08:0.1@exp len × 0.2:0@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 0.5; dur 4; gain 0.2..0.35 | amp 0:0 0.01:1 0.4:0.15@exp len × 0.9:0@exp | - |
+|  | master | 1 | - | - | reverb size 0.15..0.25 damp 0.8 mix 0.1..0.18 |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 16.45 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `metal-chain` a chain: many small metallic clinks in a row (class foley) (drawn once for the sound: f 1800..3200; n 14..18; over 1..1.2; hit 1..4000000000) | osc | 1 | osc wave sine; freq f; dur 4; gain 0.6..0.9 | amp hits (n hits over over s, jitter 0.8, attack 0.001 s, decay 0.05..0.1 s, level 0.3..1, seed hit) | - |
+|  | osc | 1 | osc wave sine; freq f × 2.76; dur 4; gain 0.3..0.5 | amp hits (n hits over over s, jitter 0.8, attack 0.001 s, decay 0.03..0.06 s, level 0.3..1, seed hit) | - |
+|  | osc | 1 | osc wave metal; freq f × 0.6; dur 4; filter hp; cutoff 3000..5000; gain 0.3..0.5 | amp hits (n hits over over s, jitter 0.8, attack 0.001 s, decay 0.02 s, level 0.3..1, seed hit) | - |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 6.6 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `metal-clank` one heavy metal hit: a thud, an inharmonic ring (class impact) (drawn once for the sound: f 220..360; len 0.7..1) | osc | 1 | osc wave sine; freq 60..90; dur 4; gain 0.8..1 | amp 0:0 0.003:1 0.12..0.2:0@exp; freq 0:100..130 0.1:45..60@exp | - |
+|  | osc | 1 | osc wave sine; freq f; dur 4; gain 0.6..0.9 | amp 0:0 0.002:1 len:0@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 2.4; dur 4; gain 0.4..0.6 | amp 0:0 0.002:1 len × 0.7:0@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 4.1; dur 4; gain 0.2..0.4 | amp 0:0 0.002:1 len × 0.45:0@exp | - |
+|  | osc | 1 | osc wave metal; freq f × 3; dur 4; filter bp; cutoff 1500..3000; q 1.5; gain 0.3..0.5 | amp 0:0 0.001:1 0.12..0.25:0@exp | - |
+|  | master | 1 | - | - | compress threshold -18 ratio 8 attack 3 release 120 makeup 18.2 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `glass-shatter` glass breaking: a crack, a spray of fine bursts and ringing shards (class impact) (drawn once for the sound: n 30..60; over 0.5..1; hit 1..4000000000) | osc | 1 | osc wave white; dur 4; filter hp; cutoff 2500..4000; gain 0.7..1 | amp 0:0 0.001:1 0.04..0.08:0@exp | - |
+|  | osc | 1 | osc wave white; dur 4; filter bp; cutoff 5000..8000; q 1; gain 0.5..0.8 | amp hits (n hits over over s, jitter 0.9, attack 0.001 s, decay 0.01..0.025 s, level 0.2..1, seed hit) | - |
+|  | osc | 1 | osc wave sine; freq 5300..8000; dur 4; gain 0.2..0.4 | amp hits (8..14 hits over over s, jitter 0.9, attack 0.001 s, decay 0.15..0.3 s, level 0.3..1) | - |
+|  | osc | 1 | osc wave sine; freq 8000..11000; dur 4; gain 0.1..0.25 | amp hits (8..14 hits over over s, jitter 0.9, attack 0.001 s, decay 0.1..0.2 s, level 0.3..1) | - |
+|  | osc | 1 | osc wave sine; freq 90..140; dur 4; gain 0.5..0.8 | amp 0:0 0.003:1 0.08..0.14:0@exp | - |
+|  | master | 1 | - | - | compress threshold -18 ratio 8 attack 3 release 120 makeup 12.8 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `glass-clink` two glasses touching: two bright inharmonic partials, short (class foley) (drawn once for the sound: f 5200..6000; len 0.28..0.34) | osc | 1 | osc wave sine; freq f; dur 4; gain 0.7..1 | amp 0:0 0.001:1 len:0@exp | - |
+|  | osc | 1 | osc wave sine; freq f × 2.32; dur 4; gain 0.4..0.7 | amp 0:0 0.001:1 len × 0.7:0@exp | - |
+|  | osc | 1 | osc wave white; dur 4; filter hp; cutoff 5000..8000; gain 0.2..0.4 | amp 0:0 0.0005:1 0.01:0@exp | - |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 13.2 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `voice-vowel` a sung vowel: a saw pulse train through three band-pass formants (class voice) (drawn once for the sound: f0 110..260; vowel one of 0, 1, 2, 3, 4; len 0.4..0.8) | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[730 530 270 570 300]; q 5..8; gain 1 | amp 0:0 0.06:1 len × 0.6:0.9 len:0@exp; freq 0:f0 × 1.08 len:f0 × 0.94 | - |
+|  | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[1090 1840 2290 840 870]; q 6..10; gain 0.7 | amp 0:0 0.06:1 len × 0.6:0.9 len:0@exp; freq 0:f0 × 1.08 len:f0 × 0.94 | - |
+|  | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[2440 2480 3010 2410 2240]; q 6..10; gain 0.4 | amp 0:0 0.06:1 len × 0.6:0.9 len:0@exp; freq 0:f0 × 1.08 len:f0 × 0.94 | - |
+|  | osc | 1 | osc wave white; dur 4; filter bp; cutoff vowel[1090 1840 2290 840 870]; q 2; gain 0.05 | amp 0:0 0.06:1 len × 0.6:0.9 len:0@exp | - |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 9 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `voice-cluck` a cluck: a few quick formant pulses on a falling pitch (class voice) (drawn once for the sound: f0 215..250; vowel one of 0, 3; n 3..3; over 0.18..0.26; hit 1..4000000000) | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[730 530 270 570 300]; q 5..9; gain 1 | freq 0:f0 × 1.3 over × 1.2:f0 × 0.7@exp; amp hits (n hits over over s, jitter 0.3, attack 0.004 s, decay 0.04..0.07 s, level 0.85..1, seed hit) | - |
+|  | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[1090 1840 2290 840 870]; q 5..9; gain 0.7 | freq 0:f0 × 1.3 over × 1.2:f0 × 0.7@exp; amp hits (n hits over over s, jitter 0.3, attack 0.004 s, decay 0.04..0.07 s, level 0.85..1, seed hit) | - |
+|  | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[2440 2480 3010 2410 2240]; q 5..9; gain 0.4 | freq 0:f0 × 1.3 over × 1.2:f0 × 0.7@exp; amp hits (n hits over over s, jitter 0.3, attack 0.004 s, decay 0.04..0.07 s, level 0.85..1, seed hit) | - |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 15.8 |
+|  | master | 1 | - | - | limit ceiling -3 |
+| `voice-giggle` a giggle: a run of short, high formant bursts that tail off (class voice) (drawn once for the sound: f0 250..340; vowel one of 0, 1; n 5..5; over 0.5..0.65; hit 1..4000000000) | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[730 530 270 570 300]; q 5..9; gain 1 | freq 0:f0 × 1.1 over:f0 × 0.85; amp hits (n hits over over s, jitter 0.3, attack 0.01 s, decay 0.05..0.09 s, level 0.85..1, seed hit) | - |
+|  | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[1090 1840 2290 840 870]; q 5..9; gain 0.7 | freq 0:f0 × 1.1 over:f0 × 0.85; amp hits (n hits over over s, jitter 0.3, attack 0.01 s, decay 0.05..0.09 s, level 0.85..1, seed hit) | - |
+|  | osc | 1 | osc wave saw; freq f0; dur 4; filter bp; cutoff vowel[2440 2480 3010 2410 2240]; q 5..9; gain 0.4 | freq 0:f0 × 1.1 over:f0 × 0.85; amp hits (n hits over over s, jitter 0.3, attack 0.01 s, decay 0.05..0.09 s, level 0.85..1, seed hit) | - |
+|  | master | 1 | - | - | compress threshold -24 ratio 8 attack 3 release 120 makeup 12.7 |
+|  | master | 1 | - | - | limit ceiling -3 |
 | `wind` a bed: moving air, a low rush that swells and fades, a thin whistle on top (loops, 5..7 s, fade 0.6 s) | osc | 1 | osc wave brown; dur loop; filter bp; q 0.8..1.4; gain 1 | cutoff wanders (5..8 points in 220..700, back to its start at the loop end); gain wanders (4..7 points in 0.45..1, back to its start at the loop end) | - |
 |  | osc | 1 | osc wave pink; dur loop; filter bp; q 2..4; gain 0.2 | cutoff wanders (4..7 points in 700..1800, back to its start at the loop end); gain wanders (4..7 points in 0.04..0.35, back to its start at the loop end) | - |
 |  | osc | 1 | osc wave white; dur loop; filter hp; cutoff 5000; gain 0.05 | gain wanders (4..6 points in 0.2..1, back to its start at the loop end) | - |
@@ -352,6 +448,9 @@ classic category on a layered sound, which gives it one classic layer). Like the
 |  | osc | 1 | osc wave pink; dur loop; filter bp; cutoff 1500..1900; q 3..5; gain 0.5 | gain wanders (12..18 points in 0.1..0.8, back to its start at the loop end) | - |
 |  | osc | 1 | osc wave brown; dur loop; filter bp; cutoff 180; q 0.5; gain 0.5 | - | - |
 |  | master | 1 | - | - | reverb size 0.45..0.65 damp 0.5 mix 0.25 |
+| `metal` a metal sound: the seed picks one of `metal-chain`, `metal-clank` | - | - | - | - | - |
+| `glass` a glass sound: the seed picks one of `glass-shatter`, `glass-clink` | - | - | - | - | - |
+| `voice` a voice: the seed picks one of `voice-vowel`, `voice-cluck`, `voice-giggle` | - | - | - | - | - |
 
 `examples`: `docs/examples/layered-demo.txt` builds an impact, a magic sparkle and a door creak (all three pass the checks).
 
@@ -365,7 +464,7 @@ ordinary sounds in `sounds/`, so a set never hides a sound inside itself.
 set new footsteps from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%"
 ```
 
-- `count` variants of `from` (a classic or layered sound) are made, `footsteps_1` … `footsteps_6`. They are seeded:
+- `count` variants of `from` (a classic or layered sound) are made, `footsteps_1` … `footsteps_6` (or the ids you choose: `names="step_{n}"` numbers them from 1, `as=step_a,step_b,...` lists them; ids keep their case and must be new, ignoring case). They are seeded:
   the same set command always makes the same sounds (`seed=<n>` is written into the normal form).
 - **spread** is a list of `<parameter>±<amount>` rules (`+-` and `+/-` also read). The amount is in the parameter's own
   unit, or a percentage of the source's value with `%`. For a classic sound the parameter is a classic parameter by the
@@ -420,12 +519,12 @@ rendering over the boundary**: the sound is rendered `fade` seconds longer than 
 seconds with an equal-power curve (`sin` and `cos` of a quarter cycle, built from the tone's polynomial sine so Node and the browser agree). The
 last sample of the loop then runs on into the first as the render itself would (the first sample *is* the sample after the last one in the long
 render), reverb and delay tails wrap around, and noise keeps its level through the join. It is not a crossfade of two copies of the start. Two
-consequences: a layer's `dur` should cover the loop plus the crossfade (the bed recipes do; a shorter source leaves silence), and a **periodic** sound
+consequences: a layer's `dur` must cover the loop plus the crossfade (a shorter source leaves silence), so **`sound loop` lengthens every osc, fm and ks layer that is shorter than length + fade** (to length + fade + 50 ms, minus its offset; a recipe's layers included; the result says which layers it changed), and leaves a classic or sample layer, which has no `dur`, to play once inside the loop; and a **periodic** sound
 whose cycle does not divide the loop length is two correlated copies in the crossfade, so its level can dip or swell there: choose the length to be a
 whole number of cycles, or use noise (which is what beds are). An envelope on a parameter should come back to where it started at the loop end;
 the bed recipes' wanders do exactly that.
 
-- The loop is `length` samples long exactly (`duration` is ignored); the render key changes only for a looping sound.
+- The loop is `length` samples long exactly (`duration` is ignored), 0.1 to 120 s; the render key changes only for a looping sound. The bed recipes loop cleanly at any allowed length (tested at 4, 8 and 20 s); a recipe's envelopes (wanders, drops) are drawn for the length it was made with and hold their last value after it, so a much longer bed repeats the same texture rather than adding new drops.
 - **Checks on a loop.** `click` looks at the **seam** instead of the first and last sample: it fails when the jump from the last sample to the first is
   above `clickMax` *and* above 4 times the local sample-to-sample step (so a loud noise bed is not flagged for being noise), or when the level of the
   last 50 ms differs from the first 50 ms by more than `seamStepMaxDb` (default 3 dB). `tail` needs no fade-out. The other checks are as ever.
@@ -433,9 +532,30 @@ the bed recipes' wanders do exactly that.
   (50 ms windows) across four repeats with the seams marked.
 - WAV is exact; OGG is lossy, so an OGG loop is only as good as the codec at its seam (`export` says so).
 - **Ambience recipes** (beds, below): `wind`, `rain`, `fire`, `crowd`: layered, looped, seeded, with periodic wanders and bursts (the table lists them).
-  `sound new <id> voice=layered preset=rain` makes a bed that lands near −16 LUFS; `sound loop <id> off` makes it a one-shot.
+  `sound new <id> voice=layered preset=rain` makes a bed; `sound loop <id> off` makes it a one-shot.
 
 `examples`: `docs/examples/sets-demo.txt` makes a footstep set of six, an impact in three distances and a rain bed, and all of it passes the checks.
+
+### Loudness classes
+
+One loudness target for every sound is wrong for a game: a UI tick is not as loud as an explosion (a real set spans about −8 to −49 LUFS). The style names **loudness classes**, each with a target and a tolerance, and every sound is held to its class:
+
+| Class | Target | Tolerance | For |
+|---|---|---|---|
+| `standard` | -16 LUFS | ±1 LU | a sound with no class (the default class): the style's loudnessTarget and loudnessTolerance |
+| `ui` | -28 LUFS | ±3 LU | ticks, clicks, toggles, menu sounds |
+| `foley` | -22 LUFS | ±2 LU | footsteps, doors, rustles, props |
+| `impact` | -14 LUFS | ±2 LU | hits, explosions, crashes, spells |
+| `ambience` | -26 LUFS | ±3 LU | beds and loops under everything |
+| `voice` | -20 LUFS | ±2 LU | voices, barks, giggles |
+| `music-sting` | -16 LUFS | ±2 LU | bells, stingers, short musical cues |
+
+- A sound's class: `sound set <id> class=<name>` (`class=none` clears it); `loudness=<LUFS>` holds this sound alone to its own target (the class's tolerance still applies; `loudness=auto` clears it). A set has a class too: `set new … class=<name>` or `set class <set> <name>`, which its members use if they have none of their own, and which — when the set has no `target` — is also what `set new`, `set add` and `set class` match the members to by gain.
+- Which rule holds a sound, most specific first: its own `loudness`, its own `class`, the `target` of its set, the class of its set, the style's `defaultClass` (`standard`). A far or muffled family variant is held to that target plus its offset.
+- `check`, `measure` and `describe --json` say which rule applied: `held to -28.0 LUFS ±3 (class ui)`, `(class ui; own loudness)`, `(class standard; target of set steps)`. The recipes (ui-click, footstep, door, magic and the sound-effect recipes below) start their sounds in the class they were made for.
+- The project style adds to or replaces the classes: `"style": { "loudnessClasses": { "ui": { "target": -30, "tolerance": 3 }, "boss": { "target": -9 } }, "defaultClass": "foley" }` (tolerance defaults to 1 LU; a class name is `a-z`, `0-9`, `-`).
+- `normalize <project> <id|set>... [<class> | target=<LUFS>]` writes the gain that brings sounds to their class (or to a class you name, which they join, or to a target they are then held to). A layered sound's gain goes up to 4; a classic sound's `volume` stops at 1, and the warning says how many LU it falls short (`sound layer-up` first lets gain go to 4).
+- **When two checks pull against each other**, `check` names the rule that binds, so they are fixed in the right order: harsh and loudness ("louder is harsher": lower the 2–5 kHz energy first, then raise gain), and clip and loudness (shave the peaks with `compress` / `limit` first, then raise gain).
 
 ### Checks and the project style
 
@@ -445,10 +565,10 @@ and the exact time ranges it flags.
 | Check | Flags | Default |
 |---|---|---|
 | `clip` | true peak above the limit, or samples at full scale (the ranges are where) | at most -0.1 dBTP |
-| `loudness` | integrated loudness (ITU-R BS.1770, K-weighted, gated) off the target | -16 LUFS ±1 |
+| `loudness` | integrated loudness (ITU-R BS.1770, K-weighted, gated) off the target of the sound's class (above) | its class: `standard` -16 LUFS ±1 |
 | `dc` | DC offset | at most 0.5 % |
 | `click` | a jump at the first or last sample (a loop: at its seam, see "Loops") | at most 0.02 of full scale |
-| `tail` | silence padding at the start or end, or a sound cut off before it died away (the last samples are not at least 60 dB below the peak); a loop needs no fade-out | at most 50 ms; -60 dB |
+| `tail` | silence padding at the start or end, or a sound cut off before it died away (the last samples are not at least 60 dB below the peak; an exponential decay that reaches −60 dB at its end counts as finished, so the rule has 1 dB of slack); a loop needs no fade-out | at most 50 ms; -60 dB |
 | `harsh` | sustained energy at 2 to 5 kHz: the level of that band (dBFS, RMS of the band content, from 1024-sample Hann spectra; a full-scale sine inside it reads -3) stays above the limit for at least the minimum time (the ranges are where) | at most -20 dBFS for 80 ms |
 
 | `set-spread` | (a set, `check <set>`) members closer together than `setSpreadMin` or farther apart than `setSpreadMax`, or a member's loudness off the set's target | 1 dB; 20 dB; ±1 LU |
@@ -456,7 +576,7 @@ and the exact time ranges it flags.
 Every check works on stereo (below). A sound shorter than 400 ms is measured as one block over its whole length (BS.1770 needs 400 ms
 blocks; padding with silence would lower the figure). `work` `done` on a request is refused while the
 sound's checks fail. Targets come from the optional `style` object in `project.json`, any of
-`loudnessTarget`, `loudnessTolerance`, `truePeakMax`, `dcMax`, `clickMax`, `silenceMax` (seconds),
+`loudnessTarget`, `loudnessTolerance` (the `standard` class), `loudnessClasses` and `defaultClass` (above), `truePeakMax`, `dcMax`, `clickMax`, `silenceMax` (seconds),
 `tailFloorDb`, `harshLimitDb` (dBFS), `harshMinMs`, `setSpreadMin` (dB), `setSpreadMax` (dB), `seamStepMaxDb` (dB); the defaults fill what is left out. An unknown key is an error.
 
 ### The numbers
@@ -518,7 +638,7 @@ soundclaw view <project> <id> compare <other> [--out <file.png>]
 soundclaw describe <project> <id>
 soundclaw check <project> [<id>...]
 soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
-soundclaw sample import <project> <file.wav> [as=<name>]
+soundclaw sample import <project> <file.wav | folder> [as=<name>]
 soundclaw sample list <project>
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
 soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
@@ -563,9 +683,37 @@ MCP `view` tool returns the image itself.
 | `set` | (`view <project> <set> set`) a set's members side by side on one time scale: waveform, spectrogram and a loudness bar each (the target marked), then the pairwise distance matrix in dB with the pairs outside the limits outlined |
 | `compare` | two spectrograms stacked and, under them, their difference (red: the second is louder; blue: the first), plus distance numbers: spectral distance (dB), loudness, duration, brightness, pitch start and end (semitones), envelope correlation |
 
+The `compare` header says `A = <first>, B = <second>` (the order of the arguments); the differences are B compared with A: positive means B is more.
+
 `describe` is a plain-words summary built only from the measured numbers (never from the sound's
 settings), then the numbers. `check` runs the checks with scores, thresholds and the exact ranges;
 it exits 1 when any sound fails. `check` also takes a set's name and runs `set-spread` on it (with no names it checks every sound and every set).
+It says which loudness class held each sound, and when two failing checks pull against each other, the rule that binds.
+
+**Numbers for scripts, and many sounds in one process.** Starting a process costs about half a second, so a script that measures 100 sounds one at a time
+spends a minute starting. `measure <project> [<id|set>...] [--json]` measures many sounds in one process (all of them when none is named): per sound its
+class and target, every number `describe` prints and every check's result. `--json` prints one document:
+
+```
+{ "format": "soundclaw-measure", "version": 1, "pass": false,
+  "sounds": [ { "id": "tick", "voice": "layered", "status": "draft",
+                "class": { "name": "ui", "target": -28, "tolerance": 3, "basis": "class ui" },
+                "pass": true, "description": "…",
+                "numbers": { "duration", "samples", "channels", "silent", "peak", "peakDb", "truePeakDb", "rmsDb", "crestDb", "dc", "lufs",
+                             "attack", "tail", "leadingSilence", "trailingSilence", "endLevelDb",
+                             "centroid": { "mean", "start", "mid", "end" }, "flatness",
+                             "pitch": { "start", "end", "min", "max", "rangeSemitones", "voiced" }, "onsets", "onsetTimes" },
+                "checks": [ { "name", "pass", "score", "value", "threshold", "ranges": [ { "from", "to", "note" } ] } ],
+                "binding": [ "…" ] } ],
+  "sets": [ { "id", "pass", "members", "loudness", "distances", "check" } ] }
+```
+
+A number that is not finite (a silent sound has no loudness) is `null`. Numbers are rounded to four decimals. `measure` and `check` exit 1 when any check fails.
+`--json` is also on `check` (the same document), `describe` (one sound's object) and `render` (the same, with `renderKey` and `samplesHash`). The MCP `measure` tool does the same.
+
+**`normalize <project> <id|set>... [<class> | target=<LUFS>]`** writes the gain commands that bring sounds (or a set's members) to a loudness, as one undo group, and prints them: each
+sound's own class target with no argument; a class name (the sounds join that class: `sound set <id> class=<name>`); or `target=<LUFS>` (they are given `loudness=<LUFS>` and held to it).
+The gain is a layered sound's `gain` or a classic sound's `volume`; a classic sound that cannot get loud enough is a warning that says by how many LU.
 
 ### What others changed
 
@@ -603,7 +751,9 @@ g2 #3 human:ana 2026-11-06T10:00:01Z
 column is the id: a column named `id`, `key`, `sound` or `name`, else the first; the other columns
 are parameter names in any order plus an optional `seed`; a missing column, an empty cell or `NA`
 takes the default), from a single-patch file (the file name gives the id, or `--id`), or from the
-patch text itself. One undo group. A sound id that appears twice in a csv is read as the engine
+patch text itself. One undo group. The output starts with the warnings, then one summary line (how many sounds, how many exact and how many approximated); the
+per-row report is printed for the rows that lost something, or for every row when there are 8 or fewer sounds. `--quiet` leaves out the rows. `--classic` marks every imported
+sound classic (`sound classic <id> on`), so it stays one classic voice and exports as a `synth.csv` row. A sound id that appears twice in a csv is read as the engine
 reads it: the id keeps the position of its first row and the values of its last, and a warning names
 both lines (`warning: synth.csv: 'zip' is on line 2 and again on line 4; …`).
 
@@ -654,7 +804,7 @@ everything else is audio, ready to drop into a pack. Without `--all`, `--set` or
 A layered sound exports as audio only, **WAV** (16-bit, 44,100 Hz, mono or stereo, through the limiter above) **or OGG**; `export` says so for each one
 and how much the limiter reduced it, `--format csv` and `patch` refuse a layered sound that is named and skip it when everything is
 exported (a `synth.csv` row cannot hold layers). A classic sound marked classic, or never layered, keeps exporting as a row.
-`sample import <project> <file.wav> [as=<name>]` copies a WAV into `<project>/samples/`; `sample list` lists them.
+`sample import <project> <file.wav | folder> [as=<name>]` copies a WAV (or every `.wav` in a folder; a file that cannot be read is reported and the others still go in) into `<project>/samples/`; `sample list` lists them.
 
 Exit codes: 0 done, 1 refused (an error in the commands or the project; nothing was applied), 2
 usage error, 3 (`await` only) the timeout passed with nothing to report.
@@ -730,10 +880,12 @@ is also served over HTTP at `/mcp` with the token as a bearer.
 | `history` | The tape, filtered by `sound`, `by` or `last` (default 50). Includes what people did. |
 | `render` | `sound`: the numbers of its render (samples, peaks, loudness, attack, tail, brightness, pitch, onsets), a description, and the check summary last. |
 | `view` | `sound` (a set's name for `set`), `kind` (`wave`, `spec` default, `pitch`, `layers`, `loop`, `set`, `compare`), `other` for compare: a PNG image and the numbers. |
-| `describe` | `sound`: words from the numbers, then the numbers. |
-| `check` | `sounds` (sound ids and set names; default all): the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
+| `describe` | `sound`, `json`: words from the numbers, then the numbers (or one JSON object). |
+| `measure` | `sounds` (ids and set names; default all), `json` (default true): the class, every number and every check of many sounds in one call. |
+| `normalize` | `sounds`, `to` (a class name, or `target=<LUFS>`): write the gain that brings sounds to a loudness, as one undo group. |
+| `check` | `sounds` (sound ids and set names; default all), `json`: the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
 | `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
-| `sample` | `action` (`import` with `file` and `as`, or `list`): WAV samples for sample layers. |
+| `sample` | `action` (`import` with `file` (a WAV or a folder) and `as`, or `list`): WAV samples for sample layers. |
 | `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too. |
 | `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |
 | `request` | File (`sound`, `note`, `tags`, `like`), `reply` (`id`, `text`) or `cancel` a request. |

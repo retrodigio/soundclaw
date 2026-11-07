@@ -22,16 +22,18 @@
 //   undo [group=<group>] [by=<author>]
 //   redo [group=<group>] [by=<author>]
 
+import { CLASS_NAME_RE } from './checks.ts';
+import { burstsEnv, isBursts } from './bursts.ts';
 import { CLASSIC_FIELDS, ClassicError, WAVE_NAMES, formatPatchNamed, parsePatch, type ClassicPatch } from './classic.ts';
 import { GENERATOR_NAMES, MUTATE_AMOUNT, defaultGenSeed, defaultMutateSeed, generate, isGenerator, mutate, type GeneratorName } from './generators.ts';
 import { SOUND_SPECS, checkNumber, classicLayer, FX_KINDS, FX_SPECS, SOURCE_KINDS, adsr, formatEnv, layerSpecs, newLayeredSound, parseTarget, paramNames, parseEnv, parseValue, specOf, type Env, type FxKind, type SourceKind, type LayeredSound } from './layered.ts';
-import { RECIPE_NAMES, defaultRecipeSeed, isRecipe, type RecipeName } from './recipes.ts';
-import { applyLayerCommand, applyRecipe } from './layer-ops.ts';
+import { RECIPE_NAMES, RECIPE_UMBRELLAS, defaultRecipeSeed, isRecipe, type RecipeName } from './recipes.ts';
+import { applyLayerCommand, applyRecipe, raiseLayersForLoop } from './layer-ops.ts';
 import { FAMILY_KINDS, isFamily, makeFamily } from './families.ts';
-import { LOOP_FADE, LOOP_LENGTH, type FamilyKind, type LoopSpec } from './layered.ts';
+import { LOOP_FADE, LOOP_LENGTH, MAX_DURATION, type FamilyKind, type LoopSpec } from './layered.ts';
 import { Library, MAX_SET_MEMBERS, checkMemberIds, checkSpread, defaultSetSeed, formatSpread, makeMember, memberId, parseSpread, spreadPositions, type SpreadRule } from './sets.ts';
 import { hashText } from './generators.ts';
-import { SOUND_ID_RE, TONE_PARAMS, cloneSound, fmtNumber, isParamName, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
+import { SOUND_ID_RE, TONE_PARAMS, cloneSound, idClash, fmtNumber, isParamName, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
 
 export interface Diag {
   line: number;
@@ -130,8 +132,8 @@ export const AUTHOR_RE = /^(agent|human):[A-Za-z0-9_.-]{1,32}$/;
 export const HUMAN_RE = /^human:[A-Za-z0-9_.-]{1,32}$/;
 export const GROUP_RE = /^g\d+$/;
 
-/** A value in `sound set`: a number, or `auto` for the seed (back to the hash of the values). */
-export type SetValue = number | 'auto';
+/** A value in `sound set`: a number; `auto` (the seed back to the hash of the values, duration automatic, no own loudness); or a class name (`none`: no own class). */
+export type SetValue = number | string;
 
 /** `name=value` words of a layer or effect command, the values still as text (the layer decides what they mean). */
 export type Raw = [string, string][];
@@ -156,7 +158,10 @@ export type Command =
   | { op: 'fx-remove'; id: string; layer: number | null; k: number; text: string }
   | { op: 'fx-move'; id: string; layer: number | null; k: number; to: number; text: string }
   | { op: 'loop'; id: string; loop: LoopSpec | null; text: string }
-  | { op: 'set-new'; id: string; from: string; count: number; target: number | null; spread: SpreadRule[]; seed: number | null; text: string }
+  | { op: 'copy' | 'rename'; id: string; to: string; text: string }
+  | { op: 'remove'; id: string; fromSets: boolean; text: string }
+  | { op: 'set-class'; id: string; class: string | null; text: string }
+  | { op: 'set-new'; id: string; from: string; count: number; target: number | null; class: string | null; names: string[] | null; spread: SpreadRule[]; seed: number | null; text: string }
   | { op: 'set-add' | 'set-remove'; id: string; sounds: string[]; text: string }
   | { op: 'set-retarget'; id: string; target: number | null; text: string }
   | { op: 'set-regen'; id: string; seed: number | null; spread: SpreadRule[] | null; text: string }
@@ -257,12 +262,21 @@ function adsrOf(w: string): Env | null {
 function parseEnvCommand(rest: Token[], head: Token, line: number): Command {
   const id = checkId(rest[0], line, 'env');
   const target = rest[1];
-  const body = rest[2];
-  if (!target || !body || rest.length > 3) throw new DiagError(line, (target ?? head).col, `env ${id}: env <id> <target> "<breakpoints>" (or adsr(a,d,s,r), or clear); targets like 1.freq, 2.amp, 1.fx2.mix, master.fx1.mix`);
+  let body = rest[2];
+  // bursts(times=0.1,0.3 attack=0.002 ...) written without quotes may have spaces in it: take the words up to the closing bracket as one
+  if (body && !body.quoted && body.v.startsWith('bursts(') && !body.v.endsWith(')')) {
+    let k = 3;
+    let v = body.v;
+    while (k < rest.length && !v.endsWith(')')) v += ' ' + rest[k++]!.v;
+    body = { ...body, v };
+    rest = [...rest.slice(0, 2), body, ...rest.slice(k)];
+  }
+  if (!target || !body || rest.length > 3) throw new DiagError(line, (target ?? head).col, `env ${id}: env <id> <target> "<breakpoints>" (or adsr(a,d,s,r), bursts(times=...), or clear); targets like 1.freq, 2.amp, 1.fx2.mix, master.fx1.mix`);
   let env: Env | null;
   try {
     parseTarget(target.v);
     if (body.v === 'clear') env = null;
+    else if (isBursts(body.v)) env = burstsEnv(body.v);
     else if (!body.quoted && adsrOf(body.v)) {
       if (!/^\d+\.amp$/.test(target.v)) throw new Error('adsr(…) is for amplitude envelopes (target N.amp); other targets take breakpoints');
       env = adsrOf(body.v);
@@ -357,14 +371,15 @@ function spreadOf(v: string, t: Token, line: number): SpreadRule[] {
 
 function parseSet(rest: Token[], head: Token, line: number): Command {
   const [verb, ...args] = rest;
-  if (!verb) throw new DiagError(line, head.col, 'set: new, add, remove, retarget or regen');
+  if (!verb) throw new DiagError(line, head.col, 'set: new, add, remove, retarget, class or regen');
   const id = checkId(args[0], line, `set ${verb.v}`);
   if (verb.v === 'new') {
     let from: string | null = null, count: number | null = null, target: number | null = null, seed: number | null = null;
+    let cls: string | null = null, template: string | null = null, listed: string[] | null = null;
     let spread: SpreadRule[] = [];
     for (const t of args.slice(1)) {
-      const m = /^(from|count|target|spread|seed)=(.*)$/s.exec(t.v);
-      if (!m) throw new DiagError(line, t.col, `set new: unexpected '${t.v}' (from=<sound> count=<n> [target=<LUFS>] [spread="<param>±<amount> ..."] [seed=<n>])`);
+      const m = /^(from|count|target|class|names|as|spread|seed)=(.*)$/s.exec(t.v);
+      if (!m) throw new DiagError(line, t.col, `set new: unexpected '${t.v}' (from=<sound> count=<n> [target=<LUFS>] [class=<name>] [names="<template with {n}>" | as=<id>,<id>,...] [spread="<param>±<amount> ..."] [seed=<n>])`);
       const v = m[2]!.length >= 2 && m[2]!.startsWith('"') && m[2]!.endsWith('"') ? m[2]!.slice(1, -1) : m[2]!;
       if (m[1] === 'from') { if (!SOUND_ID_RE.test(v)) throw new DiagError(line, t.col, `'${v}' is not a sound id`); from = v; }
       else if (m[1] === 'count') {
@@ -372,17 +387,40 @@ function parseSet(rest: Token[], head: Token, line: number): Command {
         if (n === null || !Number.isInteger(n) || n < 1 || n > MAX_SET_MEMBERS) throw new DiagError(line, t.col, `count is a whole number from 1 to ${MAX_SET_MEMBERS} (got '${v}')`);
         count = n;
       } else if (m[1] === 'target') target = targetOf(v, t, line);
+      else if (m[1] === 'class') {
+        if (!CLASS_NAME_RE.test(v)) throw new DiagError(line, t.col, `class is a loudness class name (like ui, foley, impact), got '${v}'`);
+        cls = v;
+      } else if (m[1] === 'names') template = v;
+      else if (m[1] === 'as') listed = v.split(',').filter(Boolean);
       else if (m[1] === 'seed') seed = seedOf(v, t, line);
       else spread = spreadOf(v, t, line);
     }
     if (!from || count === null) throw new DiagError(line, verb.col, `set new ${id}: give from=<sound> and count=<n> (the sound the variants are made from, and how many)`);
-    return { op: 'set-new', id, from, count, target, spread, seed, text: `set new ${id} from=${from} count=${count}${target !== null ? ` target=${fmtNumber(target)}` : ''}${spread.length ? ` spread=${quote(formatSpread(spread))}` : ''}${seed !== null ? ` seed=${seed}` : ''}` };
+    if (template !== null && listed !== null) throw new DiagError(line, verb.col, 'set new: give names="<template>" or as=<id>,<id>,..., not both');
+    let names: string[] | null = null;
+    if (template !== null) {
+      if (!template.includes('{n}')) throw new DiagError(line, verb.col, `set new: the names template needs {n} for the member number (like names="step_{n}"), got '${template}'`);
+      names = Array.from({ length: count }, (_, k) => template!.replace('{n}', String(k + 1)));
+    } else if (listed !== null) {
+      if (listed.length !== count) throw new DiagError(line, verb.col, `set new: as= lists ${listed.length} ids but count=${count}`);
+      names = listed;
+    }
+    if (names) {
+      for (const n of names) if (!SOUND_ID_RE.test(n)) throw new DiagError(line, verb.col, `set new: '${n}' is not a sound id (a-z, A-Z, 0-9, _ and -, starting with a letter, at most 48 characters)`);
+      if (new Set(names.map((n) => n.toLowerCase())).size !== names.length) throw new DiagError(line, verb.col, 'set new: the member ids repeat (ids are unique ignoring case)');
+    }
+    return { op: 'set-new', id, from, count, target, class: cls, names, spread, seed, text: `set new ${id} from=${from} count=${count}${target !== null ? ` target=${fmtNumber(target)}` : ''}${spread.length ? ` spread=${quote(formatSpread(spread))}` : ''}${seed !== null ? ` seed=${seed}` : ''}` };
   }
   if (verb.v === 'add' || verb.v === 'remove') {
     const sounds = args.slice(1);
     if (!sounds.length) throw new DiagError(line, verb.col, `set ${verb.v} ${id}: name the sounds`);
     for (const t of sounds) if (!SOUND_ID_RE.test(t.v)) throw new DiagError(line, t.col, `'${t.v}' is not a sound id`);
     return { op: verb.v === 'add' ? 'set-add' : 'set-remove', id, sounds: sounds.map((t) => t.v), text: `set ${verb.v} ${id} ${sounds.map((t) => t.v).join(' ')}` };
+  }
+  if (verb.v === 'class') {
+    const t = args[1];
+    if (!t || args.length > 2 || (t.v !== 'none' && !CLASS_NAME_RE.test(t.v))) throw new DiagError(line, (t ?? verb).col, `set class ${id}: give a loudness class name (like ui, foley, impact), or none`);
+    return { op: 'set-class', id, class: t.v === 'none' ? null : t.v, text: `set class ${id} ${t.v}` };
   }
   if (verb.v === 'retarget') {
     const t = args[1];
@@ -404,7 +442,7 @@ function parseSet(rest: Token[], head: Token, line: number): Command {
     }
     return { op: 'set-regen', id, seed, spread, text: `set regen ${id}${seed !== null ? ` seed=${seed}` : ''}${spread ? ` spread=${quote(formatSpread(spread))}` : ''}` };
   }
-  throw new DiagError(line, verb.col, `unknown set command '${verb.v}' (new, add, remove, retarget, regen)`);
+  throw new DiagError(line, verb.col, `unknown set command '${verb.v}' (new, add, remove, retarget, class, regen)`);
 }
 
 function parseFamily(rest: Token[], head: Token, line: number): Command {
@@ -425,7 +463,7 @@ function parseLine(l: RawLine): Command {
   const line = l.line;
   if (head!.v === 'sound') {
     const [verb, ...args] = rest;
-    if (!verb) throw new DiagError(line, head!.col, 'sound: new, set, patch, generate, mutate, mark, layer-up or classic');
+    if (!verb) throw new DiagError(line, head!.col, 'sound: new, set, patch, generate, mutate, mark, layer-up, classic, loop, copy, rename or remove');
     if (verb.v === 'new') {
       const id = checkId(args[0], line, 'sound new');
       let voice: VoiceKind | null = null;
@@ -438,7 +476,7 @@ function parseLine(l: RawLine): Command {
           if (m[2] !== 'tone' && m[2] !== 'classic' && m[2] !== 'layered') throw new DiagError(line, t.col, `voice is tone, classic or layered (not '${m[2]}')`);
           voice = m[2];
         } else if (m[1] === 'preset') {
-          if (!isGenerator(m[2]!) && !isRecipe(m[2]!)) throw new DiagError(line, t.col, `no preset '${m[2]}' (presets: ${[...GENERATOR_NAMES, ...RECIPE_NAMES].join(', ')})`);
+          if (!isGenerator(m[2]!) && !isRecipe(m[2]!)) throw new DiagError(line, t.col, `no preset '${m[2]}' (presets: ${[...GENERATOR_NAMES, ...RECIPE_NAMES, ...RECIPE_UMBRELLAS].join(', ')})`);
           preset = m[2]!;
         } else {
           const n = numberOf(m[2]!);
@@ -470,9 +508,13 @@ function parseLine(l: RawLine): Command {
         const m = /^([A-Za-z]+)=(.*)$/.exec(t.v);
         if (!m) throw new DiagError(line, t.col, `'${t.v}' is not <param>=<value>`);
         const name = m[1]!;
-        if (!isParamName(name)) throw new DiagError(line, t.col, `no parameter '${name}' (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, seed)`);
+        if (!isParamName(name)) throw new DiagError(line, t.col, `no parameter '${name}' (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, seed; any sound: class, loudness)`);
         let value: SetValue;
-        if (name === 'wave' && (WAVE_NAMES as readonly string[]).includes(m[2]!)) value = (WAVE_NAMES as readonly string[]).indexOf(m[2]!);
+        if (name === 'class') {
+          if (m[2] !== 'none' && !CLASS_NAME_RE.test(m[2]!)) throw new DiagError(line, t.col, `class is a loudness class name (like ui, foley, impact) or none (got '${m[2]}')`);
+          value = m[2]!;
+        } else if (name === 'loudness') value = m[2] === 'auto' || m[2] === 'none' ? 'auto' : targetOf(m[2]!, t, line);
+        else if (name === 'wave' && (WAVE_NAMES as readonly string[]).includes(m[2]!)) value = (WAVE_NAMES as readonly string[]).indexOf(m[2]!);
         else if ((name === 'seed' || name === 'duration') && m[2] === 'auto') value = 'auto';
         else {
           const n = numberOf(m[2]!);
@@ -485,6 +527,9 @@ function parseLine(l: RawLine): Command {
           } else if (name === 'gain') {
             const problem = paramProblem(name, n, 'layered');
             if (problem) throw new DiagError(line, t.col, problem);
+          } else if (name === 'duration') {
+            // a tone is 0.01 to 10 s and a layered sound up to 120: the voice decides when it is applied
+            if (n < 0.01 || n > MAX_DURATION) throw new DiagError(line, t.col, `duration must be between 0.01 and ${MAX_DURATION} s (got ${n})`);
           } else if (voices.length === 1) {
             const problem = paramProblem(name, n, voices[0]);
             if (problem) throw new DiagError(line, t.col, problem);
@@ -496,7 +541,7 @@ function parseLine(l: RawLine): Command {
         if (values.some(([n]) => n === name)) throw new DiagError(line, t.col, `${name} is set twice in one command`);
         values.push([name, value]);
       }
-      return { op: 'set', id, values, text: `sound set ${id} ${values.map(([n, v]) => `${n}=${v === 'auto' ? 'auto' : n === 'wave' ? WAVE_NAMES[v as number] ?? fmtNumber(v as number) : fmtNumber(v)}`).join(' ')}` };
+      return { op: 'set', id, values, text: `sound set ${id} ${values.map(([n, v]) => `${n}=${typeof v === 'string' ? v : n === 'wave' ? WAVE_NAMES[v] ?? fmtNumber(v) : fmtNumber(v)}`).join(' ')}` };
     }
     if (verb.v === 'patch') {
       const id = checkId(args[0], line, 'sound patch');
@@ -514,7 +559,7 @@ function parseLine(l: RawLine): Command {
     if (verb.v === 'generate') {
       const id = checkId(args[0], line, 'sound generate');
       const cat = args[1];
-      if (!cat || (!isGenerator(cat.v) && !isRecipe(cat.v))) throw new DiagError(line, (cat ?? verb).col, `sound generate ${id}: give a category (${[...GENERATOR_NAMES, ...RECIPE_NAMES].join(', ')})`);
+      if (!cat || (!isGenerator(cat.v) && !isRecipe(cat.v))) throw new DiagError(line, (cat ?? verb).col, `sound generate ${id}: give a category (${[...GENERATOR_NAMES, ...RECIPE_NAMES, ...RECIPE_UMBRELLAS].join(', ')})`);
       let seed: number | null = null;
       for (const t of args.slice(2)) {
         const m = /^seed=(.*)$/.exec(t.v);
@@ -562,6 +607,21 @@ function parseLine(l: RawLine): Command {
       if (fade < LOOP_FADE.min || fade > LOOP_FADE.max || fade > L / 2) throw new DiagError(line, len.col, `sound loop ${id}: fade is ${LOOP_FADE.min} to ${LOOP_FADE.max} seconds and at most half the length (got ${fade})`);
       return { op: 'loop', id, loop: { length: L, fade }, text: `sound loop ${id} ${fmtNumber(L)} fade=${fmtNumber(fade)}` };
     }
+    if (verb.v === 'copy' || verb.v === 'rename') {
+      const id = checkId(args[0], line, `sound ${verb.v}`);
+      const to = checkId(args[1], line, `sound ${verb.v} ${id}`);
+      if (args.length > 2) throw new DiagError(line, args[2]!.col, `sound ${verb.v}: unexpected '${args[2]!.v}' (sound ${verb.v} <id> <new id>)`);
+      return { op: verb.v, id, to, text: `sound ${verb.v} ${id} ${to}` };
+    }
+    if (verb.v === 'remove') {
+      const id = checkId(args[0], line, 'sound remove');
+      let fromSets = false;
+      for (const t of args.slice(1)) {
+        if (t.v === '--from-sets' || t.v === 'from-sets') fromSets = true;
+        else throw new DiagError(line, t.col, `sound remove: unexpected '${t.v}' (--from-sets also takes it out of the sets that name it)`);
+      }
+      return { op: 'remove', id, fromSets, text: `sound remove ${id}${fromSets ? ' --from-sets' : ''}` };
+    }
     if (verb.v === 'mark') {
       const id = checkId(args[0], line, 'sound mark');
       const st = args[1];
@@ -570,7 +630,7 @@ function parseLine(l: RawLine): Command {
       const note = args[2]?.v ?? '';
       return { op: 'mark', id, status: st.v as SoundStatus, note, text: `sound mark ${id} ${st.v}${note ? ' ' + quote(note) : ''}` };
     }
-    throw new DiagError(line, verb.col, `unknown sound command '${verb.v}' (new, set, patch, generate, mutate, mark, layer-up, classic, loop)`);
+    throw new DiagError(line, verb.col, `unknown sound command '${verb.v}' (new, set, patch, generate, mutate, mark, layer-up, classic, loop, copy, rename, remove)`);
   }
   if (head!.v === 'undo' || head!.v === 'redo') {
     let group: string | null = null;
@@ -626,10 +686,16 @@ const VOICE_PARAM_HINT = (v: VoiceKind): string => voiceParams(v).map((p) => p.n
  * command's normal form when applying settled something the text left open (a default seed), which
  * is what goes on the tape; otherwise undefined.
  */
+/** Throws when a new sound named `id` would clash with one that exists, ignoring case. */
+function checkFree(lib: Library, id: string, hint?: string): void {
+  const clash = idClash(lib.keys(), id);
+  if (clash) throw new Error(`sound '${id}' exists already${clash !== id ? ` as '${clash}' (ids are unique ignoring case)` : ''}${hint ? ` (${hint})` : ''}`);
+}
+
 export function applyCommand(lib: Library, c: Command): string | undefined {
   switch (c.op) {
     case 'new': {
-      if (lib.has(c.id)) throw new Error(`sound '${c.id}' exists already`);
+      checkFree(lib, c.id);
       if (c.voice === 'layered') {
         let up = newLayeredSound(c.id, c.seed!);
         if (c.preset && isRecipe(c.preset)) up = applyRecipe(up, c.preset as RecipeName, c.seed!);
@@ -643,18 +709,25 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       const s = lib.get(c.id);
       if (!s) throw new Error(`no sound '${c.id}'`);
       const next = cloneSound(s);
+      const marks = c.values.filter(([n]) => n === 'class' || n === 'loudness');
+      for (const [n, v] of marks) {
+        if (n === 'class') { if (v === 'none') delete next.loudClass; else next.loudClass = v as string; }
+        else if (v === 'auto') delete next.loudness;
+        else next.loudness = v as number;
+      }
+      const values = c.values.filter(([n]) => n !== 'class' && n !== 'loudness');
       if (next.voice === 'layered') {
-        for (const [n, v] of c.values) {
+        for (const [n, v] of values) {
           if (n === 'duration') next.duration = v === 'auto' ? null : checkNumber(specOf(SOUND_SPECS, 'duration')!, v as number, c.id);
           else if (n === 'gain' || n === 'seed') {
             if (v === 'auto') throw new Error(`${c.id}: a layered sound's seed is a number (it has no auto)`);
             (next as unknown as Record<string, number>)[n] = checkNumber(specOf(SOUND_SPECS, n)!, v as number, c.id);
-          } else throw new Error(`${c.id} is a layered sound: sound set takes duration, gain and seed (layers have layer set, effects have fx set)`);
+          } else throw new Error(`${c.id} is a layered sound: sound set takes duration, gain, seed, class and loudness (layers have layer set, effects have fx set)`);
         }
         lib.set(c.id, next);
         return undefined;
       }
-      for (const [n, v] of c.values) {
+      for (const [n, v] of values) {
         if (n === 'duration' && v === 'auto') throw new Error(`${c.id}: duration=auto is for a layered sound`);
         if (n === 'seed') {
           if (next.voice !== 'classic') throw new Error(`seed is a classic-voice parameter; ${c.id} is a ${next.voice} (parameters: ${VOICE_PARAM_HINT(next.voice)})`);
@@ -701,7 +774,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       if (!s) throw new Error(`no sound '${c.id}'`);
       if (s.voice !== 'classic') throw new Error(`${c.id} is a ${s.voice} sound; mutate is for classic sounds${s.voice === 'layered' ? ' (a layered sound is changed with layer set, or regenerated with sound generate)' : ''}`);
       const target = c.as ?? c.id;
-      if (c.as && lib.has(c.as)) throw new Error(`sound '${c.as}' exists already`);
+      if (c.as) checkFree(lib, c.as);
       const seed = c.seed ?? defaultMutateSeed(s.patch, target);
       const patch = mutate(s.patch, c.amount, seed);
       lib.set(target, c.as ? newClassicSound(c.as, patch) : { ...s, patch });
@@ -718,8 +791,10 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       if (!s) throw new Error(`no sound '${c.id}'`);
       if (s.voice !== 'layered') throw new Error(`${c.id} is a ${s.voice} sound; a loop is for a layered sound${s.voice === 'classic' ? ` (sound layer-up ${c.id} makes this one layered, sample for sample)` : ''}`);
       const next = cloneSound(s);
-      if (c.loop) next.loop = { ...c.loop };
-      else delete next.loop;
+      if (c.loop) {
+        next.loop = { ...c.loop };
+        raiseLayersForLoop(next, c.loop);
+      } else delete next.loop;
       lib.set(c.id, next);
       return undefined;
     }
@@ -728,15 +803,15 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       const src = lib.get(c.from);
       if (!src) throw new Error(`no sound '${c.from}' to make the set from`);
       if (src.voice === 'tone') throw new Error(`${c.from} is a tone: a set is made from a classic or layered sound`);
-      checkMemberIds(c.id, c.count);
+      if (!c.names) checkMemberIds(c.id, c.count);
       checkSpread(src, c.spread);
       const seed = c.seed ?? defaultSetSeed(c.id, c.from);
-      const ids = Array.from({ length: c.count }, (_, k) => memberId(c.id, k));
-      for (const id of ids) if (lib.has(id)) throw new Error(`sound '${id}' exists already (a set's members are named ${c.id}_1, ${c.id}_2 ...)`);
+      const ids = c.names ?? Array.from({ length: c.count }, (_, k) => memberId(c.id, k));
+      for (const id of ids) checkFree(lib, id, c.names ? undefined : `a set's members are named ${c.id}_1, ${c.id}_2 ... unless names= or as= give them`);
       const pos = spreadPositions(seed, c.spread, c.count);
       ids.forEach((id, k) => lib.set(id, makeMember(src, id, c.spread, seed, k, c.count, pos)));
-      lib.sets.set(c.id, { id: c.id, from: c.from, seed, target: c.target, spread: c.spread, members: ids, generated: [...ids] });
-      return `set new ${c.id} from=${c.from} count=${c.count}${c.target !== null ? ` target=${fmtNumber(c.target)}` : ''}${c.spread.length ? ` spread=${quote(formatSpread(c.spread))}` : ''} seed=${seed}`;
+      lib.sets.set(c.id, { id: c.id, from: c.from, seed, target: c.target, ...(c.class ? { class: c.class } : {}), spread: c.spread, members: ids, generated: [...ids] });
+      return `set new ${c.id} from=${c.from} count=${c.count}${c.target !== null ? ` target=${fmtNumber(c.target)}` : ''}${c.class ? ` class=${c.class}` : ''}${c.names ? ` as=${c.names.join(',')}` : ''}${c.spread.length ? ` spread=${quote(formatSpread(c.spread))}` : ''} seed=${seed}`;
     }
     case 'set-add':
     case 'set-remove': {
@@ -756,6 +831,58 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       const set = lib.sets.get(c.id);
       if (!set) throw new Error(`no set '${c.id}'`);
       lib.sets.set(c.id, { ...set, target: c.target });
+      return undefined;
+    }
+    case 'set-class': {
+      const set = lib.sets.get(c.id);
+      if (!set) throw new Error(`no set '${c.id}'`);
+      const next = { ...set };
+      if (c.class) next.class = c.class;
+      else delete next.class;
+      lib.sets.set(c.id, next);
+      return undefined;
+    }
+    case 'copy': {
+      const s = lib.get(c.id);
+      if (!s) throw new Error(`no sound '${c.id}'`);
+      checkFree(lib, c.to, 'name the copy with sound copy <id> <new id>');
+      const copy = cloneSound(s);
+      copy.id = c.to;
+      copy.status = 'draft';
+      lib.set(c.to, copy);
+      return undefined;
+    }
+    case 'rename': {
+      const s = lib.get(c.id);
+      if (!s) throw new Error(`no sound '${c.id}'`);
+      if (c.to !== c.id) {
+        const clash = idClash(lib.keys(), c.to);
+        if (clash && clash !== c.id) throw new Error(`sound '${c.to}' exists already${clash !== c.to ? ` as '${clash}' (ids are unique ignoring case)` : ''}`);
+      }
+      const moved = cloneSound(s);
+      moved.id = c.to;
+      lib.delete(c.id);
+      lib.set(c.to, moved);
+      for (const [k, set] of lib.sets) {
+        if (set.from !== c.id && !set.members.includes(c.id) && !set.generated.includes(c.id)) continue;
+        const sw = (x: string): string => (x === c.id ? c.to : x);
+        lib.sets.set(k, { ...set, from: set.from === null ? null : sw(set.from), members: set.members.map(sw), generated: set.generated.map(sw) });
+      }
+      for (const [k, other] of lib.entries()) {
+        if (other.voice === 'layered' && other.family?.of === c.id) lib.set(k, { ...cloneSound(other), family: { ...other.family, of: c.to } });
+      }
+      return undefined;
+    }
+    case 'remove': {
+      if (!lib.has(c.id)) throw new Error(`no sound '${c.id}'`);
+      const naming = [...lib.sets.values()].filter((set) => set.members.includes(c.id) || set.from === c.id);
+      if (naming.length && !c.fromSets) {
+        throw new Error(`${c.id} is named by ${naming.map((x) => `set ${x.id}`).join(', ')}: take it out first (set remove ${naming[0]!.id} ${c.id}), or sound remove ${c.id} --from-sets`);
+      }
+      for (const set of naming) {
+        lib.sets.set(set.id, { ...set, from: set.from === c.id ? null : set.from, members: set.members.filter((m) => m !== c.id), generated: set.generated.filter((m) => m !== c.id) });
+      }
+      lib.delete(c.id);
       return undefined;
     }
     case 'set-regen': {
@@ -781,7 +908,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       if (!src) throw new Error(`no sound '${c.id}'`);
       const as = c.as ?? `${c.id}_${c.kind}`;
       if (!SOUND_ID_RE.test(as)) throw new Error(`'${as}' is not a sound id (name the variant with as=<id>)`);
-      if (lib.has(as)) throw new Error(`sound '${as}' exists already (name the variant with as=<id>)`);
+      checkFree(lib, as, 'name the variant with as=<id>');
       lib.set(as, makeFamily(src, c.kind, as, defaultRecipeSeed('layered', as)));
       return `family ${c.id} ${c.kind} as=${as}`;
     }

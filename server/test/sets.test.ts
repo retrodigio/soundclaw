@@ -17,15 +17,16 @@ beforeEach(() => { f = fixture(); });
 afterEach(() => f.clean());
 const run = (commands: string, w: Writer = f.w) => { const r = w.run({ commands, by: claude }); if (!r.ok) throw new Error(JSON.stringify(r.errors)); return r; };
 
-const STEPS = 'sound new step voice=layered preset=footstep seed=11\nset new feet from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%" seed=5\n';
+const STEPS = 'sound new step voice=layered seed=11\nlayer add step osc wave=sine freq=110 dur=0.18 gain=0.8\nenv step 1.freq \"0:150 0.1:55@exp\"\nenv step 1.amp \"0:0 0.003:1 0.15:0@exp\"\nlayer add step osc wave=brown dur=0.15 filter=lp cutoff=1200 q=1 gain=0.7\nenv step 2.cutoff \"0:2200 0.12:400@exp\"\nenv step 2.amp \"0:0 0.004:1 0.12:0@exp\"\nlayer add step osc wave=white dur=0.07 offset=0.03 filter=hp cutoff=3500 gain=0.2\nenv step 3.amp \"0:0 0.004:1 0.05:0@exp\"\nset new feet from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%" seed=5\n';
 
 describe('set new through the writer', () => {
   it('makes the members, then writes the loudness matching as plain commands on the same tape group', () => {
     const r = run(STEPS);
     const cmds = r.added.map((e) => e.cmd);
-    expect(cmds[0]).toMatch(/^sound new step voice=layered preset=footstep seed=11$/);
-    expect(cmds[1]).toBe('set new feet from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%" seed=5');
-    expect(cmds.slice(2).map((c) => c.replace(/gain=.*/, 'gain=…'))).toEqual(Array.from({ length: 6 }, (_, k) => `sound set feet_${k + 1} gain=…`));
+    expect(cmds[0]).toBe("sound new step voice=layered seed=11");
+    const at = cmds.findIndex((c) => c.startsWith('set new'));
+    expect(cmds[at]).toBe('set new feet from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%" seed=5');
+    expect(cmds.slice(at + 1).map((c) => c.replace(/gain=.*/, 'gain=…'))).toEqual(Array.from({ length: 6 }, (_, k) => `sound set feet_${k + 1} gain=…`));
     expect(new Set(r.added.map((e) => e.group)).size).toBe(1);
     expect(r.touchedSets).toEqual(['feet']);
     expect(r.touched).toContain('feet_3');
@@ -66,7 +67,7 @@ describe('set new through the writer', () => {
     const r = run('set retarget feet -26');
     expect(r.added.map((e) => e.cmd).filter((c) => c.startsWith('sound set feet_'))).toHaveLength(6);
     expect(Math.abs(loudnessOf(f.w.sound('feet_4')) - -26)).toBeLessThan(0.1);
-    run('sound new boot voice=layered preset=footstep seed=2');
+    run('sound new boot voice=layered seed=2\nlayer add boot osc wave=sine freq=110 dur=0.18 gain=0.8\nenv boot 1.freq \"0:150 0.1:55@exp\"\nenv boot 1.amp \"0:0 0.003:1 0.15:0@exp\"\nlayer add boot osc wave=brown dur=0.15 filter=lp cutoff=1200 q=1 gain=0.7\nenv boot 2.cutoff \"0:2200 0.12:400@exp\"\nenv boot 2.amp \"0:0 0.004:1 0.12:0@exp\"\nlayer add boot osc wave=white dur=0.07 offset=0.03 filter=hp cutoff=3500 gain=0.2\nenv boot 3.amp \"0:0 0.004:1 0.05:0@exp\"');
     const a = run('set add feet boot');
     expect(a.added.map((e) => e.cmd)).toEqual(['set add feet boot', expect.stringMatching(/^sound set boot gain=/)]);
     expect(Math.abs(loudnessOf(f.w.sound('boot')) - -26)).toBeLessThan(0.1);
@@ -87,7 +88,7 @@ describe('set new through the writer', () => {
     expect(f.w.sound('c_1').voice).toBe('classic');
   });
   it('is atomic: an error in the batch applies none of it', () => {
-    const r = f.w.run({ commands: 'sound new step voice=layered preset=footstep seed=11\nset new feet from=step count=3 spread="9.freq±5%"', by: claude });
+    const r = f.w.run({ commands: 'sound new step voice=layered seed=11\nlayer add step osc wave=sine freq=110 dur=0.18 gain=0.8\nenv step 1.freq \"0:150 0.1:55@exp\"\nenv step 1.amp \"0:0 0.003:1 0.15:0@exp\"\nlayer add step osc wave=brown dur=0.15 filter=lp cutoff=1200 q=1 gain=0.7\nenv step 2.cutoff \"0:2200 0.12:400@exp\"\nenv step 2.amp \"0:0 0.004:1 0.12:0@exp\"\nlayer add step osc wave=white dur=0.07 offset=0.03 filter=hp cutoff=3500 gain=0.2\nenv step 3.amp \"0:0 0.004:1 0.05:0@exp\"\nset new feet from=step count=3 spread="9.freq±5%"', by: claude });
     expect(r.ok).toBe(false);
     expect(f.w.sounds()).toEqual([]);
   });
@@ -126,7 +127,7 @@ describe('check and the views of a set', () => {
 
 describe('families through the writer', () => {
   it('matches a family variant\'s loudness to the source\'s plus the rule\'s offset', () => {
-    run('sound new door voice=layered preset=door seed=7');
+    run('sound new door voice=layered seed=7\nlayer add door osc wave=sine freq=95 dur=0.35 gain=0.9\nenv door 1.freq \"0:110 0.2:42@exp\"\nenv door 1.amp \"0:0 0.003:1 0.3:0@exp\"\nlayer add door osc wave=brown dur=0.3 filter=lp cutoff=600 gain=0.6\nenv door 2.amp \"0:0 0.003:1 0.25:0@exp\"\nlayer add door osc wave=saw dur=0.7 offset=0.2 filter=bp cutoff=2800 q=2 gain=0.7\nenv door 3.amp \"0:0 0.1:1 0.5:0@exp\"\nfx add door reverb size=0.25 damp=0.6 mix=0.1');
     const r = run('family door far\nfamily door muffled as=door_wall');
     expect(r.added.map((e) => e.cmd)).toEqual(['family door far as=door_far', expect.stringMatching(/^sound set door_far gain=/), 'family door muffled as=door_wall', expect.stringMatching(/^sound set door_wall gain=/)]);
     const lu = loudnessOf(f.w.sound('door'));

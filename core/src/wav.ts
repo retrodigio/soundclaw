@@ -89,7 +89,7 @@ export interface SampleWav {
 }
 
 /** Read a WAV for use as a sample: PCM 8, 16, 24 or 32 bit or 32-bit float, any rate, any channel count (mixed down to mono); other chunks are skipped. Throws a plain Error saying what is wrong. */
-export function readSampleWav(bytes: Uint8Array, maxSeconds = 60): SampleWav {
+export function readSampleWav(bytes: Uint8Array, maxSeconds = 120): SampleWav {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = (off: number) => String.fromCharCode(bytes[off]!, bytes[off + 1]!, bytes[off + 2]!, bytes[off + 3]!);
   if (bytes.length < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV file (no RIFF/WAVE header)');

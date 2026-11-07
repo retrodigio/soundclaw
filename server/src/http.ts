@@ -129,7 +129,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   const host = o.host ?? '127.0.0.1';
@@ -258,7 +258,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       return;
     }
     // A sound as the server renders it: raw little-endian float32 samples (what the browser must match), or a WAV.
-    const rm = /^\/api\/render\/([a-z][a-z0-9_-]*)\.(f32|f64|wav)$/.exec(url.pathname);
+    const rm = /^\/api\/render\/([A-Za-z][A-Za-z0-9_-]*)\.(f32|f64|wav)$/.exec(url.pathname);
     if (rm) {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       void o.writer.enqueue(() => o.writer.render(rm[1]!)).then((r) => {

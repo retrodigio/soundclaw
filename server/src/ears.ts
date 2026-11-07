@@ -5,9 +5,9 @@ import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'no
 import { join, resolve } from 'node:path';
 import {
   CHECK_NAMES, audibleLayers, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
-  pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, fmtStep, loopView, seamNumbers, setView, formatSpread, type Analysis, type CheckResult, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
+  pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, fmtStep, loopView, seamNumbers, setView, formatSpread, type Analysis, type CheckResult, type LoudnessRule, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
-import { ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
+import { Library, applyCommand, bindingRules, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
 import { encodeOgg } from './ogg.ts';
 import { ProjectError } from './project.ts';
 import { plural } from './report.ts';
@@ -16,6 +16,8 @@ import type { Writer } from './writer.ts';
 export interface Measured {
   analysis: Analysis;
   checks: CheckResult[];
+  /** The loudness rule the checks used: the class, the target and why. */
+  rule: LoudnessRule;
 }
 
 /** One line: `checks: 4/5 pass; failing: loudness -22.4 LUFS (6.4 LU too quiet)`. */
@@ -48,9 +50,17 @@ export function checkText(w: Writer, ids: string[]): { text: string; pass: boole
   const sets = setIds.map((id) => setCheckText(w, id));
   lines.push(...sets.map((x) => x.text));
   const s = w.style;
-  if (results.length) lines.push(`${plural(results.length - failing.length, 'sound')} of ${results.length} pass all of ${CHECK_NAMES.join(', ')} (target ${s.loudnessTarget} LUFS ±${s.loudnessTolerance}, true peak at most ${s.truePeakMax} dBTP${w.project.json.style ? '; from the project style' : '; the default style'})`);
+  if (results.length) lines.push(`${plural(results.length - failing.length, 'sound')} of ${results.length} pass all of ${CHECK_NAMES.join(', ')} (${loudnessWords(results.map((r) => r.m.rule), s)}, true peak at most ${s.truePeakMax} dBTP${w.project.json.style ? '; from the project style' : '; the default style'})`);
   if (sets.length) lines.push(`${plural(sets.filter((x) => x.pass).length, 'set')} of ${sets.length} pass set-spread`);
   return { text: lines.join('\n'), pass: !failing.length && sets.every((x) => x.pass) };
+}
+
+/** The loudness rules in play, in words: `target -16 LUFS ±1` when every sound is of the standard class, else each class used with its target. */
+function loudnessWords(rules: readonly LoudnessRule[], s: { loudnessTarget: number; loudnessTolerance: number }): string {
+  const used = new Map<string, string>();
+  for (const r of rules) used.set(r.basis, `${r.basis.split(';')[0]!.replace('class ', '')} ${r.target} ±${r.tolerance}`);
+  if (used.size <= 1 && (!rules.length || rules[0]!.basis === 'class standard')) return `target ${s.loudnessTarget} LUFS ±${s.loudnessTolerance}`;
+  return `loudness by class: ${[...new Set(used.values())].join(', ')} LUFS`;
 }
 
 /** One set in a few lines: members, target, rules, loudness and the set-spread verdict. */
@@ -65,8 +75,139 @@ export function setSummary(w: Writer, id: string): string {
 /** Why `work done` must wait: the failing checks of a sound, or null when it passes. */
 export function failingChecks(w: Writer, id: string): string | null {
   const m = w.measure(id);
-  const bad = m.checks.filter((c) => !c.pass);
-  return bad.length ? bad.map((c) => `${c.name}: ${c.value} (held to ${c.threshold})`).join('; ') : null;
+  const bad = m.checks.filter((c) => !c.pass).map((c) => `${c.name}: ${c.value} (held to ${c.threshold})`);
+  // A sound that belongs to a set (two members or more) is done only when the set holds together too: set-spread passes.
+  for (const set of w.sets()) {
+    if (!set.members.includes(id) || set.members.length < 2) continue;
+    const sm = w.measureSetDoc(set.id).result;
+    if (!sm.pass) bad.push(`set-spread of set ${set.id}: ${sm.value} (held to ${sm.threshold})`);
+  }
+  return bad.length ? bad.join('; ') : null;
+}
+
+// ---- machine-readable numbers ------------------------------------------------------------------------
+
+const r4 = (v: number): number | null => (Number.isFinite(v) ? Math.round(v * 1e4) / 1e4 : null);
+
+/** Every number `describe` and `render` print, as plain JSON (null where the number is not finite: a silent sound has no loudness). Rounded to 4 decimals, as the text is rounded, so the last digit a platform may differ in is not in it. */
+export function numbersJson(a: Analysis): Record<string, unknown> {
+  return {
+    duration: r4(a.duration), samples: a.samples, channels: a.channels, silent: a.silent,
+    peak: r4(a.peak), peakDb: r4(a.peakDb), truePeakDb: r4(a.truePeakDb), rmsDb: r4(a.rmsDb), crestDb: r4(a.crestDb), dc: r4(a.dc), lufs: r4(a.lufs),
+    attack: r4(a.attack), tail: r4(a.tail), leadingSilence: r4(a.leadingSilence), trailingSilence: r4(a.trailingSilence), endLevelDb: r4(a.endLevelDb),
+    centroid: { mean: r4(a.centroid.mean), start: r4(a.centroid.start), mid: r4(a.centroid.mid), end: r4(a.centroid.end) },
+    flatness: r4(a.flatness),
+    pitch: { start: r4(a.pitch.start ?? NaN), end: r4(a.pitch.end ?? NaN), min: r4(a.pitch.min ?? NaN), max: r4(a.pitch.max ?? NaN), rangeSemitones: r4(a.pitch.rangeSemitones), voiced: r4(a.pitch.voiced) },
+    onsets: a.onsets, onsetTimes: a.onsetTimes.map((t) => r4(t)),
+  };
+}
+
+/** One check as JSON. */
+export function checkJson(c: CheckResult): Record<string, unknown> {
+  return { name: c.name, pass: c.pass, score: r4(c.score), value: c.value, threshold: c.threshold, ranges: c.ranges.map((g) => ({ from: g.from, to: g.to, note: g.note })) };
+}
+
+/** One sound: its loudness class and why, every number, every check's result and the rules that bind when two checks fail together. */
+export function soundJson(w: Writer, id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const s = w.sound(id);
+  const m = w.measure(id);
+  return {
+    id, voice: s.voice, status: s.status,
+    class: { name: m.rule.className, target: m.rule.target, tolerance: m.rule.tolerance, basis: m.rule.basis },
+    pass: checksPass(m.checks), numbers: numbersJson(m.analysis), description: describe(m.analysis),
+    checks: m.checks.map(checkJson), binding: bindingRules(m.checks), ...extra,
+  };
+}
+
+/** A set's set-spread check as JSON. */
+export function setJson(w: Writer, id: string): Record<string, unknown> {
+  const set = w.set(id);
+  if (!set.members.length) return { id, pass: false, members: [], check: null, note: 'the set has no members' };
+  const m = w.measureSetDoc(id);
+  return { id, pass: m.result.pass, members: set.members, loudness: m.lufs.map((l) => r4(l)), distances: m.matrix.map((row) => row.map((d) => r4(d))), check: checkJson(m.result) };
+}
+
+/**
+ * `measure`: the numbers and every check of many sounds in one go (a whole project when none is named), as JSON for a script.
+ * Sound ids and set names may be mixed; a set is measured as the set-spread check.
+ */
+export function measureJson(w: Writer, ids: string[]): { json: string; pass: boolean } {
+  const soundIds = ids.length ? ids.filter((x) => w.has(x) || !w.hasSet(x)) : w.sounds().map((s) => s.id);
+  const setIds = ids.length ? ids.filter((x) => !w.has(x) && w.hasSet(x)) : w.sets().map((s) => s.id);
+  const sounds = soundIds.map((id) => soundJson(w, id));
+  const sets = setIds.map((id) => setJson(w, id));
+  const pass = sounds.every((x) => x.pass) && sets.every((x) => x.pass);
+  return { json: JSON.stringify({ format: 'soundclaw-measure', version: 1, pass, sounds, sets }, null, 1), pass };
+}
+
+/** `measure` as text: one block per sound, its class, numbers and check line. */
+export function measureText(w: Writer, ids: string[]): { text: string; pass: boolean } {
+  const soundIds = ids.length ? ids.filter((x) => w.has(x) || !w.hasSet(x)) : w.sounds().map((s) => s.id);
+  if (!soundIds.length) throw new ProjectError('there are no sounds to measure');
+  let pass = true;
+  const blocks = soundIds.map((id) => {
+    const m = w.measure(id);
+    if (!checksPass(m.checks)) pass = false;
+    return `${id} (${m.rule.basis}: ${m.rule.target.toFixed(1)} LUFS ±${m.rule.tolerance})\n${formatNumbers(m.analysis)}\n${checkLine(m)}`;
+  });
+  return { text: blocks.join('\n\n'), pass };
+}
+
+// ---- normalize ---------------------------------------------------------------------------------------
+
+/**
+ * `normalize`: the commands that bring sounds (or a set's members) to a loudness. With no spec each sound goes to its own rule's
+ * target (its class, its set's, the default); a class name puts them in that class (`sound set <id> class=<name>`) and matches the
+ * class's target; `target=<LUFS>` gives them that loudness (`sound set <id> loudness=<LUFS>`) so the checks hold them to it. The
+ * matching itself is the gain (a layered sound's `gain`; a classic sound's `volume`, which cannot go above 1: the note says how far it falls short).
+ */
+export function normalizeCommands(w: Writer, names: string[], spec?: string): { commands: string; notes: string[]; ids: string[]; target: string } {
+  if (!names.length) throw new ProjectError('normalize: name sounds or a set');
+  const ids: string[] = [];
+  for (const n of names) {
+    if (w.has(n)) ids.push(n);
+    else if (w.hasSet(n)) ids.push(...w.set(n).members);
+    else throw new ProjectError(`no sound or set '${n}'`);
+  }
+  const unique = [...new Set(ids)];
+  let cls: string | null = null;
+  let loud: number | null = null;
+  if (spec !== undefined) {
+    const t = /^target=(.+)$/.exec(spec)?.[1] ?? (/^-?\d/.test(spec) ? spec : null);
+    if (t !== null) {
+      loud = Number(t.replace(/lufs$/i, ''));
+      if (!Number.isFinite(loud) || loud < -60 || loud > 0) throw new ProjectError(`normalize: the target is LUFS from -60 to 0, like target=-20 (got '${t}')`);
+    } else {
+      const table = classTable(w.style);
+      if (!table[spec]) throw new ProjectError(`normalize: '${spec}' is neither a loudness class (${Object.keys(table).join(', ')}) nor target=<LUFS>`);
+      cls = spec;
+    }
+  }
+  const lib = new Library();
+  for (const s of w.sounds()) lib.set(s.id, cloneSound(s));
+  lib.sets = new Map(w.sets().map((x) => [x.id, x] as const));
+  const out: string[] = [];
+  const notes: string[] = [];
+  for (const id of unique) {
+    const pre = cls ? `sound set ${id} class=${cls} loudness=auto` : loud !== null ? `sound set ${id} loudness=${loud}` : null;
+    if (pre) {
+      const before = serializeSound(lib.get(id)!);
+      applyCommand(lib, parse(pre).commands[0]!);
+      if (serializeSound(lib.get(id)!) !== before) out.push(pre);
+    }
+    const sound = lib.get(id)!;
+    const rule = loudnessFor(sound, lib.sets.values(), w.style);
+    const m = matchGain(sound, rule.target, w.samples);
+    if (m.command) out.push(m.command);
+    if (m.note) notes.push(m.note);
+  }
+  const target = cls ? `class ${cls} (${classTable(w.style)[cls]!.target} LUFS)` : loud !== null ? `${loud} LUFS` : 'each sound\'s own class';
+  return { commands: out.join('\n'), notes, ids: unique, target };
+}
+
+/** `describe --json` and `render --json`: the sound's JSON (class, numbers, description, checks); render adds the key and the samples' hash. */
+export function describeJson(w: Writer, id: string, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify(soundJson(w, id, extra), null, 1);
 }
 
 /** The render's numbers, then the description and checks; the last line is the check summary. */

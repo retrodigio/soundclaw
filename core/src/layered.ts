@@ -12,13 +12,16 @@ import { CLASSIC_FIELDS, WAVE_NAMES, formatPatchNamed, makePatch, type ClassicPa
 
 export const MAX_LAYERS = 8;
 export const MAX_FX = 8;
-export const MAX_POINTS = 32;
-export const MAX_DURATION = 10;
+export const MAX_POINTS = 256;
+/** The longest a source, a sound or a sample layer is, seconds. */
+export const MAX_DURATION = 120;
+/** A source may be a little longer than a sound can be: a 120 s loop renders its crossfade past the end (up to 2 s) and needs a source that covers it. */
+export const MAX_SOURCE_DURATION = 123;
 
 export type SourceKind = 'classic' | 'osc' | 'fm' | 'ks' | 'sample';
 export const SOURCE_KINDS: readonly SourceKind[] = ['classic', 'osc', 'fm', 'ks', 'sample'];
-export type FxKind = 'filter' | 'distort' | 'bitcrush' | 'chorus' | 'delay' | 'reverb';
-export const FX_KINDS: readonly FxKind[] = ['filter', 'distort', 'bitcrush', 'chorus', 'delay', 'reverb'];
+export type FxKind = 'filter' | 'distort' | 'bitcrush' | 'chorus' | 'delay' | 'reverb' | 'compress' | 'limit';
+export const FX_KINDS: readonly FxKind[] = ['filter', 'distort', 'bitcrush', 'chorus', 'delay', 'reverb', 'compress', 'limit'];
 
 export type Value = number | string;
 
@@ -67,11 +70,11 @@ export const SOURCE_SPECS: Record<Exclude<SourceKind, 'classic'>, readonly PSpec
     num('freq', 20, 20000, 440, 'Hz', 'pitch (the pitch of metal noise too; noise ignores it)', true),
     num('duty', 0.01, 0.99, 0.5, '', 'square and pulse: the high part of each cycle', true),
     text('table', 'organ', 'wavetable: organ, bell, reed, hollow, or 4 to 64 numbers like "0,0.5,1,0.5,0,-0.5,-1,-0.5"'),
-    num('dur', 0.01, MAX_DURATION, 0.3, 's', 'length of the source'),
+    num('dur', 0.01, MAX_SOURCE_DURATION, 0.3, 's', 'length of the source'),
   ],
   fm: [
     num('freq', 20, 20000, 440, 'Hz', 'base pitch; each operator runs at freq × its ratio', true),
-    num('dur', 0.01, MAX_DURATION, 0.3, 's', 'length of the source'),
+    num('dur', 0.01, MAX_SOURCE_DURATION, 0.3, 's', 'length of the source'),
     num('ops', 2, 4, 2, '', 'how many operators (2 to 4)', false, true),
     choice('algo', FM_ALGOS, 'chain', 'chain: 4→3→2→1; fan: 2, 3 and 4 all modulate 1; pairs: 2→1 and 4→3 added; parallel: all added (no modulation). Operator 1 is always a carrier'),
     num('ratio1', 0.25, 16, 1, '', 'operator 1 frequency ratio'),
@@ -88,14 +91,14 @@ export const SOURCE_SPECS: Record<Exclude<SourceKind, 'classic'>, readonly PSpec
   ],
   ks: [
     num('freq', 20, 20000, 220, 'Hz', 'pitch of the string'),
-    num('dur', 0.01, MAX_DURATION, 1, 's', 'length of the source'),
+    num('dur', 0.01, MAX_SOURCE_DURATION, 1, 's', 'length of the source'),
     num('decay', 0.05, 10, 1, 's', 'time for the string to fall by 60 dB'),
     num('bright', 0, 1, 0.8, '', 'brightness of the pluck (0 dull … 1 bright)'),
   ],
   sample: [
     text('sample', '', 'the name of a sample in the project (sample import <project> <file.wav> as=<name>)'),
-    num('start', 0, MAX_DURATION * 6, 0, 's', 'trim: where in the sample to start'),
-    num('end', 0, MAX_DURATION * 6, 0, 's', 'trim: where to stop (0 = the end)'),
+    num('start', 0, MAX_DURATION, 0, 's', 'trim: where in the sample to start'),
+    num('end', 0, MAX_DURATION, 0, 's', 'trim: where to stop (0 = the end)'),
     num('pitch', -48, 48, 0, 'semitones', 'transposition (the sample\'s length changes with it)', true),
     num('reverse', 0, 1, 0, '', '1 plays it backwards', false, true),
   ],
@@ -140,6 +143,18 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
     fxNum('size', 0, 1, 0.5, '', 'room size (0 small … 1 large); the tail is about 0.3 + 2.2 × size seconds'),
     fxNum('damp', 0, 1, 0.5, '', 'how fast the highs die away'),
     fxNum('mix', 0, 1, 0.3, '', 'dry/wet', true),
+  ],
+  compress: [
+    fxNum('threshold', -60, 0, -18, 'dB', 'level above which the sound is turned down (peak level, dBFS)'),
+    fxNum('ratio', 1, 20, 4, '', 'how much of the level above the threshold is kept: 4 means 4 dB over becomes 1 dB over'),
+    fxNum('attack', 0.1, 200, 5, 'ms', 'how fast the detector follows a rise in level'),
+    fxNum('release', 5, 2000, 100, 'ms', 'how fast the detector lets go after the level falls'),
+    fxNum('makeup', 0, 24, 0, 'dB', 'gain added after compressing'),
+  ],
+  limit: [
+    fxNum('ceiling', -24, 0, -1, 'dB', 'no sample goes above this level (dBFS) after the limiter'),
+    fxNum('release', 1, 1000, 50, 'ms', 'how fast the gain comes back after a peak'),
+    fxNum('lookahead', 0, 20, 5, 'ms', 'how long before a peak the gain starts to come down (0: it drops at once)'),
   ],
 };
 
@@ -238,7 +253,7 @@ export interface LoopSpec {
   length: number;
   fade: number;
 }
-export const LOOP_LENGTH = { min: 0.5, max: 8 } as const;
+export const LOOP_LENGTH = { min: 0.1, max: 120 } as const;
 export const LOOP_FADE = { min: 0.02, max: 2, default: 0.5 } as const;
 
 export type FamilyKind = 'near' | 'far' | 'muffled';
@@ -261,6 +276,10 @@ export interface LayeredSound {
   loop?: LoopSpec;
   /** Set by `family`: the variant's loudness is held to the style's target plus offsetDb. */
   family?: FamilyMark;
+  /** The loudness class (a name in the style's loudnessClasses) the sound is checked against; absent: its set's, else the style's default. */
+  loudClass?: string;
+  /** A loudness (LUFS) for this sound alone, in place of its class's target. */
+  loudness?: number;
   /** The next layer's salt. */
   nextSalt: number;
   layers: Layer[];
@@ -396,6 +415,8 @@ export function serializeLayered(s: LayeredSound): string[] {
   const lines = [`seed ${s.seed}`, `duration ${s.duration === null ? 'auto' : fmtNum(s.duration)}`, `gain ${fmtNum(s.gain)}`];
   if (s.loop) lines.push(`loop ${fmtNum(s.loop.length)} fade ${fmtNum(s.loop.fade)}`);
   if (s.family) lines.push(`family ${s.family.kind} of ${s.family.of} offset ${fmtNum(s.family.offsetDb)}`);
+  if (s.loudClass) lines.push(`class ${s.loudClass}`);
+  if (s.loudness !== undefined) lines.push(`loudness ${fmtNum(s.loudness)}`);
   const fxLines = (fx: Fx[], indent: string, prefix: string): void => {
     fx.forEach((f, i) => {
       lines.push(`${indent}fx ${i + 1} ${f.kind} ${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(' ')}`);

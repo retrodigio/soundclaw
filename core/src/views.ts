@@ -280,7 +280,8 @@ export function formatDistance(d: Distance, a: string, b: string): string {
   const sg = (v: number, unit: string, dp = 1): string => `${v >= 0 ? '+' : ''}${v.toFixed(dp)} ${unit}`;
   const st = (v: number | null): string => (v === null ? 'n/a' : sg(v, 'semitones'));
   return [
-    `${b} compared with ${a} (positive: ${b} is more):`,
+    `A = ${a}, B = ${b}`,
+    `B compared with A, that is ${b} compared with ${a} (positive: ${b} is more, negative: ${a} is more):`,
     `spectral distance ${d.spectralDb.toFixed(1)} dB (mean |difference| of the mel spectrograms); on the average spectra ${d.averageSpectrumDb.toFixed(1)} dB`,
     `duration ${sg(d.durationDiffS, 's', 3)}; loudness ${sg(d.loudnessDiffLu, 'LU')}; true peak ${sg(d.truePeakDiffDb, 'dB')}; brightness ${sg(d.centroidDiffHz, 'Hz', 0)}`,
     `pitch at the start ${st(d.pitchStartDiffSt)}, at the end ${st(d.pitchEndDiffSt)}; envelope correlation ${d.envelopeCorrelation.toFixed(2)}`,

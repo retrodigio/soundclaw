@@ -68,7 +68,7 @@ describe('run', () => {
     const before = readFileSync(join(proj, 'history.jsonl'), 'utf8');
     const r = sc(['run', proj, '-e', 'sound set a volume=0.2\nsound set a frequency=1\nsound frob a']);
     expect(r.code).toBe(1);
-    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, generate, mutate, mark, layer-up, classic, loop)\n2 errors; nothing was applied.\n");
+    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, generate, mutate, mark, layer-up, classic, loop, copy, rename, remove)\n2 errors; nothing was applied.\n");
     expect(readFileSync(join(proj, 'history.jsonl'), 'utf8')).toBe(before);
   });
 

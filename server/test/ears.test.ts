@@ -114,7 +114,8 @@ describe('views', () => {
     }
     const c = viewSound(f.w, 'beep', 'compare', { other: 'zap', out: join(f.root, 'cmp.png') });
     expect(c.file).toBe(join(f.root, 'cmp.png'));
-    expect(c.text).toMatch(/^zap compared with beep/m);
+    expect(c.text).toMatch(/^A = beep, B = zap$/m);
+    expect(c.text).toMatch(/zap compared with beep \(positive: zap is more, negative: beep is more\)/);
     expect(c.text).toContain('spectral distance');
     expect(() => viewSound(f.w, 'beep', 'compare')).toThrow(/second sound/);
     expect(() => viewSound(f.w, 'nope', 'wave')).toThrow(/no sound 'nope'/);

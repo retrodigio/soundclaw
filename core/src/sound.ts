@@ -9,9 +9,10 @@ import { SOUND_SPECS, cloneLayered, layeredBody, serializeLayered, type LayeredS
 
 export const SAMPLE_RATE = 44100;
 /** Bump when the renderer's output for the same document changes: cached renders are keyed by it. */
-export const RENDER_VERSION = 1;
+export const RENDER_VERSION = 2;
 
-export const SOUND_ID_RE = /^[a-z][a-z0-9_-]{0,47}$/;
+/** Ids are case-sensitive as written (file stems in engines are), and unique ignoring case so two never share a file on a case-insensitive disk. */
+export const SOUND_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 
 export type SoundStatus = 'draft' | 'approved' | 'rejected';
 
@@ -44,6 +45,9 @@ export interface ToneSound {
   volume: number;
   /** The latest status mark: draft until a person (or agent) approves or rejects it. */
   status: SoundStatus;
+  /** The loudness class the checks hold the sound to (a name in the style's loudnessClasses), and a loudness (LUFS) for this sound alone. */
+  loudClass?: string;
+  loudness?: number;
 }
 
 /** The classic voice: 25 sfxr-style parameters (and optionally the noise seed). */
@@ -54,6 +58,8 @@ export interface ClassicSound {
   status: SoundStatus;
   /** Marked `classic`: the sound must stay one classic voice (it refuses layer-up), so it exports as a synth.csv row. */
   classicOnly?: boolean;
+  loudClass?: string;
+  loudness?: number;
 }
 
 export type { LayeredSound };
@@ -91,7 +97,7 @@ export function paramProblem(name: string, value: number, voice: VoiceKind = 'to
 
 /** The parameter names of the voices together (the command parser checks a name against these; the sound's voice decides at apply time). */
 export function isParamName(name: string): boolean {
-  return name === 'seed' || name === 'gain' || TONE_PARAMS.some((p) => p.name === name) || CLASSIC_FIELDS.some((f) => f.name === name);
+  return name === 'seed' || name === 'gain' || name === 'class' || name === 'loudness' || TONE_PARAMS.some((p) => p.name === name) || CLASSIC_FIELDS.some((f) => f.name === name);
 }
 
 /** A number as written in the tape and documents: shortest round-trip form, no exponent noise. */
@@ -109,6 +115,10 @@ export function serializeSound(s: Sound): string {
     if (s.patch.seed !== undefined) lines.push(`seed ${fmtNumber(s.patch.seed)}`);
     if (s.classicOnly) lines.push('classic yes');
   }
+  if (s.voice !== 'layered') {
+    if (s.loudClass) lines.push(`class ${s.loudClass}`);
+    if (s.loudness !== undefined) lines.push(`loudness ${fmtNumber(s.loudness)}`);
+  }
   lines.push(`status ${s.status}`);
   return lines.join('\n') + '\n';
 }
@@ -119,6 +129,13 @@ export function renderKey(s: Sound, sampleHash: (name: string) => string = () =>
     ? `${RENDER_VERSION}|tone|${TONE_PARAMS.map((p) => `${p.name}=${fmtNumber(s[p.name as ParamName])}`).join('|')}`
     : `${RENDER_VERSION}|classic|${formatPatchNamed(s.patch)}`;
   return sha256Text(body);
+}
+
+/** The sound with the same id ignoring case, if the library has one (ids are unique ignoring case). */
+export function idClash(ids: Iterable<string>, id: string): string | undefined {
+  const low = id.toLowerCase();
+  for (const x of ids) if (x.toLowerCase() === low) return x;
+  return undefined;
 }
 
 export function cloneSound<T extends Sound>(s: T): T {

@@ -126,7 +126,7 @@ describe('Karplus-Strong', () => {
 
   it('dies away faster with a shorter `decay`; a long string is still ringing when a short one has gone', () => {
     const level = (decay: number, at: number) => {
-      const x = render(layered(NEW + `layer add s ks freq=440 dur=2 decay=${decay}\n` + FLAT));
+      const x = render(layered(NEW + `layer add s ks freq=440 dur=2 decay=${decay}\n` + FLAT + 'sound set s duration=1.5\n')); // (automatic length would cut a quick decay where it is 60 dB down)
       const from = Math.round(at * SAMPLE_RATE);
       return 20 * Math.log10(Math.sqrt(x.subarray(from, from + 441).reduce((s, v) => s + v * v, 0) / 441));
     };
@@ -143,8 +143,9 @@ describe('sample layers', () => {
     expect(Math.abs(up.length - 2205)).toBeLessThanOrEqual(8);
     const trimmed = render(layered(NEW + 'layer add s sample sample=tick start=0.02 end=0.05\n' + FLAT), BANK);
     expect(Math.abs(trimmed.length - 1323)).toBeLessThanOrEqual(8);
-    const rev = render(layered(NEW + 'layer add s sample sample=tick reverse=1\n' + FLAT), BANK);
-    for (const i of [500, 1500, 3000]) expect(Math.min(...[-2, -1, 0, 1, 2].map((d) => Math.abs(rev[i]! - base[Math.min(base.length - 1, Math.max(0, base.length - 1 - i + d))]!)))).toBeLessThan(0.05);
+    const whole = render(layered(NEW + 'layer add s sample sample=tick\n' + FLAT + 'sound set s duration=0.1\n'), BANK);
+    const rev = render(layered(NEW + 'layer add s sample sample=tick reverse=1\n' + FLAT + 'sound set s duration=0.1\n'), BANK);
+    for (const i of [500, 1500, 3000]) expect(Math.min(...[-2, -1, 0, 1, 2].map((d) => Math.abs(rev[i]! - whole[Math.min(whole.length - 1, Math.max(0, whole.length - 1 - i + d))]!)))).toBeLessThan(0.05);
   });
 
   it('a missing sample is silence (the server refuses to write it)', () => {
@@ -541,15 +542,15 @@ layer remove imp 5`;
     expect(err('sound layer-up s')).toMatch(/layered sound; layer-up makes a classic/);
   });
 
-  it('limits: 8 layers, 8 effects per chain, 32 breakpoints', () => {
+  it('limits: 8 layers, 8 effects per chain, 256 breakpoints', () => {
     const many = NEW + Array.from({ length: 8 }, () => 'layer add s osc').join('\n') + '\n';
     expect(() => build(many)).not.toThrow();
     expect(() => build(many + 'layer add s osc')).toThrow(/8 layers already/);
     const fx = NEW + 'layer add s osc\n' + Array.from({ length: 8 }, () => 'fx add s layer=1 chorus').join('\n') + '\n';
     expect(() => build(fx)).not.toThrow();
     expect(() => build(fx + 'fx add s layer=1 chorus')).toThrow(/8 effects already/);
-    const pts = Array.from({ length: 33 }, (_, i) => `${i}:1`).join(' ');
-    expect(() => build(NEW + `layer add s osc\nenv s 1.gain "${pts}"`)).toThrow(/at most 32 breakpoints/);
+    const pts = Array.from({ length: 257 }, (_, i) => `${i}:1`).join(' ');
+    expect(() => build(NEW + `layer add s osc\nenv s 1.gain "${pts}"`)).toThrow(/at most 256 breakpoints/);
   });
 
   it('reordering keeps each layer\'s envelopes, mute/solo decide what sounds, and the noise does not change when layers move', () => {

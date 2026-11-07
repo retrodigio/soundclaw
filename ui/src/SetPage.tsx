@@ -44,7 +44,7 @@ export function SetPage({ store, set }: { store: Store; set: SetDoc }) {
         <a href="#/" className="back" data-testid="back">← all sounds</a>
         <h2>set {set.id}</h2>
         {measure && <span className={`chip check-${measure.result.pass ? 'pass' : 'fail'}`} data-testid="set-check" data-pass={measure.result.pass}>{measure.result.pass ? '✓ set-spread' : '✗ set-spread'}</span>}
-        <span className="dim" data-testid="set-info">{set.members.length} members{set.from ? ` from ${set.from}` : ''} · {set.target !== null ? `target ${set.target} LUFS` : 'no loudness target'} · seed <b data-testid="set-seed">{set.seed}</b></span>
+        <span className="dim" data-testid="set-info">{set.members.length} members{set.from ? ` from ${set.from}` : ''} · {set.target !== null ? `target ${set.target} LUFS` : set.class ? `class ${set.class}` : 'no loudness target'} · seed <b data-testid="set-seed">{set.seed}</b></span>
         <span className="spacer" />
         <label className="dim">gap <input type="number" min={0} max={5000} step={50} value={gap} data-testid="set-gap" style={{ width: '5em' }} onChange={(e) => setGap(Math.max(0, Number(e.target.value)))} /> ms</label>
         <button className="play" data-testid="set-play-all" data-playing={sequencing} disabled={!members.length} onClick={() => void (sequencing ? store.stopSequence() : store.playSequence(members.map((m) => m.id), gap))}>{sequencing ? '■ Stop' : '▶ Play in sequence'}</button>

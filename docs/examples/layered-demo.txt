@@ -13,7 +13,8 @@ layer add impact osc wave=square freq=3200 dur=0.012 gain=0.3
 env impact 3.amp "0:0 0.001:1 0.01:0@exp"
 fx add impact distort shape=soft drive=5 mix=0.7
 fx add impact reverb size=0.25 mix=0.12
-sound set impact gain=1.4
+sound set impact gain=2
+fx add impact limit ceiling=-1 release=40 lookahead=3   # loud and not clipping: limit the peaks, then the gain can go up
 
 # a magic sparkle: four bell notes spread across the stereo field, a shimmer, echo and room
 sound new sparkle voice=layered seed=12

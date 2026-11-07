@@ -18,9 +18,9 @@ describe('the command language', () => {
   });
 
   it('reports every problem with line and column, and says what is allowed', () => {
-    const r = parse('sound new Beep\nsound set beep frequency=5\nsound set beep pitch=1\nsound set beep volume=loud\nfrobnicate\nsound set x frequency=440 frequency=450\nsound mark beep liked');
+    const r = parse('sound new 9beep\nsound set beep frequency=5\nsound set beep pitch=1\nsound set beep volume=loud\nfrobnicate\nsound set x frequency=440 frequency=450\nsound mark beep liked');
     expect(r.errors.map((e) => `${e.line}:${e.col} ${e.message}`)).toEqual([
-      expect.stringMatching(/^1:11 'Beep' is not a sound id/),
+      expect.stringMatching(/^1:11 '9beep' is not a sound id/),
       '2:16 frequency must be between 20 and 20000 Hz (got 5)',
       expect.stringMatching(/^3:16 no parameter 'pitch' \(tone: frequency, duration, volume; classic: wave, attack/),
       "4:16 volume: 'loud' is not a number",

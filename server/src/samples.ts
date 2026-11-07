@@ -81,6 +81,32 @@ export class SampleStore implements SampleBank {
     return this.load(name) ? new Uint8Array(readFileSync(this.file(name))) : undefined;
   }
 
+  /**
+   * Import every WAV file in a folder (not its sub-folders), named by file name as `import` does. One file that cannot be read or whose name
+   * is taken by other content does not stop the others: it is reported. Returns what was done, in file order.
+   */
+  importDir(dir: string): { imported: { info: SampleInfo; created: boolean; file: string }[]; problems: string[] } {
+    const path = resolve(dir);
+    const files = readdirSync(path).filter((f) => /\.wav$/i.test(f) && statSync(join(path, f)).isFile()).sort();
+    const imported: { info: SampleInfo; created: boolean; file: string }[] = [];
+    const problems: string[] = [];
+    const names = new Map<string, string>();
+    for (const f of files) {
+      try {
+        const r = this.import(join(path, f));
+        const clash = names.get(r.info.name);
+        if (clash) problems.push(`${f}: gets the name '${r.info.name}' that ${clash} has too (the later file is the one kept; rename one of them)`);
+        names.set(r.info.name, f);
+        imported.push({ ...r, file: f });
+      } catch (e) {
+        if (e instanceof ProjectError) problems.push(`${f}: ${e.message}`);
+        else throw e;
+      }
+    }
+    if (!files.length) problems.push(`no .wav files in ${dir}`);
+    return { imported, problems };
+  }
+
   /** Copy a WAV file into the project's samples folder. */
   import(file: string, as?: string): { info: SampleInfo; created: boolean } {
     const path = resolve(file);
