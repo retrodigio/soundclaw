@@ -1,6 +1,6 @@
 // Results as text, for the CLI and the MCP tools.
 
-import { CLASSIC_FIELDS, WAVE_NAMES, type Sound, type TapeEntry } from '@soundclaw/core';
+import { CLASSIC_FIELDS, WAVE_NAMES, isStereo, layerLabel, type Sound, type TapeEntry } from '@soundclaw/core';
 import type { RunOutcome } from './writer.ts';
 
 export const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -24,9 +24,13 @@ export function formatErrors(source: string, errors: { line: number; col: number
 export function soundLine(s: Sound): string {
   const status = s.status === 'draft' ? '' : `, ${s.status}`;
   if (s.voice === 'tone') return `${s.id}: ${s.voice} ${s.frequency} Hz, ${s.duration} s, volume ${s.volume}${status}`;
+  if (s.voice === 'layered') {
+    const parts = s.layers.map((l, i) => `${i + 1} ${layerLabel(l)}${l.mute ? ' (muted)' : ''}${l.solo ? ' (solo)' : ''}${l.fx.length ? ` +${l.fx.map((f) => f.kind).join('+')}` : ''}`);
+    return `${s.id}: layered ${s.layers.length ? `${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} [${parts.join('; ')}]` : '(no layers yet)'}${s.master.length ? `, master ${s.master.map((f) => f.kind).join('+')}` : ''}${isStereo(s) ? ', stereo' : ''}${status}`;
+  }
   const set = CLASSIC_FIELDS.filter((f) => s.patch[f.name] !== f.default).map((f) => `${f.name}=${f.name === 'wave' ? WAVE_NAMES[s.patch.wave] : s.patch[f.name]}`);
   if (s.patch.seed !== undefined) set.push(`seed=${s.patch.seed}`);
-  return `${s.id}: classic${set.length ? ' ' + set.join(' ') : ' (all defaults)'}${status}`;
+  return `${s.id}: classic${s.classicOnly ? ' (marked classic)' : ''}${set.length ? ' ' + set.join(' ') : ' (all defaults)'}${status}`;
 }
 
 /** The tape: `#12 g5 agent:claude 2026-11-06T10:00:00Z  sound set beep volume=0.4`, undone groups marked. */

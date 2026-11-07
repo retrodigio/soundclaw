@@ -68,7 +68,7 @@ describe('run', () => {
     const before = readFileSync(join(proj, 'history.jsonl'), 'utf8');
     const r = sc(['run', proj, '-e', 'sound set a volume=0.2\nsound set a frequency=1\nsound frob a']);
     expect(r.code).toBe(1);
-    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, generate, mutate, mark)\n2 errors; nothing was applied.\n");
+    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, generate, mutate, mark, layer-up, classic)\n2 errors; nothing was applied.\n");
     expect(readFileSync(join(proj, 'history.jsonl'), 'utf8')).toBe(before);
   });
 
@@ -101,7 +101,7 @@ describe('list, history, render', () => {
     const r = sc(['list', proj]).out.split('\n');
     expect(r[0]).toBe('2 sounds:');
     expect(r[1]).toMatch(/^ {2}beep: tone 440 Hz, 0.5 s, volume 0.5, approved → 22050 samples/);
-    expect(r[2]).toMatch(/^ {4}checks: \d\/5 pass/);
+    expect(r[2]).toMatch(/^ {4}checks: \d\/6 pass/);
     expect(r[3]).toMatch(/^ {2}boop: tone 220 Hz/);
   });
   it('history filters by sound, author and count', () => {
@@ -120,7 +120,7 @@ describe('list, history, render', () => {
     expect(again).toMatch(/\(from the render cache\)\n/);
     // the numbers, then a description, and the check summary is the last line
     expect(again).toMatch(/duration 0\.500 s \(22050 samples\)\nloudness /);
-    expect(again.trim().split('\n').at(-1)).toMatch(/^checks: \d\/5 pass/);
+    expect(again.trim().split('\n').at(-1)).toMatch(/^checks: \d\/6 pass/);
     expect(sc(['render', proj, 'nope']).err).toMatch(/no sound 'nope'/);
   });
 });
@@ -259,29 +259,29 @@ describe('the classic voice, the ears, import and export', () => {
     const r = sc(['run', proj, '-e', 'sound new hit voice=classic preset=hit seed=4; sound mutate hit amount=0.1 seed=5 as=hit2']);
     expect(r.out).toContain('#4 sound new hit voice=classic preset=hit seed=4');
     expect(r.out).toContain('#5 sound mutate hit amount=0.1 seed=5 as=hit2');
-    expect(r.out).toMatch(/\nhit: classic wave=\w+ .* → \d+ samples, peak [\d.]+, rms [\d.]+, hash [0-9a-f]{12}\n {4}checks: \d\/5 pass/);
+    expect(r.out).toMatch(/\nhit: classic wave=\w+ .* → \d+ samples, peak [\d.]+, rms [\d.]+, hash [0-9a-f]{12}\n {4}checks: \d\/6 pass/);
     expect(r.out).toContain('hit2: classic');
   });
 
   it('render ends with the check summary; describe says it in words', () => {
     const r = sc(['render', proj, 'zap']);
-    expect(r.out.trim().split('\n').at(-1)).toMatch(/^checks: \d\/5 pass; failing: /);
+    expect(r.out.trim().split('\n').at(-1)).toMatch(/^checks: \d\/6 pass; failing: /);
     const d = sc(['describe', proj, 'beep']);
     expect(d.code).toBe(0);
     expect(d.out).toMatch(/^beep: 0\.\d\d s, tonal and /);
-    expect(d.out.trim().split('\n').at(-1)).toBe('checks: 5/5 pass');
+    expect(d.out.trim().split('\n').at(-1)).toBe('checks: 6/6 pass');
     expect(sc(['describe', proj, 'nope']).err).toMatch(/no sound 'nope'/);
   });
 
   it('check exits 0 when everything passes and 1 when something fails, listing where', () => {
     const ok = sc(['check', proj, 'beep']);
     expect(ok.code).toBe(0);
-    expect(ok.out).toMatch(/^beep: PASS \(5\/5 checks pass\)/);
+    expect(ok.out).toMatch(/^beep: PASS \(6\/6 checks pass\)/);
     const bad = sc(['check', proj]);
     expect(bad.code).toBe(1);
     expect(bad.out).toMatch(/^zap: FAIL/m);
     expect(bad.out).toMatch(/flagged 0\.0000-0\.0010 s: starts at level/);
-    expect(bad.out).toMatch(/1 sound of 2 pass all of clip, loudness, dc, click, tail/);
+    expect(bad.out).toMatch(/1 sound of 2 pass all of clip, loudness, dc, click, tail, harsh/);
   });
 
   it('view writes a PNG (under .cache/views, or --out) and prints the numbers', () => {

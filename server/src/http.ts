@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
-import { HUMAN_RE, floatBytes, renderExact } from '@soundclaw/core';
+import { HUMAN_RE, floatBytes, joinChannels, renderExact } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
 import type { ClientMessage, PersonRequest, ServerMessage } from './protocol.ts';
 import { awaitRequests, personRequest } from './requests.ts';
@@ -129,7 +129,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'request', 'reply', 'cancel', 'work'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   const host = o.host ?? '127.0.0.1';
@@ -243,13 +243,27 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       json(res, 200, o.writer.snapshot());
       return;
     }
+    if (url.pathname === '/api/samples') {
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      json(res, 200, o.writer.samples.list());
+      return;
+    }
+    const sm = /^\/api\/samples\/([a-z0-9][a-z0-9_-]*)\.wav$/.exec(url.pathname);
+    if (sm) {
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      const bytes = o.writer.samples.bytes(sm[1]!);
+      if (!bytes) { json(res, 404, { error: `no sample '${sm[1]}'` }); return; }
+      res.writeHead(200, { ...HEADERS, 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store', ETag: `"${o.writer.samples.hash(sm[1]!)}"` });
+      res.end(Buffer.from(bytes));
+      return;
+    }
     // A sound as the server renders it: raw little-endian float32 samples (what the browser must match), or a WAV.
     const rm = /^\/api\/render\/([a-z][a-z0-9_-]*)\.(f32|f64|wav)$/.exec(url.pathname);
     if (rm) {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       void o.writer.enqueue(() => o.writer.render(rm[1]!)).then((r) => {
         // f64: the exact doubles (the classic voice's reference samples); f32: what is played; wav: as exported.
-        const body = rm[2] === 'wav' ? o.writer.wavOf(rm[1]!) : rm[2] === 'f64' ? new Uint8Array(renderExact(o.writer.sound(rm[1]!)).buffer) : floatBytes(r.samples);
+        const body = rm[2] === 'wav' ? o.writer.wavOf(rm[1]!) : rm[2] === 'f64' ? new Uint8Array(renderExact(o.writer.sound(rm[1]!), o.writer.samples).buffer) : floatBytes(joinChannels(r.channels));
         res.writeHead(200, { ...HEADERS, 'Content-Type': rm[2] === 'wav' ? 'audio/wav' : 'application/octet-stream', 'Cache-Control': 'no-store', ETag: `"${r.key}"` });
         res.end(Buffer.from(body));
       }, (e: unknown) => json(res, e instanceof ProjectError ? 404 : 500, { error: (e as Error).message }));

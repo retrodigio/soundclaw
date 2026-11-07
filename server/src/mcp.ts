@@ -31,6 +31,14 @@ Make sounds with \`run\` (one batch = one undo group; any error applies nothing)
   sound generate <id> <category|random> [seed=<n>]   a new random patch for a classic sound, from a category's ranges (or any sound: random)
   sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change to a classic sound
   sound mark <id> approved|rejected|draft ["note"]   a status mark (people use the buttons; the note says why)
+Layered sounds (several voices summed; use them when one sfxr voice is not enough: impacts, doors, magic, footsteps, anything with a body and a top):
+  sound new <id> voice=layered [preset=footstep|ui-click|door|magic|<classic category>] [seed=<n>]   up to 8 layers; sound set <id> duration=<s|auto> gain=<g> seed=<n>
+  layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]   osc: wave sine|square|saw|triangle|pulse|wavetable|white|pink|brown|metal, freq, duty, dur; fm: ops 2-4, algo, ratio1-4, index2-4; ks (pluck): freq, decay, bright; sample: sample=<name>, start, end, pitch, reverse; every layer: offset, gain, pan, filter=off|lp|hp|bp|notch, cutoff, q
+  layer set <id> <n> <param>=<value> ...  |  layer remove|move|mute|solo <id> <n> [to=<m> | on|off]   (layers count from 1; source=<kind> changes a layer's source)
+  env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | clear   an envelope replaces a fixed value; targets 1.freq 1.amp 1.cutoff 2.pan 1.fx1.mix master.fx1.mix
+  fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb [<param>=<value> ...] [at=<k>]  |  fx set|remove|move <id> [layer=<n>] <k> ...   (no layer= : the master chain)
+  sound layer-up <id>   a classic sound becomes layered, same samples   |   sound classic <id> on|off   keep it one classic voice (exports as a synth.csv row)
+  Order: source -> filter -> amp envelope -> effects -> gain -> pan, then the sum -> master gain -> master effects; export adds a limiter. Layered sounds export as WAV only. A layer with pan off centre makes the sound stereo. The \`layers\` view shows each layer; the \`harsh\` check flags sustained 2-5 kHz energy. \`sample\` imports a WAV for sample layers.
   undo [group=<g>] [by=<author>]   |   redo [group=<undo group>] [by=<author>]      run alone, as the only command of the batch
 \`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers, description and checks; \`export\` writes wav (16-bit, 44,100 Hz, mono), patch (sfxr text) or csv (synth.csv) files; \`import\` makes classic sounds from an sfxr csv or patch.
 
@@ -155,11 +163,11 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('view', {
     title: 'View a sound',
-    description: 'Your ears as a picture (PNG) with the numbers: wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers), pitch (YIN track over a note grid), compare (this sound and `other` stacked with a difference spectrogram, and distance numbers). The image is also saved under <project>/.cache/views.',
+    description: 'Your ears as a picture (PNG) with the numbers: wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers), pitch (YIN track over a note grid), layers (the layers of a layered sound stacked: waveform and spectrogram of each, with offsets), compare (this sound and `other` stacked with a difference spectrogram, and distance numbers). The image is also saved under <project>/.cache/views.',
     annotations: { readOnlyHint: true },
     inputSchema: z.object({
       sound: z.string(),
-      kind: z.enum(['wave', 'spec', 'pitch', 'compare']).optional().describe('Default spec'),
+      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'compare']).optional().describe('Default spec'),
       other: z.string().optional().describe('compare: the second sound'),
     }),
   }, (a) => w.enqueue((): CallToolResult => {
@@ -215,9 +223,32 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     }
   }));
 
+  server.registerTool('sample', {
+    title: 'Sample',
+    description: 'Samples for sample layers. import: copy a WAV file (PCM 8/16/24/32-bit or float, any rate, mixed to mono, at most 60 s) into <project>/samples/ under a name (default: the file name); then `layer add <id> sample sample=<name> ...` uses it. list: the samples in the project.',
+    inputSchema: z.object({
+      action: z.enum(['import', 'list']),
+      file: z.string().optional().describe('import: path of the WAV file'),
+      as: z.string().optional().describe('import: the sample\'s name (a-z, 0-9, _ and -)'),
+    }),
+  }, (a) => w.enqueue(() => {
+    try {
+      if (a.action === 'list') {
+        const list = w.samples.list();
+        return { content: [text(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, sha256 ${x.sha256.slice(0, 12)}`).join('\n') : 'no samples')] };
+      }
+      if (!a.file) return fail('import needs file');
+      const r = w.samples.import(a.file, a.as);
+      w.samplesChanged();
+      return { content: [text(`${r.created ? 'imported' : 'already in the project:'} sample ${r.info.name}: ${r.info.seconds.toFixed(3)} s, ${r.info.rate} Hz, sha256 ${r.info.sha256.slice(0, 12)}`)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
   server.registerTool('export', {
     title: 'Export sounds',
-    description: 'Write sounds to a folder (default <project>/exports, which git ignores). format wav (default): 16-bit PCM, 44,100 Hz, mono; classic sounds as the engine\'s pre-rendered WAVs (trunc(s x 32000)). patch: a single-patch text per classic sound. csv: one synth.csv for the classic sounds. Without sounds, all of them.',
+    description: 'Write sounds to a folder (default <project>/exports, which git ignores). format wav (default): 16-bit PCM, 44,100 Hz; classic sounds as the engine\'s pre-rendered WAVs (trunc(s x 32000), mono); layered sounds through a limiter at the style\'s true-peak ceiling (mono, or stereo when a layer is panned), as WAV only. patch: a single-patch text per classic sound. csv: one synth.csv for the classic sounds. Without sounds, all of them.',
     inputSchema: z.object({
       sounds: z.array(z.string()).optional().describe('The sounds to export (default all)'),
       format: z.enum(['wav', 'patch', 'csv']).optional().describe('Default wav'),

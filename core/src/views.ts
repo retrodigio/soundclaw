@@ -7,7 +7,7 @@ import { Canvas, type Rgb } from './png.ts';
 import { SAMPLE_RATE } from './sound.ts';
 
 export type ViewKind = 'wave' | 'spec' | 'pitch';
-export const VIEW_KINDS: readonly (ViewKind | 'compare')[] = ['wave', 'spec', 'pitch', 'compare'];
+export const VIEW_KINDS: readonly (ViewKind | 'compare' | 'layers')[] = ['wave', 'spec', 'pitch', 'layers', 'compare'];
 
 export interface Image {
   png: Uint8Array;
@@ -310,3 +310,57 @@ export function compareView(xa: Samples, xb: Samples, la: string, lb: string): {
   return { image: { png: c.png(), width: W, height: H }, distance: distance(xa, xb, aa, ab, sa, sb), a: aa, b: ab };
 }
 
+
+// ---- layers --------------------------------------------------------------------------------------
+
+export interface LayerRow {
+  /** `1 osc sine 60 Hz` */
+  label: string;
+  /** Seconds into the sound where the layer starts. */
+  offset: number;
+  /** `gain 0.9 pan -0.3 (muted)` */
+  detail: string;
+  /** The layer as it enters the sum, in the sound's timeline (stereo: the mix of the two). */
+  samples: Samples;
+}
+
+/** Each layer's waveform and spectrogram, stacked on one time axis, with the layers' start offsets marked. */
+export function layersView(rows: readonly LayerRow[], duration: number, title = ''): Image {
+  const waveH = 44, specH = 52, gap = 10;
+  const rowH = 12 + waveH + specH + gap;
+  const H = TOP + Math.max(1, rows.length) * rowH + BOTTOM;
+  const c = new Canvas(W, H, BG);
+  const px = LEFT, pw = W - LEFT - RIGHT;
+  header(c, `LAYERS ${title}`, `${rows.length} LAYER${rows.length === 1 ? '' : 'S'}  ${duration.toFixed(3)} S`);
+  const specs = rows.map((r) => melSpectrogram(r.samples, { hop: 256 }));
+  let top = -Infinity;
+  for (const s of specs) top = Math.max(top, specMax(s));
+  rows.forEach((r, i) => {
+    const y0 = TOP + i * rowH;
+    c.text(`${r.label}  ${r.detail}  STARTS ${r.offset.toFixed(3)} S`, px, y0 + 1, TEXT);
+    const wy = y0 + 12, mid = wy + waveH / 2;
+    c.hline(px, px + pw - 1, Math.round(mid), GRID);
+    const n = r.samples.length;
+    for (let col = 0; col < pw; col++) {
+      const from = Math.floor((col * n) / pw);
+      const to = Math.max(from + 1, Math.floor(((col + 1) * n) / pw));
+      let lo = 0, hi = 0;
+      for (let k = from; k < to && k < n; k++) { const v = r.samples[k]!; if (v < lo) lo = v; if (v > hi) hi = v; }
+      const yTop = Math.round(mid - Math.min(1, hi) * (waveH / 2 - 1));
+      c.vline(px + col, yTop, Math.max(Math.round(mid - Math.max(-1, lo) * (waveH / 2 - 1)), yTop), TEAL);
+    }
+    const sy = wy + waveH + 2;
+    const s = specs[i]!;
+    if (Number.isFinite(top)) {
+      paintSpec(c, s, px, sy, pw, specH - 2, duration, (frame, b, frac) => {
+        const row = s.db[Math.min(s.db.length - 1, frame)]!;
+        const v = row[b]! * (1 - frac) + row[Math.min(row.length - 1, b + 1)]! * frac;
+        return ramp(INFERNO, (v - (top - SPEC_RANGE_DB)) / SPEC_RANGE_DB);
+      });
+    }
+    const ox = px + Math.round((r.offset / duration) * (pw - 1));
+    c.vline(ox, y0 + 10, y0 + rowH - gap, AMBER, 3);
+  });
+  timeRuler(c, px, pw, TOP + Math.max(1, rows.length) * rowH - gap + 2, duration);
+  return { png: c.png(), width: W, height: H };
+}

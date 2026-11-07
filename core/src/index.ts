@@ -5,6 +5,8 @@
 export * from './sha256.ts';
 export * from './mathx.ts';
 export * from './classic.ts';
+export * from './layered.ts';
+export * from './synth.ts';
 export * from './generators.ts';
 export * from './sound.ts';
 export * from './render.ts';
@@ -19,3 +21,4 @@ export * from './checks.ts';
 export * from './describe.ts';
 export * from './views.ts';
 export * from './editor.ts';
+export * from './recipes.ts';

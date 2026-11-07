@@ -14,7 +14,7 @@ export function formatNumbers(a: Analysis): string {
   const c = a.centroid;
   const p = a.pitch;
   const lines = [
-    `duration ${a.duration.toFixed(3)} s (${a.samples} samples)`,
+    `duration ${a.duration.toFixed(3)} s (${a.samples} samples${a.channels > 1 ? `, ${a.channels} channels: stereo` : ''})`,
     `loudness ${f1(a.lufs)} LUFS, true peak ${f1(a.truePeakDb)} dBTP (sample peak ${f1(a.peakDb)} dBFS), rms ${f1(a.rmsDb)} dBFS, crest factor ${f1(a.crestDb)} dB`,
     `dc offset ${a.dc.toFixed(5)} (${(a.dc * 100).toFixed(2)} %)`,
     `attack ${(a.attack * 1000).toFixed(1)} ms to −3 dB of peak; tail ${a.tail.toFixed(3)} s to −60 dB; silence ${Math.round(a.leadingSilence * 1000)} ms before and ${Math.round(a.trailingSilence * 1000)} ms after`,
@@ -31,6 +31,7 @@ export function formatNumbers(a: Analysis): string {
 export function describe(a: Analysis): string {
   if (a.silent) return `${secs(a.duration)} of silence.`;
   const parts: string[] = [secs(a.duration)];
+  if (a.channels > 1) parts.push('stereo');
   const c = a.centroid.mean;
   const noisy = a.flatness > 0.2 || a.pitch.voiced < 0.25;
   const brightness = c < 400 ? 'very dark' : c < 1000 ? 'dark' : c < 2500 ? 'mid-range' : c < 5000 ? 'bright' : 'very bright';

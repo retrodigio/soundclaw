@@ -196,17 +196,24 @@ function filter(x: Samples, [b0, b1, b2, a1, a2]: Biquad): Float64Array {
  * −70 LUFS and then 10 LU below the gated mean. A sound shorter than one block is measured as a
  * single block over its whole length (no padding with silence). Silence is −Infinity.
  */
-export function integratedLoudness(x: Samples): number {
-  if (!x.length) return -Infinity;
+export function integratedLoudness(input: Samples | readonly Samples[]): number {
+  const chans = Array.isArray(input) ? (input as readonly Samples[]) : [input as Samples];
+  if (!chans[0]!.length) return -Infinity;
   const [s1, s2] = kWeighting(SAMPLE_RATE);
-  const y = filter(filter(x, s1), s2);
+  const ys = chans.map((x) => filter(filter(x, s1), s2));
+  const y = ys[0]!;
   const block = Math.round(0.4 * SAMPLE_RATE);
   const step = Math.round(0.1 * SAMPLE_RATE);
   const ms: number[] = [];
   const meanSquare = (from: number, to: number): number => {
-    let sum = 0;
-    for (let i = from; i < to; i++) sum += y[i]! * y[i]!;
-    return sum / (to - from);
+    // BS.1770: the channels' mean squares add (left and right each weigh 1)
+    let total = 0;
+    for (const c of ys) {
+      let sum = 0;
+      for (let i = from; i < to; i++) sum += c[i]! * c[i]!;
+      total += sum / (to - from);
+    }
+    return total;
   };
   if (y.length < block) ms.push(meanSquare(0, y.length));
   else for (let s = 0; s + block <= y.length; s += step) ms.push(meanSquare(s, s + block));
@@ -340,6 +347,8 @@ export const midiName = (m: number): string => `${NOTE_NAMES[((m % 12) + 12) % 1
 // ---- The numbers ---------------------------------------------------------------------------------
 
 export interface Analysis {
+  /** 1, or 2 for a stereo sound (peaks and loudness count both; spectrum and pitch are measured on the mix of the two). */
+  channels: number;
   samples: number;
   /** Seconds. */
   duration: number;
@@ -392,21 +401,45 @@ export function rmsEnvelope(x: Samples, win = 220, hop = 110): Float64Array {
   return out;
 }
 
-export function analyze(x: Samples): Analysis {
-  const n = x.length;
+export function analyze(input: Samples | readonly Samples[]): Analysis {
+  const chs = Array.isArray(input) ? (input as readonly Samples[]) : [input as Samples];
+  const n = chs[0]!.length;
+  // x: what the spectrum and pitch are measured on (the mix); m: the level at each sample (the larger channel), for peaks, attack, silence and tail.
+  let x: Samples = chs[0]!;
+  let m: Samples;
+  if (chs.length === 1) {
+    const a = new Float32Array(n);
+    for (let i = 0; i < n; i++) a[i] = Math.abs(x[i]!);
+    m = a;
+  } else {
+    const mix = new Float32Array(n);
+    const lvl = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let s = 0, big = 0;
+      for (const c of chs) { s += c[i]!; big = Math.max(big, Math.abs(c[i]!)); }
+      mix[i] = s / chs.length;
+      lvl[i] = big;
+    }
+    x = mix;
+    m = lvl;
+  }
   const duration = n / SAMPLE_RATE;
   let peak = 0, sum = 0, sq = 0;
-  for (let i = 0; i < n; i++) {
-    const v = x[i]!;
-    const a = Math.abs(v);
-    if (a > peak) peak = a;
-    sum += v;
-    sq += v * v;
+  for (const c of chs) {
+    let cs = 0;
+    for (let i = 0; i < n; i++) {
+      const v = c[i]!;
+      const a = Math.abs(v);
+      if (a > peak) peak = a;
+      cs += v;
+      sq += v * v;
+    }
+    if (Math.abs(cs) > Math.abs(sum)) sum = cs;
   }
-  const rms = n ? Math.sqrt(sq / n) : 0;
+  const rms = n ? Math.sqrt(sq / (n * chs.length)) : 0;
   const silent = peak < 1e-6;
   const empty = {
-    samples: n, duration, silent, peak, peakDb: toDb(peak), truePeakDb: toDb(peak), rmsDb: toDb(rms), crestDb: 0, dc: n ? sum / n : 0, lufs: -Infinity,
+    channels: chs.length, samples: n, duration, silent, peak, peakDb: toDb(peak), truePeakDb: toDb(peak), rmsDb: toDb(rms), crestDb: 0, dc: n ? sum / n : 0, lufs: -Infinity,
     attack: 0, tail: 0, leadingSilence: duration, trailingSilence: 0, endLevelDb: -Infinity,
     centroid: { mean: NaN, start: NaN, mid: NaN, end: NaN }, centroidTrack: [], flatness: NaN,
     pitch: { start: null, end: null, min: null, max: null, rangeSemitones: 0, voiced: 0, track: [] }, onsets: 0, onsetTimes: [],
@@ -416,18 +449,18 @@ export function analyze(x: Samples): Analysis {
   // attack: first sample within −3 dB of the peak
   const thr3 = peak * Math.pow(10, -3 / 20);
   let attackAt = 0;
-  while (attackAt < n && Math.abs(x[attackAt]!) < thr3) attackAt++;
+  while (attackAt < n && m[attackAt]! < thr3) attackAt++;
 
   // silence and tail, from the RMS envelope
   const win = 220, hop = 110;
-  const env = rmsEnvelope(x, win, hop);
+  const env = rmsEnvelope(m, win, hop);
   let envMax = 0;
   for (const v of env) envMax = Math.max(envMax, v);
   const floor60 = peak * 0.001;
   let firstLoud = 0;
-  while (firstLoud < n && Math.abs(x[firstLoud]!) < floor60) firstLoud++;
+  while (firstLoud < n && m[firstLoud]! < floor60) firstLoud++;
   let lastLoud = n - 1;
-  while (lastLoud > 0 && Math.abs(x[lastLoud]!) < floor60) lastLoud--;
+  while (lastLoud > 0 && m[lastLoud]! < floor60) lastLoud--;
   const env3 = envMax * Math.pow(10, -3 / 20);
   let lastTop = 0;
   for (let k = 0; k < env.length; k++) if (env[k]! >= env3) lastTop = k;
@@ -437,7 +470,7 @@ export function analyze(x: Samples): Analysis {
   const tailEnd = Math.min(lastLoud, lastAbove * hop + win);
   const tail = Math.max(0, tailEnd - topEndSample) / SAMPLE_RATE;
   let endPeak = 0;
-  for (let i = Math.max(0, n - 2); i < n; i++) endPeak = Math.max(endPeak, Math.abs(x[i]!));
+  for (let i = Math.max(0, n - 2); i < n; i++) endPeak = Math.max(endPeak, m[i]!);
 
   // spectrum: centroid, flatness
   const s = stft(x, 1024, 256);
@@ -498,8 +531,8 @@ export function analyze(x: Samples): Analysis {
   if (!onsetTimes.length) onsetTimes.push((firstLoud) / SAMPLE_RATE);
 
   return {
-    samples: n, duration, silent, peak, peakDb: toDb(peak), truePeakDb: toDb(truePeak(x)), rmsDb: toDb(rms), crestDb: toDb(peak) - toDb(rms),
-    dc: sum / n, lufs: integratedLoudness(x), attack: attackAt / SAMPLE_RATE, tail,
+    channels: chs.length, samples: n, duration, silent, peak, peakDb: toDb(peak), truePeakDb: toDb(Math.max(...chs.map((c) => truePeak(c)))), rmsDb: toDb(rms), crestDb: toDb(peak) - toDb(rms),
+    dc: sum / n, lufs: integratedLoudness(chs), attack: attackAt / SAMPLE_RATE, tail,
     leadingSilence: firstLoud / SAMPLE_RATE, trailingSilence: (n - 1 - lastLoud) / SAMPLE_RATE, endLevelDb: toDb(endPeak) - toDb(peak),
     centroid, centroidTrack: track, flatness: flatW > 0 ? flatSum / flatW : NaN, pitch, onsets: onsetTimes.length, onsetTimes,
   };

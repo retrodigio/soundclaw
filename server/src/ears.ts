@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  CHECK_NAMES, checkSummary, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
+  CHECK_NAMES, audibleLayers, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
   pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, type Analysis, type CheckResult, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -64,7 +64,7 @@ export interface ViewResult {
  * A view of a sound as a PNG (saved under <project>/.cache/views, or `out`): wave, spec or pitch;
  * compare takes a second sound and adds the difference spectrogram and distance numbers.
  */
-export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare', o: { other?: string; out?: string } = {}): ViewResult {
+export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers', o: { other?: string; out?: string } = {}): ViewResult {
   const m = w.measure(id);
   const r = w.render(id);
   let png: Uint8Array;
@@ -78,7 +78,20 @@ export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare', o: 
   } else if (kind === 'wave') png = waveView(r.samples, m.analysis, id).png;
   else if (kind === 'spec') png = specView(r.samples, m.analysis, id).png;
   else if (kind === 'pitch') png = pitchView(m.analysis, id).png;
-  else throw new ProjectError(`no view '${kind}' (wave, spec, pitch, compare)`);
+  else if (kind === 'layers') {
+    const sound = w.sound(id);
+    if (sound.voice !== 'layered') throw new ProjectError(`${id} is a ${sound.voice} sound: the layers view is for layered sounds (wave, spec and pitch show any sound)`);
+    const parts = renderParts(sound, w.samples);
+    const rows = parts.parts.map((p) => ({
+      label: `${p.index + 1} ${layerLabel(p.layer)}`,
+      offset: p.layer.p.offset as number,
+      detail: `gain ${p.layer.p.gain} pan ${p.layer.p.pan}${p.layer.solo ? ' solo' : ''}`,
+      samples: mixdown(p.channels),
+    }));
+    const silent = sound.layers.filter((l) => !audibleLayers(sound).includes(l)).length;
+    png = layersView(rows, parts.length / 44100, id).png;
+    text += `\nlayers: ${rows.length} sounding${silent ? `, ${silent} muted or not soloed` : ''}${isStereo(sound) ? '; stereo (the layers are drawn as the mix of their two channels)' : ''}`;
+  } else throw new ProjectError(`no view '${kind}' (wave, spec, pitch, layers, compare)`);
   const file = o.out ? resolve(o.out) : join(w.project.dir, '.cache', 'views', `${id}${kind === 'compare' ? `-vs-${o.other}` : ''}-${kind}-${r.key.slice(0, 8)}.png`);
   mkdirSync(join(file, '..'), { recursive: true });
   writeFileSync(file, png);
@@ -103,7 +116,7 @@ export interface ExportedFile {
 }
 
 function classicOf(s: Sound, what: string): ClassicPatch {
-  if (s.voice !== 'classic') throw new ProjectError(`${s.id} is a ${s.voice} sound: ${what} is for classic sounds (export it as wav)`);
+  if (s.voice !== 'classic') throw new ProjectError(`${s.id} is a ${s.voice} sound: ${what} is for classic sounds${s.voice === 'layered' ? '; a layered sound exports as WAV only (export --format wav)' : ' (export it as wav)'}`);
   return s.patch;
 }
 
@@ -131,11 +144,11 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
     for (const id of names) {
       const s = w.sound(id);
       if (s.voice === 'classic') rows.push({ id, patch: s.patch });
-      else if (ids.length) throw new ProjectError(`${id} is a ${s.voice} sound: csv is for classic sounds`);
+      else if (ids.length) throw new ProjectError(`${id} is a ${s.voice} sound: csv is for classic sounds${s.voice === 'layered' ? '; a layered sound exports as WAV only (export --format wav)' : ''}`);
       else skipped.push(id);
     }
     if (!rows.length) throw new ProjectError('no classic sounds to write as csv');
-    for (const id of skipped) notes.push(`skipped ${id} (not a classic sound)`);
+    for (const id of skipped) notes.push(`skipped ${id} (${w.sound(id).voice === 'layered' ? 'layered: WAV only' : 'not a classic sound'})`);
     const file = join(dir, 'synth.csv');
     const text = formatCsv(rows);
     writeFileSync(file, text);
@@ -145,7 +158,7 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
   for (const id of names) {
     const s = w.sound(id);
     if (format === 'patch') {
-      if (s.voice !== 'classic' && !ids.length) { notes.push(`skipped ${id} (not a classic sound)`); continue; }
+      if (s.voice !== 'classic' && !ids.length) { notes.push(`skipped ${id} (${s.voice === 'layered' ? 'layered: WAV only' : 'not a classic sound'})`); continue; }
       const p = classicOf(s, 'a patch');
       // A seed cannot ride in the positional form: write the named form, which the engine's parser also reads.
       const body = patchFileText(p);
@@ -154,7 +167,13 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
       files.push(base(id, file, Buffer.byteLength(body), 'patch'));
     } else {
       const file = join(dir, `${id}.wav`);
-      const wav = s.voice === 'classic' ? classicWav(renderExact(s)) : w.wavOf(id);
+      let wav: Uint8Array;
+      if (s.voice === 'classic') wav = classicWav(renderExact(s));
+      else if (s.voice === 'layered') {
+        const x = w.exportOf(id);
+        wav = x.wav;
+        notes.push(`${id}: layered sound, exported as WAV only (${x.channels === 2 ? 'stereo' : 'mono'}, 16-bit, 44,100 Hz); a synth.csv row or patch text cannot hold layers. Limiter at the style's true-peak ceiling ${w.style.truePeakMax} dBTP: ${x.reductionDb > 0 ? `reduced the loudest part by ${x.reductionDb.toFixed(1)} dB` : 'did not need to act'}`);
+      } else wav = w.wavOf(id);
       writeFileSync(file, wav);
       files.push(base(id, file, wav.length, 'wav'));
     }

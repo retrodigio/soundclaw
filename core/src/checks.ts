@@ -3,7 +3,7 @@
 // `work done` on a request refuses while a check fails.
 
 import { SAMPLE_RATE } from './sound.ts';
-import type { Analysis, Samples } from './analysis.ts';
+import { stft, type Analysis, type Samples } from './analysis.ts';
 
 /** The numbers the checks are held to. A project overrides them in project.json under `style`. */
 export interface Style {
@@ -20,6 +20,10 @@ export interface Style {
   silenceMax: number;
   /** The last samples must be this far below the peak, dB, for the sound to count as finished rather than cut. */
   tailFloorDb: number;
+  /** The 2-5 kHz band's level (dBFS, RMS of the band) above which a stretch of the sound counts as harsh... */
+  harshLimitDb: number;
+  /** ...when it lasts at least this long (ms). */
+  harshMinMs: number;
 }
 
 export const DEFAULT_STYLE: Style = {
@@ -30,6 +34,8 @@ export const DEFAULT_STYLE: Style = {
   clickMax: 0.02,
   silenceMax: 0.05,
   tailFloorDb: -60,
+  harshLimitDb: -20,
+  harshMinMs: 80,
 };
 
 /** The style keys and what they mean (for docs and errors). */
@@ -48,8 +54,8 @@ export function resolveStyle(given: unknown): Style {
   return style;
 }
 
-export type CheckName = 'clip' | 'loudness' | 'dc' | 'click' | 'tail';
-export const CHECK_NAMES: readonly CheckName[] = ['clip', 'loudness', 'dc', 'click', 'tail'];
+export type CheckName = 'clip' | 'loudness' | 'dc' | 'click' | 'tail' | 'harsh';
+export const CHECK_NAMES: readonly CheckName[] = ['clip', 'loudness', 'dc', 'click', 'tail', 'harsh'];
 
 export interface CheckRange {
   /** Seconds. */
@@ -74,7 +80,7 @@ const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 const f1 = (v: number): string => (Number.isFinite(v) ? v.toFixed(1) : v > 0 ? 'inf' : '-inf');
 const sec = (n: number): number => Math.round((n / SAMPLE_RATE) * 10000) / 10000;
 
-/** Runs of samples at or above full scale, merged when within 1 ms, as time ranges. */
+/** Runs of samples at or above full scale (in any channel), merged when within 1 ms, as time ranges. */
 function fullScaleRanges(x: Samples): CheckRange[] {
   const out: CheckRange[] = [];
   let start = -1, last = -1;
@@ -93,7 +99,41 @@ function fullScaleRanges(x: Samples): CheckRange[] {
   return out;
 }
 
-export function runChecks(x: Samples, a: Analysis, style: Style = DEFAULT_STYLE): CheckResult[] {
+const HARSH_LO = 2000;
+const HARSH_HI = 5000;
+
+/** The 2-5 kHz band's level per STFT frame (dBFS RMS of the band content: a full-scale sine reads -3). */
+export function harshBand(x: Samples): { times: Float64Array; db: Float64Array } {
+  const s = stft(x, 1024, 256);
+  const lo = Math.ceil((HARSH_LO * s.size) / SAMPLE_RATE);
+  const hi = Math.floor((HARSH_HI * s.size) / SAMPLE_RATE);
+  const db = new Float64Array(s.mags.length);
+  s.mags.forEach((m, f) => {
+    let e = 0;
+    for (let k = lo; k <= hi; k++) e += m[k]! * m[k]!;
+    // amplitude-normalised Hann magnitudes: a sine's energy spreads over 1.5 bins of 2x amplitude squared
+    const ms = e / 3;
+    db[f] = ms > 1e-12 ? (10 * Math.log(ms)) / Math.LN10 : -120;
+  });
+  return { times: s.times, db };
+}
+
+export function runChecks(input: Samples | readonly Samples[], a: Analysis, style: Style = DEFAULT_STYLE): CheckResult[] {
+  const chs = Array.isArray(input) ? (input as readonly Samples[]) : [input as Samples];
+  let x: Samples = chs[0]!;
+  let mix: Samples = chs[0]!;
+  if (chs.length > 1) {
+    const lvl = new Float32Array(x.length);
+    const avg = new Float32Array(x.length);
+    for (let i = 0; i < x.length; i++) {
+      let big = 0, sum = 0;
+      for (const c of chs) { big = Math.max(big, Math.abs(c[i]!)); sum += c[i]!; }
+      lvl[i] = big;
+      avg[i] = sum / chs.length;
+    }
+    x = lvl;
+    mix = avg;
+  }
   const out: CheckResult[] = [];
   const d = a.duration;
 
@@ -140,6 +180,7 @@ export function runChecks(x: Samples, a: Analysis, style: Style = DEFAULT_STYLE)
   {
     const start = x.length ? Math.abs(x[0]!) : 0;
     const end = x.length ? Math.abs(x[x.length - 1]!) : 0;
+    // (for two channels x holds the larger of the two at each sample, so these are the larger channel's levels)
     const ranges: CheckRange[] = [];
     if (start > style.clickMax) ranges.push({ from: 0, to: 0.001, note: `starts at level ${start.toFixed(3)}` });
     if (end > style.clickMax) ranges.push({ from: Math.round(Math.max(0, d - 0.001) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `ends at level ${end.toFixed(3)}` });
@@ -172,6 +213,36 @@ export function runChecks(x: Samples, a: Analysis, style: Style = DEFAULT_STYLE)
       name: 'tail', pass: !ranges.length, score: clamp01(1 - penalty),
       value: a.silent ? 'silent' : `silence ${Math.round(a.leadingSilence * 1000)} ms before, ${Math.round(a.trailingSilence * 1000)} ms after; ends ${Number.isFinite(a.endLevelDb) ? `${f1(a.endLevelDb)} dB re peak` : 'at zero'}`,
       threshold: `silence at most ${Math.round(style.silenceMax * 1000)} ms; ends below ${f1(style.tailFloorDb)} dB re peak`, ranges,
+    });
+  }
+  // harsh: sustained 2-5 kHz energy
+  {
+    const { times, db } = harshBand(mix);
+    const frames = db.length;
+    const hopMs = (256 / SAMPLE_RATE) * 1000;
+    const need = Math.max(1, Math.ceil(style.harshMinMs / hopMs));
+    // the level that holds for at least harshMinMs: the best (over time) of the least level in a window of `need` frames
+    let sustained = -120;
+    for (let f = 0; f + need <= frames; f++) {
+      let lo = Infinity;
+      for (let k = f; k < f + need; k++) lo = Math.min(lo, db[k]!);
+      if (lo > sustained) sustained = lo;
+    }
+    const ranges: CheckRange[] = [];
+    let start = -1;
+    for (let f = 0; f <= frames; f++) {
+      const over = f < frames && db[f]! > style.harshLimitDb;
+      if (over && start < 0) start = f;
+      if (!over && start >= 0) {
+        if (f - start >= need) ranges.push({ from: Math.round(Math.max(0, times[start]! - 512 / SAMPLE_RATE) * 10000) / 10000, to: Math.round(Math.min(d, times[f - 1]! + 512 / SAMPLE_RATE) * 10000) / 10000, note: `2-5 kHz band above ${f1(style.harshLimitDb)} dBFS for ${Math.round((f - start) * hopMs)} ms` });
+        start = -1;
+      }
+    }
+    const over = sustained - style.harshLimitDb;
+    out.push({
+      name: 'harsh', pass: !ranges.length && over <= 0, score: clamp01(1 - Math.max(0, over) / 12),
+      value: `sustained 2-5 kHz band ${f1(sustained)} dBFS${ranges.length ? `, ${ranges.length} stretch${ranges.length === 1 ? '' : 'es'} over` : ''}`,
+      threshold: `at most ${f1(style.harshLimitDb)} dBFS for ${Math.round(style.harshMinMs)} ms`, ranges: ranges.slice(0, 12),
     });
   }
   return out;

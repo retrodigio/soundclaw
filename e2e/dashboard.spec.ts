@@ -284,7 +284,7 @@ test('a classic card shows its 25 parameters read-only, a waveform and a spectro
   const failing = [...cli.out.matchAll(/^ {2}(\w+) +FAIL/gm)].map((m) => m[1]).join(',');
   expect(failing).not.toBe('');
   await expect(zap.getByTestId('check-zap')).toHaveAttribute('data-failing', failing);
-  await expect(zap.getByTestId('check-zap')).toHaveAttribute('title', /^checks: \d\/5 pass; failing: /);
+  await expect(zap.getByTestId('check-zap')).toHaveAttribute('title', /^checks: \d\/6 pass; failing: /);
 
   // The agent changes the sound: the card, the badge and the thumbnail follow.
   await agent.cli(['run', agent.dir, '-e', 'sound set beep volume=0.6']);

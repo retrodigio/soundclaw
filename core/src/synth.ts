@@ -1,0 +1,686 @@
+// The layered voice's renderer. Pure functions over typed arrays, deterministic like the rest of
+// the renderer: nothing here uses Math.sin, cos, tan, exp, log or pow (their last digit may differ
+// between platforms). The sine is `sineCycles`, 2^x and log2 are built from bits and series
+// (mathx.ts), the filter coefficient uses an fdlibm sine; everything else is + - * / sqrt floor
+// round, which IEEE 754 fixes exactly. So Node and the browser render the same bytes.
+
+import { renderClassic } from './classic.ts';
+import {
+  BUILTIN_TABLES, MAX_DURATION, audibleLayers, isStereo, layerPatch, parseTable,
+  type Env, type Fx, type Layer, type LayeredSound,
+} from './layered.ts';
+import { TAU, exp2, log2, sineCycles, sinRad, tanPi } from './mathx.ts';
+import { hashText } from './generators.ts';
+import { SAMPLE_RATE } from './sound.ts';
+
+const SR = SAMPLE_RATE;
+
+/** An imported sample, as mono 44,100 Hz-independent data: the renderer resamples it. */
+export interface SampleData {
+  rate: number;
+  data: Float32Array;
+}
+
+/** Where a sample layer finds its audio. The renderer never reads files. */
+export interface SampleBank {
+  get(name: string): SampleData | undefined;
+  /** The SHA-256 of the sample's bytes (part of the render key), or undefined when it is not there. */
+  hash(name: string): string | undefined;
+}
+
+// ---- envelopes --------------------------------------------------------------------------------------
+
+type Reader = (i: number) => number;
+
+const EXP_STEEP = 8;
+const EXP_NORM = 1 - 1 / 256; // 1 - 2^-8
+
+/** The value a segment from (value a) to (value b) has at u in [0, 1]. */
+export function curveValue(a: number, b: number, u: number, curve: Env[number]['curve']): number {
+  switch (curve) {
+    case 'hold': return a;
+    case 'ease': return a + (b - a) * (u * u * (3 - 2 * u));
+    case 'exp':
+      // Geometric between two values of one sign (equal steps of musical pitch, say); otherwise the fast-then-slow fall of a decay.
+      if ((a > 0 && b > 0) || (a < 0 && b < 0)) return a * exp2(u * log2(b / a));
+      return a + (b - a) * ((1 - exp2(-EXP_STEEP * u)) / EXP_NORM);
+    default: return a + (b - a) * u;
+  }
+}
+
+/** An envelope's value at a time in seconds (before the first point it is the first value, after the last, the last). */
+export function envAt(e: Env, t: number): number {
+  if (t <= e[0]!.t) return e[0]!.v;
+  for (let k = 0; k < e.length - 1; k++) {
+    const a = e[k]!, b = e[k + 1]!;
+    if (t < b.t) return curveValue(a.v, b.v, (t - a.t) / (b.t - a.t), b.curve);
+  }
+  return e[e.length - 1]!.v;
+}
+
+function envReader(e: Env): Reader {
+  const n = e.length;
+  let k = 0;
+  return (i) => {
+    const t = i / SR;
+    if (t <= e[0]!.t) return e[0]!.v;
+    if (t < e[k]!.t) k = 0;
+    while (k < n - 1 && t >= e[k + 1]!.t) k++;
+    if (k >= n - 1) return e[n - 1]!.v;
+    const a = e[k]!, b = e[k + 1]!;
+    return curveValue(a.v, b.v, (t - a.t) / (b.t - a.t), b.curve);
+  };
+}
+
+function param(p: Record<string, number | string>, envs: Record<string, Env>, name: string): Reader {
+  const e = envs[name];
+  if (e) return envReader(e);
+  const v = p[name] as number;
+  return () => v;
+}
+
+// ---- noise --------------------------------------------------------------------------------------------
+
+class Noise {
+  private x: number;
+  constructor(seed: number) {
+    this.x = (seed >>> 0) | 0;
+    if (this.x === 0) this.x = 0x2545f491;
+  }
+  /** White noise in [-1, 1). */
+  next(): number {
+    let x = this.x;
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    this.x = x;
+    return (x >>> 0) / 2147483648 - 1;
+  }
+}
+
+/** The seed a layer's noise starts from. */
+export function layerSeed(s: LayeredSound, l: Layer): number {
+  return l.p.seed !== undefined ? (l.p.seed as number) : hashText(`${s.seed}:${l.salt}`);
+}
+
+// ---- wavetables ---------------------------------------------------------------------------------------
+
+const HARMONICS: Record<(typeof BUILTIN_TABLES)[number], number[]> = {
+  organ: [1, 0.5, 0.33, 0.25, 0.2],
+  bell: [1, 0, 0.5, 0, 0, 0.3, 0, 0, 0.2],
+  reed: [1, 0.8, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
+  hollow: [1, 0, 0.33, 0, 0.2, 0, 0.14],
+};
+const tableCache = new Map<string, Float64Array>();
+
+export function wavetable(spec: string): Float64Array {
+  let t = tableCache.get(spec);
+  if (t) return t;
+  const parsed = parseTable(spec);
+  if (typeof parsed === 'string') {
+    t = new Float64Array(64);
+    HARMONICS[parsed as keyof typeof HARMONICS].forEach((a, h) => {
+      for (let j = 0; j < 64; j++) t![j] = t![j]! + a * sineCycles(((h + 1) * j) / 64);
+    });
+    let peak = 0;
+    for (const v of t) peak = Math.max(peak, Math.abs(v));
+    for (let j = 0; j < 64; j++) t[j] = t[j]! / peak;
+  } else t = Float64Array.from(parsed);
+  tableCache.set(spec, t);
+  return t;
+}
+
+// ---- sources ------------------------------------------------------------------------------------------
+
+const frac = (x: number): number => x - Math.floor(x);
+
+function renderOsc(l: Layer, seed: number): Float64Array {
+  const n = Math.round((l.p.dur as number) * SR);
+  const out = new Float64Array(n);
+  const wave = l.p.wave as string;
+  const freq = param(l.p, l.envs, 'freq');
+  const duty = param(l.p, l.envs, 'duty');
+  let acc = 0;
+  if (wave === 'white' || wave === 'pink' || wave === 'brown') {
+    const rng = new Noise(seed);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, last = 0;
+    for (let i = 0; i < n; i++) {
+      const w = rng.next();
+      if (wave === 'white') out[i] = w;
+      else if (wave === 'pink') {
+        b0 = 0.99886 * b0 + w * 0.0555179;
+        b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.969 * b2 + w * 0.153852;
+        b3 = 0.8665 * b3 + w * 0.3104856;
+        b4 = 0.55 * b4 + w * 0.5329522;
+        b5 = -0.7616 * b5 - w * 0.016898;
+        out[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+        b6 = w * 0.115926;
+      } else {
+        last = (last + 0.02 * w) / 1.02;
+        out[i] = last * 3.5;
+      }
+    }
+    return out;
+  }
+  if (wave === 'metal') {
+    // A 15-bit shift register with the short feedback tap: a 93-step pattern, so the noise has a pitch.
+    const rng = new Noise(seed);
+    let s = 1 + Math.floor((rng.next() + 1) * 16383);
+    let v = 1;
+    for (let i = 0; i < n; i++) {
+      out[i] = v;
+      acc += Math.min(4, (freq(i) * 93) / SR);
+      while (acc >= 1) {
+        acc -= 1;
+        const bit = (s ^ (s >> 6)) & 1;
+        s = (s >> 1) | (bit << 14);
+        v = s & 1 ? 1 : -1;
+      }
+    }
+    return out;
+  }
+  const table = wave === 'wavetable' ? wavetable(l.p.table as string) : null;
+  for (let i = 0; i < n; i++) {
+    const ph = frac(acc);
+    acc += freq(i) / SR;
+    switch (wave) {
+      case 'square': out[i] = ph < duty(i) ? 1 : -1; break;
+      case 'saw': out[i] = 2 * frac(ph + 0.5) - 1; break;
+      case 'triangle': out[i] = ph < 0.25 ? 4 * ph : ph < 0.75 ? 2 - 4 * ph : 4 * ph - 4; break;
+      case 'pulse': {
+        const d = duty(i);
+        out[i] = ((ph < d ? 1 : 0) - d) / (d > 0.5 ? d : 1 - d);
+        break;
+      }
+      case 'wavetable': {
+        const m = table!.length;
+        const pos = ph * m;
+        const i0 = Math.floor(pos);
+        const f = pos - i0;
+        out[i] = table![i0]! * (1 - f) + table![(i0 + 1) % m]! * f;
+        break;
+      }
+      default: out[i] = sineCycles(ph);
+    }
+  }
+  return out;
+}
+
+function renderFm(l: Layer): Float64Array {
+  const n = Math.round((l.p.dur as number) * SR);
+  const out = new Float64Array(n);
+  const ops = l.p.ops as number;
+  const algo = l.p.algo as string;
+  const freq = param(l.p, l.envs, 'freq');
+  const ratio = [1, 2, 3, 4].map((k) => l.p[`ratio${k}`] as number);
+  const index = [0, 2, 3, 4].map((k) => (k ? param(l.p, l.envs, `index${k}`) : () => 0));
+  const level = [1, 2, 3, 4].map((k) => param(l.p, l.envs, `level${k}`));
+  const ph = [0, 0, 0, 0];
+  const o = [0, 0, 0, 0];
+  const carriers = algo === 'chain' || algo === 'fan' ? 1 : algo === 'pairs' ? (ops >= 3 ? 2 : 1) : ops;
+  for (let i = 0; i < n; i++) {
+    const idx = [0, index[1]!(i), index[2]!(i), index[3]!(i)];
+    if (algo === 'chain') {
+      let m = 0;
+      for (let k = ops - 1; k >= 0; k--) {
+        o[k] = sineCycles(ph[k]! + m / TAU);
+        m = k > 0 ? idx[k]! * o[k]! : 0;
+      }
+      out[i] = (level[0]!(i) * o[0]!) / carriers;
+    } else if (algo === 'fan') {
+      let m = 0;
+      for (let k = 1; k < ops; k++) m += idx[k]! * sineCycles(ph[k]!);
+      out[i] = (level[0]!(i) * sineCycles(ph[0]! + m / TAU)) / carriers;
+    } else if (algo === 'pairs') {
+      const a = sineCycles(ph[0]! + (ops >= 2 ? (idx[1]! * sineCycles(ph[1]!)) / TAU : 0));
+      let sum = level[0]!(i) * a;
+      if (ops >= 3) sum += level[2]!(i) * sineCycles(ph[2]! + (ops >= 4 ? (idx[3]! * sineCycles(ph[3]!)) / TAU : 0));
+      out[i] = sum / carriers;
+    } else {
+      let sum = 0;
+      for (let k = 0; k < ops; k++) sum += level[k]!(i) * sineCycles(ph[k]!);
+      out[i] = sum / carriers;
+    }
+    const f = freq(i);
+    for (let k = 0; k < ops; k++) ph[k] = ph[k]! + (f * ratio[k]!) / SR;
+  }
+  return out;
+}
+
+function renderKs(l: Layer, seed: number): Float64Array {
+  const n = Math.round((l.p.dur as number) * SR);
+  const out = new Float64Array(n);
+  const f = l.p.freq as number;
+  const period = SR / f;
+  const L = Math.floor(period - 1);
+  const dp = period - 0.5 - L; // the allpass supplies this fraction of a sample, in [0.5, 1.5)
+  const c = (1 - dp) / (1 + dp);
+  const g = exp2(-9.965784284662087 / (f * (l.p.decay as number))); // 0.001^(period / decay)
+  const M = L + 2;
+  const d = new Float64Array(M);
+  const rng = new Noise(seed);
+  const a = 0.05 + 0.95 * (l.p.bright as number);
+  let e = 0;
+  let mean = 0;
+  for (let k = 0; k < M; k++) { e += a * (rng.next() - e); d[k] = e; mean += e; }
+  mean /= M;
+  let peak = 0;
+  for (let k = 0; k < M; k++) { d[k] = d[k]! - mean; peak = Math.max(peak, Math.abs(d[k]!)); }
+  if (peak > 0) for (let k = 0; k < M; k++) d[k] = (d[k]! / peak) * 0.9;
+  let x1 = 0, y1 = 0;
+  for (let i = 0; i < n; i++) {
+    const s0 = d[(((i - L) % M) + M) % M]!;
+    const s1 = d[(((i - L - 1) % M) + M) % M]!;
+    const avg = 0.5 * (s0 + s1);
+    const ap = c * avg + x1 - c * y1;
+    x1 = avg;
+    y1 = ap;
+    const u = g * ap;
+    d[i % M] = u;
+    out[i] = u;
+  }
+  return out;
+}
+
+function renderSample(l: Layer, bank: SampleBank | undefined): Float64Array {
+  const name = l.p.sample as string;
+  const smp = name ? bank?.get(name) : undefined;
+  if (!smp) return new Float64Array(Math.round(0.1 * SR)); // a missing sample is silence; the server refuses to write a batch that names one
+  const rate = smp.rate / SR;
+  const len = smp.data.length;
+  const i0 = Math.min(len, Math.floor((l.p.start as number) * smp.rate));
+  const endSec = l.p.end as number;
+  const i1 = endSec > 0 ? Math.min(len, Math.floor(endSec * smp.rate)) : len;
+  if (i1 - i0 < 2) return new Float64Array(Math.round(0.01 * SR));
+  const reverse = l.p.reverse === 1;
+  const pitch = param(l.p, l.envs, 'pitch');
+  const cap = MAX_DURATION * SR;
+  const out = new Float64Array(Math.min(cap, Math.ceil(((i1 - i0) / rate) * 4) + 4)); // slow enough pitches are cut at the cap
+  let pos = 0;
+  const span = i1 - i0 - 1;
+  let n = 0;
+  while (pos <= span && n < out.length) {
+    const j = Math.floor(pos);
+    const fr = pos - j;
+    const a = smp.data[reverse ? i1 - 1 - j : i0 + j]!;
+    const b = smp.data[reverse ? i1 - 1 - Math.min(span, j + 1) : i0 + Math.min(span, j + 1)]!;
+    out[n++] = a * (1 - fr) + b * fr;
+    pos += rate * exp2(pitch(n) / 12);
+  }
+  return out.slice(0, n);
+}
+
+/** One layer's source as doubles. */
+function renderSource(s: LayeredSound, l: Layer, bank: SampleBank | undefined): Float64Array {
+  switch (l.kind) {
+    case 'classic': return renderClassic(layerPatch(l));
+    case 'osc': return renderOsc(l, layerSeed(s, l));
+    case 'fm': return renderFm(l);
+    case 'ks': return renderKs(l, layerSeed(s, l));
+    case 'sample': return renderSample(l, bank);
+  }
+}
+
+// ---- the state-variable filter --------------------------------------------------------------------------
+
+/** A zero-delay-feedback state-variable filter (Zavalishin): low-pass, high-pass, band-pass (peak gain 1) and notch from one core. At the cutoff a low-pass has gain Q. */
+function runFilter(buf: Float64Array, type: string, cut: Reader, qr: Reader, dynamic: boolean): void {
+  let ic1 = 0, ic2 = 0;
+  let a1 = 0, a2 = 0, a3 = 0, k = 1;
+  const n = buf.length;
+  for (let i = 0; i < n; i++) {
+    if (i === 0 || (dynamic && (i & 7) === 0)) {
+      const fc = Math.min(Math.max(cut(i), 20), 0.45 * SR);
+      const g = tanPi(fc / SR);
+      k = 1 / qr(i);
+      a1 = 1 / (1 + g * (g + k));
+      a2 = g * a1;
+      a3 = g * a2;
+    }
+    const x = buf[i]!;
+    const v3 = x - ic2;
+    const v1 = a1 * ic1 + a2 * v3;
+    const v2 = ic2 + a2 * ic1 + a3 * v3;
+    ic1 = 2 * v1 - ic1;
+    ic2 = 2 * v2 - ic2;
+    buf[i] = type === 'lp' ? v2 : type === 'hp' ? x - k * v1 - v2 : type === 'bp' ? k * v1 : x - k * v1;
+  }
+}
+
+// ---- effects ---------------------------------------------------------------------------------------------
+
+const wetDry = (d: number, w: number, m: number): number => (m >= 1 ? w : m <= 0 ? d : d + (w - d) * m);
+
+function shape(kind: string, v: number): number {
+  switch (kind) {
+    case 'hard': return v > 1 ? 1 : v < -1 ? -1 : v;
+    case 'fold': {
+      let w = v + 1;
+      w -= 4 * Math.floor(w / 4);
+      return w < 2 ? w - 1 : 3 - w;
+    }
+    case 'cubic': {
+      const c = v > 1 ? 1 : v < -1 ? -1 : v;
+      return 1.5 * (c - (c * c * c) / 3);
+    }
+    default: return v / (1 + Math.abs(v));
+  }
+}
+
+const COMBS = [1116, 1188, 1277, 1356];
+const ALLPASS = [556, 441];
+
+/** The seconds an effect keeps sounding after its input stops (so the sound is long enough to hold it). */
+export function fxTail(f: Fx): number {
+  const mixOn = f.envs.mix !== undefined || (f.p.mix as number) > 0;
+  if (f.kind === 'delay' && mixOn) {
+    let taps = 1;
+    let level = f.p.feedback as number;
+    if (f.envs.feedback) level = 0.9;
+    while (level > 0.001 && taps < 12) { level *= f.envs.feedback ? 0.9 : (f.p.feedback as number); taps++; }
+    return (f.p.time as number) * taps;
+  }
+  if (f.kind === 'reverb' && mixOn) return 0.3 + 2.2 * (f.p.size as number);
+  return 0;
+}
+
+function runFx(buf: Float64Array, f: Fx, channel: number): void {
+  const n = buf.length;
+  const P = (name: string): Reader => param(f.p, f.envs, name);
+  const dynamic = (name: string): boolean => f.envs[name] !== undefined;
+  switch (f.kind) {
+    case 'filter':
+      runFilter(buf, f.p.type as string, P('cutoff'), P('q'), dynamic('cutoff') || dynamic('q'));
+      return;
+    case 'distort': {
+      const drive = P('drive'), mix = P('mix');
+      const kind = f.p.shape as string;
+      for (let i = 0; i < n; i++) buf[i] = wetDry(buf[i]!, shape(kind, buf[i]! * drive(i)), mix(i));
+      return;
+    }
+    case 'bitcrush': {
+      const step = exp2(1 - (f.p.bits as number));
+      const rate = P('rate'), mix = P('mix');
+      let acc = 1, held = 0;
+      for (let i = 0; i < n; i++) {
+        acc += rate(i) / SR;
+        if (acc >= 1) { acc -= 1; held = Math.round(buf[i]! / step) * step; }
+        buf[i] = wetDry(buf[i]!, held, mix(i));
+      }
+      return;
+    }
+    case 'chorus': {
+      const size = 4096;
+      const line = new Float64Array(size);
+      const depth = P('depth'), mix = P('mix');
+      const rate = f.p.rate as number;
+      const base = ((f.p.delay as number) / 1000) * SR;
+      for (let i = 0; i < n; i++) {
+        line[i % size] = buf[i]!;
+        const d = base + ((depth(i) / 1000) * SR) * sineCycles((i / SR) * rate);
+        const pos = i - d;
+        const j = Math.floor(pos);
+        const fr = pos - j;
+        const a = j >= 0 ? line[((j % size) + size) % size]! : 0;
+        const b = j + 1 >= 0 ? line[(((j + 1) % size) + size) % size]! : 0;
+        buf[i] = wetDry(buf[i]!, a * (1 - fr) + b * fr, mix(i));
+      }
+      return;
+    }
+    case 'delay': {
+      const len = Math.max(1, Math.round((f.p.time as number) * SR));
+      const line = new Float64Array(len);
+      const fb = P('feedback'), mix = P('mix');
+      for (let i = 0; i < n; i++) {
+        const wet = line[i % len]!;
+        const dry = buf[i]!;
+        line[i % len] = dry + wet * fb(i);
+        buf[i] = wetDry(dry, wet, mix(i));
+      }
+      return;
+    }
+    case 'reverb': {
+      const size = f.p.size as number;
+      const fb = 0.7 + 0.28 * size;
+      const damp = 0.4 * (f.p.damp as number);
+      const mix = P('mix');
+      const spread = channel * 23;
+      const inGain = 0.5 * Math.sqrt(1 - fb * fb);
+      const combs = COMBS.map((c) => ({ line: new Float64Array(c + spread), pos: 0, filt: 0 }));
+      const aps = ALLPASS.map((c) => ({ line: new Float64Array(c + spread), pos: 0 }));
+      for (let i = 0; i < n; i++) {
+        const dry = buf[i]!;
+        const x = dry * inGain;
+        let sum = 0;
+        for (const c of combs) {
+          const y = c.line[c.pos]!;
+          c.filt = y * (1 - damp) + c.filt * damp;
+          c.line[c.pos] = x + c.filt * fb;
+          if (++c.pos === c.line.length) c.pos = 0;
+          sum += y;
+        }
+        for (const a of aps) {
+          const y = a.line[a.pos]!;
+          a.line[a.pos] = sum + y * 0.5;
+          sum = y - sum;
+          if (++a.pos === a.line.length) a.pos = 0;
+        }
+        buf[i] = wetDry(dry, sum, mix(i));
+      }
+      return;
+    }
+  }
+}
+
+// ---- layers and the sound ----------------------------------------------------------------------------------
+
+const FADE = 88; // 2 ms
+
+interface Built {
+  layer: Layer;
+  index: number;
+  offset: number;
+  buf: Float64Array;
+  /** Samples of the layer's source (the buffer is longer by the room its effects' tails may need). */
+  src: number;
+}
+
+function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined): { buf: Float64Array; src: number } {
+  const src = renderSource(s, l, bank);
+  let tail = 0;
+  for (const f of l.fx) tail += fxTail(f);
+  const tailSamples = Math.min(MAX_DURATION * SR, Math.round(tail * SR));
+  const buf = new Float64Array(src.length + tailSamples);
+  buf.set(src);
+  const type = l.p.filter as string;
+  if (type !== 'off') runFilter(buf, type, param(l.p, l.envs, 'cutoff'), param(l.p, l.envs, 'q'), l.envs.cutoff !== undefined || l.envs.q !== undefined);
+  if (l.amp) {
+    const r = envReader(l.amp);
+    for (let i = 0; i < buf.length; i++) buf[i] = buf[i]! * r(i);
+  } else if (l.kind !== 'classic') {
+    // No amplitude envelope: a 2 ms fade at both ends of the source, so a layer never clicks.
+    const len = src.length;
+    for (let i = 0; i < Math.min(FADE, len); i++) buf[i] = buf[i]! * (i / FADE);
+    for (let i = Math.max(0, len - FADE); i < len; i++) buf[i] = buf[i]! * ((len - 1 - i) / FADE);
+  }
+  for (const f of l.fx) runFx(buf, f, 0);
+  if (l.envs.gain) {
+    const r = envReader(l.envs.gain);
+    for (let i = 0; i < buf.length; i++) buf[i] = buf[i]! * r(i);
+  } else if (l.p.gain !== 1) {
+    const g = l.p.gain as number;
+    for (let i = 0; i < buf.length; i++) buf[i] = buf[i]! * g;
+  }
+  return { buf, src: src.length };
+}
+
+/** Constant-power pan gains for a pan position in -1..1. */
+export function panGains(pan: number): [number, number] {
+  const theta = ((pan + 1) * Math.PI) / 4;
+  return [sinRad(theta + Math.PI / 2), sinRad(theta)];
+}
+
+/** How many samples a layered sound lasts. */
+function totalLength(s: LayeredSound, built: Built[]): number {
+  if (s.duration !== null) return Math.round(s.duration * SR);
+  let n = built.length ? 1 : 441;
+  for (const b of built) n = Math.max(n, b.offset + b.buf.length);
+  let tail = 0;
+  for (const f of s.master) tail += fxTail(f);
+  return Math.min(MAX_DURATION * SR, n + Math.round(tail * SR));
+}
+
+function buildAll(s: LayeredSound, bank: SampleBank | undefined): Built[] {
+  return audibleLayers(s).map((layer) => ({ layer, index: s.layers.indexOf(layer), offset: Math.round((layer.p.offset as number) * SR), ...buildLayer(s, layer, bank) }));
+}
+
+/** A built layer placed in the sound's timeline: one array per channel, pan applied, `n` samples long. */
+function place(b: Built, n: number, stereo: boolean): Float64Array[] {
+  const chans = stereo ? [new Float64Array(n), new Float64Array(n)] : [new Float64Array(n)];
+  const panEnv = b.layer.envs.pan ? envReader(b.layer.envs.pan) : null;
+  const pan = b.layer.p.pan as number;
+  const [gl, gr] = panGains(pan);
+  for (let i = 0; i < b.buf.length; i++) {
+    const j = b.offset + i;
+    if (j >= n) break;
+    const v = b.buf[i]!;
+    if (!stereo) chans[0]![j] = v;
+    else if (panEnv) {
+      const [l, r] = panGains(panEnv(i));
+      chans[0]![j] = v * l;
+      chans[1]![j] = v * r;
+    } else {
+      chans[0]![j] = v * gl;
+      chans[1]![j] = v * gr;
+    }
+  }
+  return chans;
+}
+
+/** The sound's channels: one when no layer is panned, else two (left, right). Float32. */
+export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[] {
+  const built = buildAll(s, bank);
+  const stereo = isStereo(s);
+  const n = totalLength(s, built);
+  const mix = stereo ? [new Float64Array(n), new Float64Array(n)] : [new Float64Array(n)];
+  for (const b of built) {
+    const placed = place(b, n, stereo);
+    for (let c = 0; c < mix.length; c++) for (let i = 0; i < n; i++) mix[c]![i] = mix[c]![i]! + placed[c]![i]!;
+  }
+  mix.forEach((ch, c) => {
+    if (s.gain !== 1) for (let i = 0; i < n; i++) ch[i] = ch[i]! * s.gain;
+    for (const f of s.master) runFx(ch, f, c);
+  });
+  let end = n;
+  if (s.duration === null) {
+    // An automatic length ends where the sound has died away: the last sample within 63 dB of the peak, but never inside a layer's own source. (The effects' tails only said how much room to leave.)
+    let peak = 0;
+    for (const ch of mix) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(ch[i]!));
+    const floor = peak * 0.0007079457843841379;
+    let last = 0;
+    for (const ch of mix) for (let i = n - 1; i > last; i--) if (Math.abs(ch[i]!) >= floor) { last = i; break; }
+    let floorEnd = 1;
+    for (const b of built) floorEnd = Math.max(floorEnd, b.offset + b.src);
+    end = Math.max(1, Math.min(n, Math.max(last + 1, floorEnd)));
+  }
+  return mix.map((ch) => Float32Array.from(ch.subarray(0, end)));
+}
+
+export interface LayerPart {
+  index: number;
+  layer: Layer;
+  /** The layer as it enters the sum (filter, envelope, effects, gain and pan applied), placed in the sound's timeline. */
+  channels: Float32Array[];
+}
+
+/** Each sounding layer on its own, before the master chain: what the `layers` view draws. */
+export function renderParts(s: LayeredSound, bank?: SampleBank): { length: number; stereo: boolean; parts: LayerPart[] } {
+  const built = buildAll(s, bank);
+  const stereo = isStereo(s);
+  const length = renderLayered(s, bank)[0]!.length;
+  return { length, stereo, parts: built.map((b) => ({ index: b.index, layer: b.layer, channels: place(b, length, stereo).map((c) => Float32Array.from(c)) })) };
+}
+
+export function layeredChannelCount(s: LayeredSound): number {
+  return isStereo(s) ? 2 : 1;
+}
+
+// ---- the limiter (applied on export) --------------------------------------------------------------------------
+
+const LIM_WINDOW = 48; // about 1 ms of look-ahead and smoothing
+const LIM_MARGIN = 0.9885; // 0.1 dB inside the ceiling, for the difference between interpolators
+const LIM_HALF = 24;
+let limKernel: Float64Array[] | null = null;
+
+function kernel(): Float64Array[] {
+  if (limKernel) return limKernel;
+  limKernel = [];
+  for (let ph = 1; ph <= 3; ph++) {
+    const d = ph / 4;
+    const h = new Float64Array(2 * LIM_HALF);
+    let sum = 0;
+    for (let k = -LIM_HALF + 1; k <= LIM_HALF; k++) {
+      const x = k - d;
+      const px = Math.PI * x;
+      const sinc = sinRad(px) / px;
+      const u = (x + LIM_HALF) / (2 * LIM_HALF); // 0..1 across the window (Blackman)
+      const w = 0.42 - 0.5 * sinRad(2 * Math.PI * u + Math.PI / 2) + 0.08 * sinRad(4 * Math.PI * u + Math.PI / 2);
+      h[k + LIM_HALF - 1] = sinc * w;
+      sum += sinc * w;
+    }
+    for (let k = 0; k < h.length; k++) h[k] = h[k]! / sum;
+    limKernel.push(h);
+  }
+  return limKernel;
+}
+
+/**
+ * A look-ahead peak limiter: no sample, and no point between samples (4x oversampled), goes
+ * above the ceiling (dBTP, 0.1 dB of margin inside it). Under the ceiling it changes nothing (the
+ * gain is exactly 1). Returns the new channels and the largest gain reduction in dB.
+ */
+export function limitChannels(chans: readonly Float32Array[], ceilingDb: number): { channels: Float32Array[]; reductionDb: number } {
+  const n = chans[0]?.length ?? 0;
+  const ceil = exp2(ceilingDb * 0.16609640474436813) * LIM_MARGIN; // 10^(dB/20)
+  const need = new Float64Array(n).fill(1);
+  const h = kernel();
+  let any = false;
+  for (const x of chans) {
+    for (let i = 0; i < n; i++) {
+      let pk = Math.abs(x[i]!);
+      if (pk * 1 < ceil * 0.5) continue; // far below the ceiling: the interpolated points cannot reach it
+      for (let ph = 0; ph < 3; ph++) {
+        let acc = 0;
+        for (let k = -LIM_HALF + 1; k <= LIM_HALF; k++) {
+          const j = i + k;
+          if (j >= 0 && j < n) acc += x[j]! * h[ph]![k + LIM_HALF - 1]!;
+        }
+        if (Math.abs(acc) > pk) pk = Math.abs(acc);
+      }
+      if (pk > ceil) { const g = ceil / pk; if (g < need[i]!) need[i] = g; any = true; }
+    }
+  }
+  if (!any) return { channels: chans.map((c) => c.slice()), reductionDb: 0 };
+  // M[j] = the least gain needed in [j, j + W - 1]; the gain at i averages M[i - W + 1 .. i], each of which covers i.
+  const W = LIM_WINDOW;
+  const m = new Float64Array(n);
+  for (let j = 0; j < n; j++) {
+    let lo = 1;
+    for (let k = j; k < Math.min(n, j + W); k++) if (need[k]! < lo) lo = need[k]!;
+    m[j] = lo;
+  }
+  const gain = new Float64Array(n);
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    if (i === 0) { for (let k = 0; k < W; k++) sum += m[0]!; } else sum += m[i]! - (i - W >= 0 ? m[i - W]! : m[0]!);
+    gain[i] = sum / W;
+  }
+  let worst = 1;
+  for (let i = 0; i < n; i++) if (gain[i]! < worst) worst = gain[i]!;
+  return {
+    channels: chans.map((x) => { const o = new Float32Array(n); for (let i = 0; i < n; i++) o[i] = x[i]! * gain[i]!; return o; }),
+    reductionDb: worst < 1 ? -20 * (log2(worst) * 0.30102999566398120) : 0,
+  };
+}
+

@@ -2,9 +2,10 @@
 // import them without pulling in any Node code.
 
 import type { Presence } from './await.ts';
+import type { SampleInfo } from './samples.ts';
 import type { Diag, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
 
-export type { Presence };
+export type { Presence, SampleInfo };
 export { HUMAN_RE } from '@soundclaw/core';
 
 /** Everything a page needs to start: sent on connect. */
@@ -12,6 +13,8 @@ export interface Snapshot {
   project: { name: string; dir: string; /** The server user's home folder, so the page can show the folder as ~/…. */ home?: string };
   /** Every sound's document; the page renders them with the same core the agent's renders use. */
   sounds: Sound[];
+  /** The project's imported samples (a sample layer names one; the page fetches the bytes to render it). */
+  samples: SampleInfo[];
   /** What the checks are held to (the card's badge uses the same numbers the CLI does). */
   style: Style;
   /** The whole history tape (undone groups included, with the undo that undid them). */
@@ -34,6 +37,8 @@ export type ServerMessage =
   | { type: 'result'; id: number; ok: true; group: string | null; seq: number | null }
   | { type: 'result'; id: number; ok: false; errors: Diag[] }
   | { type: 'pong' }
+  /** The project's samples changed (a sample was imported). */
+  | { type: 'samples'; samples: SampleInfo[] }
   /** requests.jsonl changed: every request as it stands. */
   | { type: 'requests'; requests: WorkRequest[] }
   /** Who is listening for requests (sent on connect and whenever it changes). */

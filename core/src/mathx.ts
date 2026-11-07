@@ -169,3 +169,66 @@ export function formatG(v: number, prec: number): string {
   }
   return strip(v.toFixed(prec - 1 - exp));
 }
+
+export const TAU = 6.283185307179586;
+
+/** sin(2π·cycles) for any phase, from a Taylor polynomial on [-π/2, π/2] (error below 1e-11). */
+export function sineCycles(cycles: number): number {
+  let p = cycles - Math.floor(cycles); // [0, 1)
+  // Fold into [-1/4, 1/4] cycles using the sine's symmetries.
+  if (p > 0.75) p -= 1;
+  else if (p > 0.25) p = 0.5 - p;
+  const x = p * TAU;
+  const x2 = x * x;
+  return x * (1 + x2 * (-1 / 6 + x2 * (1 / 120 + x2 * (-1 / 5040 + x2 * (1 / 362880 + x2 * (-1 / 39916800 + x2 * (1 / 6227020800 + x2 * (-1 / 1307674368000))))))));
+}
+
+
+const f64 = new Float64Array(1);
+const u32 = new Uint32Array(f64.buffer);
+// Which half of the Float64Array holds the high word depends on the platform's byte order; both common ones are handled.
+const HI = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? 1 : 0;
+
+/** 2^n for a whole n from -1022 to 1023, built from the bits: exact on every platform. */
+export function pow2int(n: number): number {
+  const e = n < -1022 ? -1022 : n > 1023 ? 1023 : n;
+  u32[HI] = (e + 1023) << 20;
+  u32[1 - HI] = 0;
+  return f64[0]!;
+}
+
+const LN2 = 0.6931471805599453;
+
+/** 2^x from + - * / alone (relative error below 1e-12): the same bits on every platform. */
+export function exp2(x: number): number {
+  if (x > 1023) return Infinity;
+  if (x < -1022) return 0;
+  const n = Math.round(x);
+  const y = (x - n) * LN2; // |y| <= 0.347
+  let term = 1;
+  let sum = 1;
+  for (let k = 1; k <= 11; k++) { term = (term * y) / k; sum += term; }
+  return sum * pow2int(n);
+}
+
+/** log2(x) for x > 0, from the bits and an atanh series: the same bits on every platform. */
+export function log2(x: number): number {
+  if (!(x > 0)) return x === 0 ? -Infinity : NaN;
+  f64[0] = x;
+  let e = ((u32[HI]! >>> 20) & 0x7ff) - 1023;
+  u32[HI] = (u32[HI]! & 0x800fffff) | (1023 << 20);
+  let m = f64[0]!; // [1, 2)
+  if (m > 1.4142135623730951) { m /= 2; e += 1; }
+  const z = (m - 1) / (m + 1);
+  const z2 = z * z;
+  let term = z;
+  let sum = 0;
+  for (let k = 1; k <= 19; k += 2) { sum += term / k; term *= z2; }
+  return e + (2 * sum) / LN2;
+}
+
+/** tan(pi * f / fs) for the filters' coefficients (f well below fs / 2). */
+export function tanPi(ratio: number): number {
+  const x = Math.PI * ratio;
+  return sinRad(x) / sinRad(x + Math.PI / 2);
+}

@@ -1,6 +1,6 @@
 // One-line summaries that end every result, so an agent that cannot listen still gets numbers.
 
-import { activeGroups, levels, samplesHash } from '@soundclaw/core';
+import { activeGroups, joinChannels, levels, samplesHash } from '@soundclaw/core';
 import { checkLine } from './ears.ts';
 import { formatHistory, soundLine } from './report.ts';
 import type { Writer } from './writer.ts';
@@ -13,8 +13,8 @@ export function soundSummary(w: Writer, id: string): string {
   if (!w.has(id)) return `${id}: removed`;
   const s = w.sound(id);
   const r = w.render(id);
-  const l = levels(r.samples);
-  return `${soundLine(s)} → ${r.samples.length} samples, peak ${l.peak.toFixed(3)}, rms ${l.rms.toFixed(3)}, hash ${samplesHash(r.samples).slice(0, 12)}\n    ${checkLine(w.measure(id))}`;
+  const l = levels(r.channels.length > 1 ? joinChannels(r.channels) : r.samples);
+  return `${soundLine(s)} → ${r.samples.length} samples${r.channels.length > 1 ? ` × ${r.channels.length} channels` : ''}, peak ${l.peak.toFixed(3)}, rms ${l.rms.toFixed(3)}, hash ${samplesHash(joinChannels(r.channels)).slice(0, 12)}\n    ${checkLine(w.measure(id))}`;
 }
 
 export function historyText(w: Writer, o: { sound?: string; by?: string; limit?: number } = {}): string {

@@ -1,4 +1,4 @@
-// soundclaw: new | run | list | history | changes | render | view | describe | check | import | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
+// soundclaw: new | run | list | history | changes | render | view | describe | check | import | sample | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
 
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -48,6 +48,16 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         sound generate <id> <category|random> [seed=<n>]    a new patch for a classic sound from a category's ranges
         sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change (also: mutate <id> ...)
         sound mark <id> approved|rejected|draft ["note"]
+        sound new <id> voice=layered [preset=<recipe>] [seed=<n>]   up to 8 layers (see docs/commands.md); recipes:
+                                                            footstep ui-click door magic (or a classic category)
+        sound layer-up <id>                                 a classic sound becomes layered (same samples)
+        sound classic <id> on|off                           keep a sound one classic voice (exports as a synth.csv row)
+        sound set <id> duration=<s|auto> gain=<g> seed=<n>  (layered sounds)
+        layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]
+        layer set <id> <n> <param>=<value> ...   layer remove|move|mute|solo <id> <n> [to=<m> | on|off]
+        env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | clear
+        fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb [<param>=<value> ...] [at=<k>]
+        fx set|remove|move <id> [layer=<n>] <k> ...
         undo [group=<g>] [by=<author>]    redo [group=<undo group>] [by=<author>]   (each alone in its batch)
       '-' reads the commands from standard input. --by is the author written on the history:
       agent:<name> or human:<name> (default agent:claude; a bare name means agent:<name>).
@@ -61,22 +71,30 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       peaks, attack, tail, brightness, pitch, onsets), a plain-words description, and the check
       summary on the last line.
   soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
+  soundclaw view <project> <id> layers [--out <file.png>]
   soundclaw view <project> <id> compare <other> [--out <file.png>]
       The agent's ears as a PNG (saved under <project>/.cache/views, or --out) and the numbers:
       wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers),
-      pitch (YIN track over a note grid), compare (two spectrograms and their difference, with
+      pitch (YIN track over a note grid), layers (a layered sound's layers stacked: waveform and
+      spectrogram of each, with their start offsets), compare (two spectrograms and their difference, with
       distance numbers).
   soundclaw describe <project> <id>
       A plain-words summary built only from the measured numbers, then the numbers.
   soundclaw check <project> [<id>...]
-      The checks (clip, loudness, dc, click, tail) with scores, thresholds and the exact time
+      The checks (clip, loudness, dc, click, tail, harsh) with scores, thresholds and the exact time
       ranges flagged. Exit 1 when any fails. Targets come from project.json "style" (default
       -16 LUFS +-1, true peak at most -0.1 dBTP).
   soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
       Make classic sounds from an sfxr synth.csv (one per row; the key column is the id), or from
       one single-patch text (a file or the text itself; --id names it). One undo group.
+  soundclaw sample import <project> <file.wav> [as=<name>]
+  soundclaw sample list <project>
+      Copy a WAV (PCM 8/16/24/32-bit or float, any rate, mixed down to mono, at most 60 s) into
+      <project>/samples/ so a sample layer can name it (layer add <id> sample sample=<name>).
+      The name defaults to the file's name. A name that exists with other content is refused.
   soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
-      Default wav: 16-bit PCM, 44,100 Hz, mono (classic sounds as pre-rendered WAVs, trunc(s*32000)).
+      Default wav: 16-bit PCM, 44,100 Hz (classic sounds as pre-rendered WAVs, trunc(s*32000), mono;
+      layered sounds through a limiter at the style's true-peak ceiling, mono or stereo, WAV only).
       patch: <id>.sfxr single-patch text; csv: one synth.csv. Without ids, all sounds. Default
       folder: <project>/exports/.
   soundclaw changes <project> [--since <command number | time>] [--by human|agent|<author>] [--as <agent>] [--peek]
@@ -189,6 +207,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
   export: [['out', 'format'], []],
   import: [['id', 'by'], []],
+  sample: [['as', 'by'], []],
   request: [['note', 'by', 'tag', 'like'], []],
   reply: [['by'], []],
   cancel: [['by'], []],
@@ -293,10 +312,34 @@ function cmdRender(io: Io, p: Parsed): number {
 function cmdView(io: Io, p: Parsed): number {
   const [dir, id, kind, other, ...extra] = p.pos;
   if (!dir || !id || !kind) throw new UsageError('view: give a project folder, a sound id and wave, spec, pitch or compare <other>');
-  if (!['wave', 'spec', 'pitch', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, compare)`);
+  if (!['wave', 'spec', 'pitch', 'layers', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, compare)`);
   if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound' : `view ${kind}: unexpected '${other}'`);
-  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare', { other, out: one(p, 'out') });
+  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers', { other, out: one(p, 'out') });
   io.out(v.text + '\n');
+  return 0;
+}
+
+/** `sample import <project> <file.wav> [as=<name>]` and `sample list <project>`. */
+function cmdSample(io: Io, p: Parsed): number {
+  const [verb, dir, file, ...extra] = p.pos;
+  if (verb === 'list') {
+    if (!dir || file) throw new UsageError('sample list: give a project folder');
+    const list = wr(io, dir).samples.list();
+    io.out(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz${x.channels > 1 ? `, ${x.channels} channels mixed to mono` : ''}, ${x.bytes} bytes, sha256 ${x.sha256.slice(0, 12)}`).join('\n') + '\n' : 'no samples (sample import <project> <file.wav>)\n');
+    return 0;
+  }
+  if (verb !== 'import' || !dir || !file) throw new UsageError('sample: sample import <project> <file.wav> [as=<name>] | sample list <project>');
+  let as = one(p, 'as');
+  for (const e of extra) {
+    const m = /^as=(.+)$/.exec(e);
+    if (!m) throw new UsageError(`sample import: unexpected '${e}' (as=<name>)`);
+    as = m[1];
+  }
+  assertNoServer(dir, io);
+  const w = wr(io, dir);
+  const r = w.samples.import(file, as);
+  w.samplesChanged();
+  io.out(`${r.created ? 'imported' : 'already in the project:'} sample ${r.info.name}: ${r.info.seconds.toFixed(3)} s, ${r.info.rate} Hz${r.info.channels > 1 ? `, ${r.info.channels} channels mixed to mono` : ''}, sha256 ${r.info.sha256.slice(0, 12)}\nuse it: layer add <sound> sample sample=${r.info.name} [start=<s>] [end=<s>] [pitch=<semitones>] [reverse=1]\n`);
   return 0;
 }
 
@@ -462,6 +505,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'describe': return cmdDescribe(io, parseArgs(rest, [], []));
       case 'check': return cmdCheck(io, parseArgs(rest, [], []));
       case 'import': return cmdImport(io, parseArgs(rest, ...WRITE_OPTS.import!));
+      case 'sample': return cmdSample(io, parseArgs(rest, ...WRITE_OPTS.sample!));
       case 'changes': return cmdChanges(io, parseArgs(rest, ['since', 'by', 'as'], ['peek']));
       case 'export': return cmdExport(io, parseArgs(rest, ...WRITE_OPTS.export!));
       case 'request': return cmdRequest(io, parseArgs(rest, ...WRITE_OPTS.request!));

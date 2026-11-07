@@ -4,13 +4,16 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { floatBytes, floatsFromBytes, renderKey, renderSound, type Sound } from '@soundclaw/core';
+import { channelCount, floatBytes, floatsFromBytes, joinChannels, mixdown, renderChannels, renderKey, splitChannels, type SampleBank, type Sound } from '@soundclaw/core';
 
 const MEMORY_ENTRIES = 64;
 
 export interface Rendered {
   key: string;
+  /** Mono: the samples. Stereo: the mix of the two channels (what views and pitch are measured on). */
   samples: Float32Array;
+  /** The channels: one, or two when a layer is panned. */
+  channels: Float32Array[];
   /** Served from the cache (memory or disk) rather than rendered now. */
   cached: boolean;
 }
@@ -66,16 +69,17 @@ export class RenderCache {
   }
 
   /** The sound's samples: from the cache when its document has been rendered before, else rendered and kept. */
-  render(s: Sound): Rendered {
-    const key = renderKey(s);
+  render(s: Sound, bank?: SampleBank): Rendered {
+    const key = renderKey(s, (n) => bank?.hash(n) ?? 'missing');
     const hit = this.get(key);
     if (hit) {
       this.hits++;
-      return { key, samples: hit, cached: true };
+      const channels = splitChannels(hit, channelCount(s));
+      return { key, samples: mixdown(channels), channels, cached: true };
     }
     this.misses++;
-    const samples = renderSound(s);
-    this.put(key, samples);
-    return { key, samples, cached: false };
+    const channels = renderChannels(s, bank);
+    this.put(key, joinChannels(channels));
+    return { key, samples: mixdown(channels), channels, cached: false };
   }
 }

@@ -5,6 +5,7 @@
 
 import { CLASSIC_FIELDS, formatPatchNamed, makePatch, patchValues, type ClassicPatch } from './classic.ts';
 import { sha256Text } from './sha256.ts';
+import { SOUND_SPECS, cloneLayered, layeredBody, serializeLayered, type LayeredSound } from './layered.ts';
 
 export const SAMPLE_RATE = 44100;
 /** Bump when the renderer's output for the same document changes: cached renders are keyed by it. */
@@ -32,7 +33,7 @@ export const TONE_PARAMS: readonly ParamSpec[] = [
 
 export type ParamName = 'frequency' | 'duration' | 'volume';
 
-export type VoiceKind = 'tone' | 'classic';
+export type VoiceKind = 'tone' | 'classic' | 'layered';
 
 /** The placeholder voice: a plain sine tone. */
 export interface ToneSound {
@@ -51,9 +52,12 @@ export interface ClassicSound {
   voice: 'classic';
   patch: ClassicPatch;
   status: SoundStatus;
+  /** Marked `classic`: the sound must stay one classic voice (it refuses layer-up), so it exports as a synth.csv row. */
+  classicOnly?: boolean;
 }
 
-export type Sound = ToneSound | ClassicSound;
+export type { LayeredSound };
+export type Sound = ToneSound | ClassicSound | LayeredSound;
 
 export function newSound(id: string): ToneSound {
   return { id, voice: 'tone', frequency: 440, duration: 0.5, volume: 0.5, status: 'draft' };
@@ -70,6 +74,7 @@ export function paramSpec(name: string): ParamSpec | undefined {
 /** The parameters a voice has, with ranges: what `sound set` accepts. */
 export function voiceParams(voice: VoiceKind): readonly ParamSpec[] {
   if (voice === 'tone') return TONE_PARAMS;
+  if (voice === 'layered') return SOUND_SPECS.map((p) => ({ name: p.name, min: p.min, max: p.max, default: p.default as number, unit: p.unit, help: p.help }));
   return CLASSIC_FIELDS.map((f) => ({ name: f.name, min: f.min, max: f.max, default: f.default, unit: '', help: f.help }));
 }
 
@@ -80,12 +85,13 @@ export function paramProblem(name: string, value: number, voice: VoiceKind = 'to
   if (!Number.isFinite(value)) return `${name} must be a number`;
   if (value < spec.min || value > spec.max) return `${name} must be between ${spec.min} and ${spec.max}${spec.unit ? ' ' + spec.unit : ''} (got ${value})`;
   if (name === 'wave' && !Number.isInteger(value)) return `wave must be 0, 1, 2 or 3 (square, saw, sine, noise)`;
+  if (name === 'seed' && !Number.isInteger(value)) return 'seed must be a whole number';
   return null;
 }
 
 /** The parameter names of the voices together (the command parser checks a name against these; the sound's voice decides at apply time). */
 export function isParamName(name: string): boolean {
-  return name === 'seed' || TONE_PARAMS.some((p) => p.name === name) || CLASSIC_FIELDS.some((f) => f.name === name);
+  return name === 'seed' || name === 'gain' || TONE_PARAMS.some((p) => p.name === name) || CLASSIC_FIELDS.some((f) => f.name === name);
 }
 
 /** A number as written in the tape and documents: shortest round-trip form, no exponent noise. */
@@ -96,24 +102,27 @@ export function fmtNumber(n: number): string {
 /** The sound as the text of its file (sounds/<id>.sfx): fixed order, one `key value` per line. */
 export function serializeSound(s: Sound): string {
   const lines = ['soundclaw sound 1', `id ${s.id}`, `voice ${s.voice}`];
-  if (s.voice === 'tone') for (const p of TONE_PARAMS) lines.push(`${p.name} ${fmtNumber(s[p.name as ParamName])}`);
+  if (s.voice === 'layered') lines.push(...serializeLayered(s));
+  else if (s.voice === 'tone') for (const p of TONE_PARAMS) lines.push(`${p.name} ${fmtNumber(s[p.name as ParamName])}`);
   else {
     for (const f of CLASSIC_FIELDS) lines.push(`${f.name} ${fmtNumber(s.patch[f.name])}`);
     if (s.patch.seed !== undefined) lines.push(`seed ${fmtNumber(s.patch.seed)}`);
+    if (s.classicOnly) lines.push('classic yes');
   }
   lines.push(`status ${s.status}`);
   return lines.join('\n') + '\n';
 }
 
 /** What the renderer reads: the voice and its parameters, nothing else (a status mark does not change the audio). */
-export function renderKey(s: Sound): string {
-  const body = s.voice === 'tone'
+export function renderKey(s: Sound, sampleHash: (name: string) => string = () => 'none'): string {
+  const body = s.voice === 'layered' ? `${RENDER_VERSION}|layered|${layeredBody(s, sampleHash)}` : s.voice === 'tone'
     ? `${RENDER_VERSION}|tone|${TONE_PARAMS.map((p) => `${p.name}=${fmtNumber(s[p.name as ParamName])}`).join('|')}`
     : `${RENDER_VERSION}|classic|${formatPatchNamed(s.patch)}`;
   return sha256Text(body);
 }
 
 export function cloneSound<T extends Sound>(s: T): T {
+  if (s.voice === 'layered') return cloneLayered(s) as T;
   return s.voice === 'classic' ? ({ ...s, patch: { ...s.patch } } as T) : { ...s };
 }
 

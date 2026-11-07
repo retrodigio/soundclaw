@@ -3,20 +3,9 @@
 // browser, now and in a year, produce the same samples bit for bit.
 
 import { renderClassic } from './classic.ts';
+import { sineCycles } from './mathx.ts';
 import { RENDER_VERSION, SAMPLE_RATE, type Sound } from './sound.ts';
-
-const TAU = 6.283185307179586;
-
-/** sin(2π·cycles) for any phase, from a Taylor polynomial on [-π/2, π/2] (error below 1e-11). */
-export function sineCycles(cycles: number): number {
-  let p = cycles - Math.floor(cycles); // [0, 1)
-  // Fold into [-1/4, 1/4] cycles using the sine's symmetries.
-  if (p > 0.75) p -= 1;
-  else if (p > 0.25) p = 0.5 - p;
-  const x = p * TAU;
-  const x2 = x * x;
-  return x * (1 + x2 * (-1 / 6 + x2 * (1 / 120 + x2 * (-1 / 5040 + x2 * (1 / 362880 + x2 * (-1 / 39916800 + x2 * (1 / 6227020800 + x2 * (-1 / 1307674368000))))))));
-}
+import { layeredChannelCount, renderLayered, type SampleBank } from './synth.ts';
 
 /** Number of samples a sound lasts. */
 export function sampleCount(s: { duration: number }): number {
@@ -24,8 +13,9 @@ export function sampleCount(s: { duration: number }): number {
 }
 
 /** The sound as 44,100 Hz mono doubles: for the classic voice exactly what the reference synth makes (the engine's WAVs quantise these). */
-export function renderExact(s: Sound): Float64Array {
+export function renderExact(s: Sound, bank?: SampleBank): Float64Array {
   if (s.voice === 'classic') return renderClassic(s.patch);
+  if (s.voice === 'layered') return Float64Array.from(renderSound(s, bank));
   const n = sampleCount(s);
   const out = new Float64Array(n);
   const step = s.frequency / SAMPLE_RATE;
@@ -34,13 +24,32 @@ export function renderExact(s: Sound): Float64Array {
 }
 
 /** The sound as 44,100 Hz mono samples (what is played, cached and measured). */
-export function renderSound(s: Sound): Float32Array {
+export function renderSound(s: Sound, bank?: SampleBank): Float32Array {
+  if (s.voice === 'layered') return mixdown(renderLayered(s, bank));
   if (s.voice === 'classic') return Float32Array.from(renderClassic(s.patch));
   const n = sampleCount(s);
   const out = new Float32Array(n);
   const step = s.frequency / SAMPLE_RATE;
   for (let i = 0; i < n; i++) out[i] = s.volume * sineCycles(i * step);
   return out;
+}
+
+/** Mono: the channel itself. Stereo: (left + right) / 2, what the views, pitch and spectrum are measured on. */
+export function mixdown(chs: readonly Float32Array[]): Float32Array {
+  if (chs.length === 1) return chs[0]!;
+  const out = new Float32Array(chs[0]!.length);
+  for (let i = 0; i < out.length; i++) out[i] = (chs[0]![i]! + chs[1]![i]!) / 2;
+  return out;
+}
+
+/** How many channels the sound renders to: 1, or 2 when a layer is panned. */
+export function channelCount(s: Sound): number {
+  return s.voice === 'layered' ? layeredChannelCount(s) : 1;
+}
+
+/** The sound's channels (one array each). Every voice but a panned layered sound is one channel. */
+export function renderChannels(s: Sound, bank?: SampleBank): Float32Array[] {
+  return s.voice === 'layered' ? renderLayered(s, bank) : [renderSound(s)];
 }
 
 export { RENDER_VERSION, SAMPLE_RATE };
@@ -75,4 +84,20 @@ export function peaks(samples: Float32Array, columns: number): { min: Float32Arr
     max[c] = hi;
   }
   return { min, max };
+}
+
+/** The channels one after the other in one array (the cache's and the server's layout). One channel: the array itself. */
+export function joinChannels(chs: readonly Float32Array[]): Float32Array {
+  if (chs.length === 1) return chs[0]!;
+  const out = new Float32Array(chs.reduce((n, c) => n + c.length, 0));
+  let at = 0;
+  for (const c of chs) { out.set(c, at); at += c.length; }
+  return out;
+}
+
+/** The inverse of joinChannels. */
+export function splitChannels(all: Float32Array, count: number): Float32Array[] {
+  if (count === 1) return [all];
+  const n = Math.floor(all.length / count);
+  return Array.from({ length: count }, (_, c) => all.subarray(c * n, (c + 1) * n));
 }

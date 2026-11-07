@@ -1,0 +1,386 @@
+{
+ "classic-pickup": {
+  "channels": 1,
+  "samples": 4013,
+  "hash": "de1148a9208f4f4a7cee6a7202424f0bfdb1148e203e024987da5ddc9681b9ed",
+  "renderVersion": 1
+ },
+ "classic-noise-seeded": {
+  "channels": 1,
+  "samples": 13003,
+  "hash": "81e1650e74b5e90dc9b99fc70081ab10fc500c4299365022afb2b0e3eb4676b1",
+  "renderVersion": 1
+ },
+ "ks-pluck": {
+  "channels": 1,
+  "samples": 22050,
+  "hash": "770e21b8a4763926411b757538b52951962a98e42416f942e70081555f44caae",
+  "renderVersion": 1
+ },
+ "sample-plain": {
+  "channels": 1,
+  "samples": 22049,
+  "hash": "26c1c624be76dd594269c1b461b50e6f84871bae0a0a8e0c9cc77c0f05558039",
+  "renderVersion": 1
+ },
+ "sample-trim-pitch-reverse": {
+  "channels": 1,
+  "samples": 7358,
+  "hash": "29121017679ef26cccbdff89afbc1a4d95d06cc4627d45147fb0af6827c08f77",
+  "renderVersion": 1
+ },
+ "sample-pitch-envelope": {
+  "channels": 1,
+  "samples": 23564,
+  "hash": "f912c6c844aeaa5b5e7bf320f7abcedf78c6f7d65a28a09c45cebcd94754713a",
+  "renderVersion": 1
+ },
+ "fm-chain-2": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "7513b7e575b02a9d5c412431f83fcc256c2783cb7053dff6bde6e8659ebd36fd",
+  "renderVersion": 1
+ },
+ "fm-chain-4": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "504212b8412de7e324cdbe3a31ac3c500a17979b6820828a70cd998d1b199cd3",
+  "renderVersion": 1
+ },
+ "fm-fan-4": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "6e5fbf88c248e51b8fa2679ca7fb865abf23911691618f83e1a2080e69de8744",
+  "renderVersion": 1
+ },
+ "fm-pairs-4": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "cfbdcba91c7983551e0a2af13e1c57fe58ac0c83958018c791edbcc55643a67f",
+  "renderVersion": 1
+ },
+ "fm-parallel-3": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "f824ba4960d0ed70f9447a55f310ebef2e5bf28a206319f9162ba9f48a65c159",
+  "renderVersion": 1
+ },
+ "fm-index-envelope": {
+  "channels": 1,
+  "samples": 17640,
+  "hash": "84115734e10032c900caf2b6e12dcb8853b07f22d40c36ea16572eb2ce1d9c6e",
+  "renderVersion": 1
+ },
+ "wave-wavetable-custom": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "016b58398ed1fa8a32fd5341711ebb34d9fcdfe8a8790b983ec76360702ca322",
+  "renderVersion": 1
+ },
+ "filter-lp-envelope": {
+  "channels": 1,
+  "samples": 17640,
+  "hash": "77af409a317dfda64461758d13044a6fd0cc10547c51bec718b7b85a32bb1164",
+  "renderVersion": 1
+ },
+ "pan-sweep-stereo": {
+  "channels": 2,
+  "samples": 17640,
+  "hash": "95f99ab674ab268422008b4c0b280ce49dceba50b226b2c042deaba55d388497",
+  "renderVersion": 1
+ },
+ "two-layers-offset-pan": {
+  "channels": 2,
+  "samples": 8820,
+  "hash": "582fa64cd9b5c2424362dbb9e6801a399a10eca6844dbcd5a6934d7386fb2847",
+  "renderVersion": 1
+ },
+ "solo-and-mute": {
+  "channels": 1,
+  "samples": 4410,
+  "hash": "3084512c446542876b4602617952cf372795dc8855e12077a36a7a284e79ea62",
+  "renderVersion": 1
+ },
+ "master-chain": {
+  "channels": 1,
+  "samples": 52789,
+  "hash": "d46b25cdbf0c8b787816917246a8a8909f1c8746e4028f19bc8410f5dbef50f0",
+  "renderVersion": 1
+ },
+ "layer-and-sound-duration": {
+  "channels": 1,
+  "samples": 15435,
+  "hash": "5f19f174d9e10148ba7d23eddf5193d8784aa8a21ad0f3b5f4df053b8fc58eb6",
+  "renderVersion": 1
+ },
+ "wave-sine": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "83dc96663340f67a647ee5e89c190a5ba01d2127a42f75aee545b1dfa128646a",
+  "renderVersion": 1
+ },
+ "wave-square": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "0182371267e9f925d6da2e5a3985470cad70fbeda8f4a0b9e4ad4ca885508753",
+  "renderVersion": 1
+ },
+ "wave-saw": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "05c57f9e727fbc87a9f356941b416078ff5eee1ebc41bdc04dccaa699da3e395",
+  "renderVersion": 1
+ },
+ "wave-triangle": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "69b03a2326424e9113f7a50680dcf315440392c70ee81da3d4e4abfcc67a66b3",
+  "renderVersion": 1
+ },
+ "wave-pulse": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "a0aa6d66345efe815864016d10588c28a709baf3361d8eb9bab947636b171873",
+  "renderVersion": 1
+ },
+ "wave-wavetable": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "ca24a79f0cb6edcbb39a89ed154e1d308da74160877994f784d69f203a887bbd",
+  "renderVersion": 1
+ },
+ "wave-white": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "ed679ed69b6b70d904707ca998f065767a36ee14cd4bdc1a9df354ddd3a626d5",
+  "renderVersion": 1
+ },
+ "wave-pink": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "57da0cd5471527e71f164994e56b31db3b6ac3056c6a720ffe9df8de9ed1a7e5",
+  "renderVersion": 1
+ },
+ "wave-brown": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "9a1d32f20d20bcc01021571c3903838edf8e3b187eb17ab53a80db653b5f1706",
+  "renderVersion": 1
+ },
+ "wave-metal": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "e0e5fd0c57b1c977ff9ba14cd881884ff121402cf5a585e12ba3f3812748b647",
+  "renderVersion": 1
+ },
+ "curve-lin": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "190855392c9d882d61f5d037c6e7a7ca34c62d4b34f5542cb7f4640f0013e840",
+  "renderVersion": 1
+ },
+ "curve-exp": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "38bcc548f23b6e99d5f7fc6663450222e1ae5a8b806be290d0e19e721589ef2d",
+  "renderVersion": 1
+ },
+ "curve-hold": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "4ae030d56515e506177cca2ca09c052b50f74ea07c79f77b6b29fbd459526daa",
+  "renderVersion": 1
+ },
+ "curve-ease": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "7770c596480ca796c764fcff458ea09c6591c81ba7955c03d933dc8494b91e83",
+  "renderVersion": 1
+ },
+ "curve-exp-to-zero": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "281cabdc8bcd850c27d9dfa4ad17d0df81159cb2f908908a9a733f29b306701a",
+  "renderVersion": 1
+ },
+ "amp-adsr": {
+  "channels": 1,
+  "samples": 22050,
+  "hash": "a19d6c8b053c555c531e4b8193895c36dc567747b359305bee10c022b1152ee0",
+  "renderVersion": 1
+ },
+ "filter-layer-lp": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "f98c2734e8120eb877525cba5423ae5fcffa2e35457bce36bf835334f00995ea",
+  "renderVersion": 1
+ },
+ "filter-fx-lp": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "f98c2734e8120eb877525cba5423ae5fcffa2e35457bce36bf835334f00995ea",
+  "renderVersion": 1
+ },
+ "filter-layer-hp": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "d612344af040946a9c05092a44b6af94e7db8d91c6cde93b1738c01f71550109",
+  "renderVersion": 1
+ },
+ "filter-fx-hp": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "d612344af040946a9c05092a44b6af94e7db8d91c6cde93b1738c01f71550109",
+  "renderVersion": 1
+ },
+ "filter-layer-bp": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "deaf5c5b49d75f5666b99986dbda4f23341b8acd49701690fe4e339470411b43",
+  "renderVersion": 1
+ },
+ "filter-fx-bp": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "deaf5c5b49d75f5666b99986dbda4f23341b8acd49701690fe4e339470411b43",
+  "renderVersion": 1
+ },
+ "filter-layer-notch": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "d1dacef1ae1d83406ecf009c469ca70a1a084db92bdb5702b90d07b974a0d447",
+  "renderVersion": 1
+ },
+ "filter-fx-notch": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "d1dacef1ae1d83406ecf009c469ca70a1a084db92bdb5702b90d07b974a0d447",
+  "renderVersion": 1
+ },
+ "fx-distort-soft": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "267dbc644ed36c4d55b90da35d77ad1f703c0b448e47c06dd6c572d58d257a30",
+  "renderVersion": 1
+ },
+ "fx-distort-hard": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "31efcc0b823a4b2b8f968de6260f4a9d0adfcaac1d2f50a3c0b05a6a736e49ce",
+  "renderVersion": 1
+ },
+ "fx-distort-fold": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "162a77f841f08a5ad6685f4a656627ce9b880ec80b8dd0dcdf233682d207bd4e",
+  "renderVersion": 1
+ },
+ "fx-distort-cubic": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "46d80c1e9c88609c435894364aa19e778784870a3e296e5efcf1b2cc7e9cfcf6",
+  "renderVersion": 1
+ },
+ "fx-bitcrush": {
+  "channels": 1,
+  "samples": 8820,
+  "hash": "2c74ecf107158f12344dc66974f4c18e54b056caf08c8c94ac13c78c23dff42f",
+  "renderVersion": 1
+ },
+ "fx-chorus": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "bec60b1599090d73ba1e6415a7398be079748d9599f45aeddcca6ef5f6e8e23b",
+  "renderVersion": 1
+ },
+ "fx-delay": {
+  "channels": 1,
+  "samples": 37485,
+  "hash": "5e5b5242a62d2e57e79adc2965d0d154592a421a3e711afae903b76975fbadb3",
+  "renderVersion": 1
+ },
+ "fx-reverb": {
+  "channels": 1,
+  "samples": 71829,
+  "hash": "e691f71d6e211c49f0717327139a1a95f10f07b0278ae602d27d7100cc61eb96",
+  "renderVersion": 1
+ },
+ "fx-envelope-mix": {
+  "channels": 1,
+  "samples": 13230,
+  "hash": "fc788c3e22c2d2c0575dd7b2fe82db0bdce1d16dd1b3a45cc95475489d63cd5d",
+  "renderVersion": 1
+ },
+ "recipe-footstep-1": {
+  "channels": 1,
+  "samples": 7850,
+  "hash": "51511dd63f7379494b5db0cb2ba80b24baca157adfd8fb79b508ef9535ebbc36",
+  "renderVersion": 1
+ },
+ "recipe-footstep-2": {
+  "channels": 1,
+  "samples": 8203,
+  "hash": "1a7cb9a958856bafd0da2fe3022dc48904094ee791e62cbac0e226f58baec620",
+  "renderVersion": 1
+ },
+ "recipe-footstep-3": {
+  "channels": 1,
+  "samples": 7585,
+  "hash": "0252d4695c85ebd1d6e8acb5b58f11e00ea396d08330712222fa0a6cf3e99ffc",
+  "renderVersion": 1
+ },
+ "recipe-ui-click-1": {
+  "channels": 1,
+  "samples": 4145,
+  "hash": "e62cabf47be1256a024e445377c690e8445494548a7ba74d64ae3fd1a449ba54",
+  "renderVersion": 1
+ },
+ "recipe-ui-click-2": {
+  "channels": 1,
+  "samples": 2646,
+  "hash": "013d7e056117038db2f536ea7603426fdc59e3e1fae95e4660344f862433bc30",
+  "renderVersion": 1
+ },
+ "recipe-ui-click-3": {
+  "channels": 1,
+  "samples": 3925,
+  "hash": "af34cf1226228e7ca06d040e5b317a947bcea04868248e568a3a0ea99471beb4",
+  "renderVersion": 1
+ },
+ "recipe-door-1": {
+  "channels": 1,
+  "samples": 50522,
+  "hash": "b980c223e7659a8d48a0bb5ff35b2d1a998a4757c67da67452237b0ed3dd82d0",
+  "renderVersion": 1
+ },
+ "recipe-door-2": {
+  "channels": 1,
+  "samples": 56249,
+  "hash": "2041631903ca7693f65727ce580a641efb4cc9808f711b2e763961f049bbf162",
+  "renderVersion": 1
+ },
+ "recipe-door-3": {
+  "channels": 1,
+  "samples": 46847,
+  "hash": "d0c6f6095a0f862a045464f4bc402c2dbef1c505a45f6af42d0bdfd752c7bf36",
+  "renderVersion": 1
+ },
+ "recipe-magic-1": {
+  "channels": 2,
+  "samples": 71597,
+  "hash": "1801e5093f64eeed4781612a51ae57bca10551a5851fd9573ee22725b5e6ad96",
+  "renderVersion": 1
+ },
+ "recipe-magic-2": {
+  "channels": 2,
+  "samples": 102418,
+  "hash": "bce6b7b43cb4423a988ef4ffdaf538612d6e73e447fe3535002666a6b1b2ebf8",
+  "renderVersion": 1
+ },
+ "recipe-magic-3": {
+  "channels": 2,
+  "samples": 77904,
+  "hash": "d82ca9796b432eee7eaf82f1b488c37e4fdcad5b5f86a1b7a67abdc7c8f259ca",
+  "renderVersion": 1
+ }
+}

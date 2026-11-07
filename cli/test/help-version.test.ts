@@ -33,7 +33,7 @@ describe('per-command help', () => {
       expect(r.status, `${c}: ${r.stderr}`).toBe(0);
       expect(r.stdout).toContain(`soundclaw ${c} `);
       // Only that command: not the whole manual.
-      expect(r.stdout.length).toBeLessThan(commandHelp('work')!.length + 1500);
+      expect(r.stdout.length).toBeLessThan(commandHelp('work')!.length + 3000);
     }
   }, 60_000);
   it('shows only the asked command', () => {

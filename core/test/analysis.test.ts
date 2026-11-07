@@ -208,9 +208,9 @@ describe('checks', () => {
 
   it('a clean, well-levelled sound passes every check', () => {
     const r = run(good());
-    expect(r.map((c) => c.name)).toEqual(['clip', 'loudness', 'dc', 'click', 'tail']);
+    expect(r.map((c) => c.name)).toEqual(['clip', 'loudness', 'dc', 'click', 'tail', 'harsh']);
     expect(checksPass(r)).toBe(true);
-    expect(checkSummary(r)).toBe('checks: 5/5 pass');
+    expect(checkSummary(r)).toBe('checks: 6/6 pass');
     expect(r.every((c) => c.score === 1 && c.ranges.length === 0)).toBe(true);
   });
 
@@ -275,9 +275,9 @@ describe('checks', () => {
 
   it('summarises failures on one line, and lists thresholds and flagged ranges in full', () => {
     const r = run(sine(440, 0.5, 0.5));
-    expect(checkSummary(r)).toMatch(/^checks: \d\/5 pass; failing: /);
+    expect(checkSummary(r)).toMatch(/^checks: \d\/6 pass; failing: /);
     const text = formatChecks('beep', r);
-    expect(text).toMatch(/^beep: FAIL \(\d\/5 checks pass\)/);
+    expect(text).toMatch(/^beep: FAIL \(\d\/6 checks pass\)/);
     expect(text).toMatch(/loudness\s+FAIL\s+score 0\.\d\d\s+.*held to -16\.0 LUFS ±1/);
     expect(text).toMatch(/flagged 0\.\d{4}-0\.\d{4} s: /);
   });

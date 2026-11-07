@@ -20,7 +20,7 @@ describe('numbers and checks through the writer', () => {
   it('measures a classic sound once per distinct render and says how it did', () => {
     run(GOOD);
     const m = f.w.measure('beep');
-    expect(m.checks.map((c) => c.pass)).toEqual([true, true, true, true, true]);
+    expect(m.checks.map((c) => c.pass)).toEqual([true, true, true, true, true, true]);
     expect(f.w.measure('beep')).toBe(m);
     run('sound set beep volume=0.6');
     expect(f.w.measure('beep')).not.toBe(m);
@@ -31,7 +31,7 @@ describe('numbers and checks through the writer', () => {
     const r = run(GOOD);
     expect(r.touched).toEqual(['beep']);
     const text = checkText(f.w, ['beep']).text;
-    expect(text).toMatch(/^beep: PASS \(5\/5 checks pass\)/);
+    expect(text).toMatch(/^beep: PASS \(6\/6 checks pass\)/);
   });
 
   it('render ends with the check summary, after the numbers and the description', () => {
@@ -41,7 +41,7 @@ describe('numbers and checks through the writer', () => {
     expect(lines[0]).toBe('head');
     expect(lines[1]).toMatch(/^0\.\d\d s, tonal/);
     expect(t).toContain('duration 0.');
-    expect(lines.at(-1)).toMatch(/^checks: \d\/5 pass; failing: .*loudness /);
+    expect(lines.at(-1)).toMatch(/^checks: \d\/6 pass; failing: .*loudness /);
   });
 
   it('describe is words from the numbers, then the numbers, then the checks', () => {
@@ -49,7 +49,7 @@ describe('numbers and checks through the writer', () => {
     const t = describeText(f.w, 'beep');
     expect(t).toMatch(/^beep: \d\.\d\d s, tonal and \w[\w -]* \(centroid about/);
     expect(t).toContain('brightness (spectral centroid) mean');
-    expect(t.split('\n').at(-1)).toBe('checks: 5/5 pass');
+    expect(t.split('\n').at(-1)).toBe('checks: 6/6 pass');
   });
 
   it('check lists every sound with scores, thresholds and flagged ranges; names an unknown sound', () => {
@@ -59,7 +59,7 @@ describe('numbers and checks through the writer', () => {
     expect(c.text).toMatch(/^beep: PASS/m);
     expect(c.text).toMatch(/^zap: FAIL/m);
     expect(c.text).toMatch(/flagged 0\.\d{4}-0\.\d{4} s: /);
-    expect(c.text).toMatch(/1 sound of 2 pass all of clip, loudness, dc, click, tail \(target -16 LUFS ±1, true peak at most -0.1 dBTP; the default style\)/);
+    expect(c.text).toMatch(/1 sound of 2 pass all of clip, loudness, dc, click, tail, harsh \(target -16 LUFS ±1, true peak at most -0.1 dBTP; the default style\)/);
     expect(() => checkText(f.w, ['nope'])).toThrow(/no sound 'nope'/);
     expect(() => checkText(fixture().w, [])).toThrow(/no sounds to check/);
   });

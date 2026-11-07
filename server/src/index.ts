@@ -12,3 +12,4 @@ export * from './runfile.ts';
 export * from './summary.ts';
 export * from './ears.ts';
 export * from './changes.ts';
+export * from './samples.ts';

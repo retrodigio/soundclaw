@@ -81,7 +81,7 @@ describe('the agent\'s side', () => {
     const q = ask('softer');
     const mcp = requestBrief(f.w, q);
     expect(mcp).toContain('wave 2');
-    expect(mcp).toContain('checks: 5/5 pass');
+    expect(mcp).toContain('checks: 6/6 pass');
     expect(mcp).toContain('sound mark beep rejected');
     expect(mcp).toContain('work(action="done"');
     expect(requestBrief(f.w, q, cliSteps('my proj'))).toContain("soundclaw work 'my proj' done r1");
