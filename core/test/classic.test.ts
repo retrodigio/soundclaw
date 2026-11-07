@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CLASSIC_FIELDS, ClassicError, classicWav, cube, decodeWav, defaultPatch, envelope, envelopeLength, formatCsv, formatG, formatPatch, formatPatchNamed, makePatch, parseCsv, parsePatch, patchValues,
-  quantizeClassic, renderClassic, seedOf, sha256Hex, sinRad,
+  quantizeClassic, readCsv, renderClassic, seedOf, sha256Hex, sinRad,
 } from '../src/index.ts';
 
 const patch = (o: Record<string, number | string>) => makePatch({ sustain: 0.1, decay: 0, ...o });
@@ -277,7 +277,11 @@ describe('synth.csv', () => {
   it('skips blank lines and comments, honours quoted cells, and rejects what is wrong with its line', () => {
     expect(parseCsv('# table\nid,freq\n\n"a",0.2\n')).toHaveLength(1);
     expect(() => parseCsv('id,speed\na,1\n')).toThrow(/unknown column 'speed'/);
-    expect(() => parseCsv('id,freq\na,1\na,2\n')).toThrow(/'a' appears twice/);
+    const r = readCsv('id,freq\na,0.1\nb,0.3\n# note\na,0.2\n');
+    expect(r.rows.map((x) => [x.id, x.patch.freq])).toEqual([['a', 0.2], ['b', 0.3]]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toMatch(/'a' is on line 2 and again on line 5/);
+    expect(parseCsv('id,freq\na,0.1\na,0.2\n').map((x) => x.patch.freq)).toEqual([0.2]);
     expect(() => parseCsv('id,freq\na,fast\n')).toThrow(/line 2 \(a\).*must be a number/);
     expect(() => parseCsv('')).toThrow(/no header/);
   });

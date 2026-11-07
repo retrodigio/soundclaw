@@ -68,7 +68,7 @@ describe('run', () => {
     const before = readFileSync(join(proj, 'history.jsonl'), 'utf8');
     const r = sc(['run', proj, '-e', 'sound set a volume=0.2\nsound set a frequency=1\nsound frob a']);
     expect(r.code).toBe(1);
-    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, mutate, mark)\n2 errors; nothing was applied.\n");
+    expect(r.err).toBe("<-e>:2:13: error: frequency must be between 20 and 20000 Hz (got 1)\n<-e>:3:7: error: unknown sound command 'frob' (new, set, patch, generate, mutate, mark)\n2 errors; nothing was applied.\n");
     expect(readFileSync(join(proj, 'history.jsonl'), 'utf8')).toBe(before);
   });
 
@@ -145,6 +145,46 @@ describe('export', () => {
     const a = readFileSync(join(proj, 'exports', 'beep.wav'));
     execFileSync(process.execPath, [BIN, 'export', proj, 'beep', '--out', join(tmp, 'again')]);
     expect(Buffer.compare(a, readFileSync(join(tmp, 'again', 'beep.wav')))).toBe(0);
+  });
+});
+
+describe('changes and tagged requests', () => {
+  beforeEach(() => {
+    sc(['new', proj]);
+    sc(['run', proj, '-e', 'sound new beep voice=classic preset=pickup seed=3; sound new boop voice=classic preset=laser seed=2']);
+  });
+  it('changes says what a person did since the agent last looked, then nothing; --peek and --since leave the cursor', () => {
+    expect(sc(['changes', proj]).out).toMatch(/^no changes by anyone but agent:claude since #0 \(your cursor is now #\d+\)/);
+    sc(['run', proj, '-e', 'sound set beep freq=0.7', '--by', 'human:ana']);
+    const peek = sc(['changes', proj, '--by', 'human', '--peek']);
+    expect(peek.out).toMatch(/^1 change by people since #\d+:/);
+    expect(peek.out).toContain('sound set beep freq=0.7');
+    expect(peek.out).toMatch(/freq 0\.\d+ → 0\.7/);
+    expect(peek.out).toMatch(/compare view \(before above, after below\): \S+change-g2-beep\.png/);
+    const png = /: (\S+change-g2-beep\.png)/.exec(peek.out)![1]!;
+    expect(readFileSync(png).subarray(1, 4).toString()).toBe('PNG');
+    expect(sc(['changes', proj, '--since', '0', '--by', 'agent']).out).toMatch(/^1 change by agent since #0:/);
+    expect(sc(['changes', proj]).out).toMatch(/^1 change by anyone but agent:claude since #2/);
+    expect(sc(['changes', proj]).out).toMatch(/^no changes/);
+    expect(sc(['changes', proj, '--as', 'other', '--by', 'human:ana']).out).toMatch(/^1 change by human:ana/);
+    expect(sc(['changes', proj, '--by', 'robot']).err).toMatch(/--by is human, agent/);
+    expect(sc(['changes']).code).toBe(2);
+  });
+  it('request --tag files the tags a card sends; --like names the other sound; the list shows them', () => {
+    const r = sc(['request', proj, 'beep', '--tag', 'too loud', '--tag', 'too similar to another sound', '--like', 'boop', '--by', 'ana']);
+    expect(r.out).toMatch(/^r1 change beep \[too loud, too similar to another sound\] \(like boop\) \(from human:ana/);
+    expect(sc(['request', proj, 'beep', '--tag', 'good', '--by', 'ana']).out).toMatch(/^r2 feedback beep \[good\]/);
+    expect(sc(['request', proj, 'beep', '--tag', 'too purple']).err).toMatch(/no tag/);
+    expect(sc(['history', proj]).out).toContain('sound mark beep rejected "too loud, too similar to boop"');
+  });
+  it('import warns about a repeated id and keeps the engine\'s rule', () => {
+    const csv = join(tmp, 'synth.csv');
+    writeFileSync(csv, 'id,freq\nzip,0.2\nzap,0.3\nzip,0.6\n');
+    const r = sc(['import', proj, 'sfxr', csv]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("warning: synth.csv: 'zip' is on line 2 and again on line 4");
+    expect(r.out).toContain('imported 2 sounds (zip, zap)');
+    expect(sc(['list', proj]).out).toContain('zip: classic freq=0.6');
   });
 });
 

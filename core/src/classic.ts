@@ -431,33 +431,50 @@ function csvCells(line: string): string[] {
  * starting with `#` are skipped.
  */
 export function parseCsv(text: string): CsvRow[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+  return readCsv(text).rows;
+}
+
+/**
+ * parseCsv, and what it noticed. A sound id that appears twice is accepted as the reference
+ * engine's reader does: the id keeps the position of its first row and the values of its last,
+ * with a warning that names both lines (numbers are lines of the file, blank and comment lines
+ * counted).
+ */
+export function readCsv(text: string): { rows: CsvRow[]; warnings: string[] } {
+  const lines = text.split(/\r?\n/).map((l, i) => ({ l, n: i + 1 })).filter((x) => x.l.trim() !== '' && !x.l.trim().startsWith('#'));
   if (!lines.length) throw new ClassicError('synth.csv: no header line');
-  const head = csvCells(lines[0]!);
+  const head = csvCells(lines[0]!.l);
   const keyAt = Math.max(0, head.findIndex((h) => ['id', 'key', 'sound', 'name'].includes(h.toLowerCase())));
   for (const [i, h] of head.entries()) {
     if (i !== keyAt && !classicField(h) && h !== 'seed') throw new ClassicError(`synth.csv: unknown column '${h}'`);
   }
   const rows: CsvRow[] = [];
-  const seen = new Set<string>();
-  lines.slice(1).forEach((line, li) => {
+  const warnings: string[] = [];
+  const at = new Map<string, { index: number; line: number }>();
+  for (const { l: line, n } of lines.slice(1)) {
     const cells = csvCells(line);
     const id = cells[keyAt] ?? '';
-    const where = `synth.csv line ${li + 2}${id ? ` (${id})` : ''}`;
+    const where = `synth.csv line ${n}${id ? ` (${id})` : ''}`;
     if (!id) throw new ClassicError(`${where}: no sound id`);
-    if (seen.has(id)) throw new ClassicError(`${where}: '${id}' appears twice`);
-    seen.add(id);
     const t: Record<string, unknown> = {};
     head.forEach((h, i) => {
       if (i === keyAt) return;
       const c = cells[i];
       if (c === undefined || c === '' || c === 'NA') return;
-      const n = luaNumber(c);
-      t[h] = n ?? c;
+      const num = luaNumber(c);
+      t[h] = num ?? c;
     });
-    rows.push({ id, patch: makePatch(t, where) });
-  });
-  return rows;
+    const row = { id, patch: makePatch(t, where) };
+    const first = at.get(id);
+    if (first) {
+      rows[first.index] = row;
+      warnings.push(`synth.csv: '${id}' is on line ${first.line} and again on line ${n}; it keeps the position of line ${first.line} and the values of line ${n}, as the engine reads it`);
+      continue;
+    }
+    at.set(id, { index: rows.length, line: n });
+    rows.push(row);
+  }
+  return { rows, warnings };
 }
 
 /** synth.csv text for the rows: every column, full precision (so a re-read renders the same samples), `seed` only when some row has one. */

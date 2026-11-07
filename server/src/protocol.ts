@@ -22,7 +22,7 @@ export interface Snapshot {
 
 /** What a person can ask from the dashboard. */
 export type PersonRequest =
-  | { action: 'request'; kind: 'change'; sound: string; note: string }
+  | { action: 'request'; kind: 'change'; sound: string; note: string; /** Quick tags (too loud, …, good). */ tags?: string[]; /** With `too similar to another sound`. */ other?: string }
   | { action: 'reply'; id: string; text: string }
   | { action: 'cancel'; id: string; text?: string };
 

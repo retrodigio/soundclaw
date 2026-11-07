@@ -16,6 +16,9 @@ reported with their line and column.
 
 Each command has a *normal form*, which is what is written on the history, so a history replays
 exactly. `sound set beep frequency=880.0 volume=.4` is stored as `sound set beep frequency=880 volume=0.4`.
+A person's edits in the dashboard are commands in the same forms, written as `human:<name>`: the
+editor writes `sound set` with the parameters in the table's order and the wave by name
+(`sound set zap wave=saw freq=0.45`), exactly the line an agent would write.
 
 | Command | Does |
 |---|---|
@@ -23,6 +26,7 @@ exactly. `sound set beep frequency=880.0 volume=.4` is stored as `sound set beep
 | `sound new <id> voice=classic [preset=<category>] [seed=<n>]` | Make a classic-voice sound: the 25 sfxr-style parameters at their defaults, or generated from a category (below). `preset=` alone means `voice=classic`. Without `seed=` the seed comes from the category and the id, and is written into the normal form. |
 | `sound set <id> <param>=<value> ...` | Change parameters (those of the sound's voice, below). Values outside a range are errors. `wave=square\|saw\|sine\|noise` takes names. `seed=<n>` fixes the noise stream; `seed=auto` goes back to the hash of the values. |
 | `sound patch <id> "<single-patch text>"` | Replace all 25 values from sfxr patch text: numbers in positional order (an empty field keeps the default) or `name=value` pairs, with an optional version line first (write the line break as `\n` inside the quotes). |
+| `sound generate <id> <category\|random> [seed=<n>]` | Replace a classic sound's 25 values with a new patch from a category or from `random` (below). The seed used is written into the normal form, so a history replays. This is what the editor's category and `random` buttons write. |
 | `sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]` | A small seeded change to a classic sound (also written `mutate <id> ...`): each parameter except the wave and the volume moves, with a chance of one half, by up to `amount`, kept in its range. `as=` leaves the original alone and makes a new sound. The seed used is written into the normal form. |
 | `sound mark <id> approved\|rejected\|draft ["note"]` | Set the sound's status. People use the dashboard's Approve and Ask for changes buttons, which write this. |
 | `undo [group=<g>] [by=<author>]` | Take a group out of effect: the latest one still in effect, a named one, or an author's latest. |
@@ -83,11 +87,13 @@ samples). The noise wave draws from an xorshift stream seeded by FNV-1a over the
 always render the same samples. In `sound patch`, `import` and the patch and CSV files, values outside
 a range are clamped (as the engine does); in `sound set` they are errors.
 
-**Presets** (`sound new <id> voice=classic preset=<category> [seed=<n>]`): each category draws from
+**Presets** (`sound new <id> voice=classic preset=<category> [seed=<n>]`, and `sound generate`): each category draws from
 the ranges below. They are data (`CATEGORIES` in `core/src/generators.ts`), not hidden code; a
 parameter a category does not mention keeps its default. "Always" is applied first, then one of
 "One of" by weight, then each "Maybe" on its own with its chance. Values are rounded to three
-decimals. The same category and seed always give the same sound.
+decimals. The same category and seed always give the same sound. `random` is sfxr's randomize: any sound,
+with every parameter group used with the chance written in its row (uniform draws, not sfxr's
+hidden power-law shaping).
 
 | Category | Meaning | Always | One of (weight) | Maybe (chance) |
 |---|---|---|---|---|
@@ -98,6 +104,7 @@ decimals. The same category and seed always give the same sound.
 | `hit` | a sharp impact: hurt, thud, punch | attack 0; sustain 0..0.1; decay 0.1..0.3; freq 0.2..0.8; slide -0.7..-0.3; wave one of 0, 1, 3 | - | highPass 0..0.3 (0.5) / duty 0..0.6 (0.33) |
 | `jump` | a short upward chirp: jumps, bounces | wave 0; attack 0; sustain 0.1..0.4; decay 0.1..0.3; freq 0.3..0.6; slide 0.1..0.3; duty 0..0.6 | - | highPass 0..0.3 (0.5) / lowPass 0.4..1 (0.5) |
 | `blip` | a very short tick: menu moves, selections | wave one of 0, 1; attack 0; sustain 0.1..0.2; decay 0..0.2; freq 0.2..0.6; highPass 0.1 | - | duty 0..0.6 (0.5) |
+| `random` | anything: every parameter group used with the chance written here | wave one of 0, 1, 2, 3; attack 0; sustain 0.05..0.4; decay 0.05..0.5; freq 0.1..0.9; punch 0..0.5 | - | attack 0.02..0.15 (0.3) / slide -0.5..0.5 (0.6) / minFreq 0.05..0.3 (0.2) / deltaSlide -0.3..0.3 (0.2) / vibratoDepth 0..0.6; vibratoSpeed 0.1..0.6; vibratoDelay 0..0.4 (0.3) / changeSpeed 0.3..0.9; changeAmount -0.8..0.8 (0.3) / duty 0..0.8; dutySweep -0.3..0.3 (0.4) / repeatSpeed 0.3..0.9 (0.2) / phaserOffset -0.4..0.6; phaserSweep -0.3..0.3 (0.25) / lowPass 0.2..0.9; lowPassSweep -0.3..0.3; resonance 0..0.5 (0.3) / highPass 0..0.4; highPassSweep -0.2..0.2 (0.3) |
 
 ### Checks and the project style
 
@@ -144,7 +151,7 @@ Every history entry has an author: `agent:<name>` or `human:<name>` (letters, di
 `-`, at most 32 characters). The CLI's `--by` takes either form; a bare name means `agent:<name>`
 for `run` and `work`, and `human:<name>` for `request`, `reply` and `cancel`. The MCP tools write
 as `agent:claude`. A dashboard page writes as the name in its header (`?name=ana` in the URL gives
-`human:ana`).
+`human:ana`; with no name, the last one used in that browser, else `human:owner`).
 
 ## The project folder
 
@@ -169,6 +176,7 @@ soundclaw new <project> [--name <name>]
 soundclaw run <project> (<script> | - | -e "<commands>") [--by <author>]
 soundclaw list <project>
 soundclaw history <project> [--sound <id>] [--by <author>] [--limit <n, default 50>]
+soundclaw changes <project> [--since <command number | time>] [--by human|agent|<author>] [--as <agent>] [--peek]
 soundclaw render <project> <id>
 soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
 soundclaw view <project> <id> compare <other> [--out <file.png>]
@@ -176,7 +184,7 @@ soundclaw describe <project> <id>
 soundclaw check <project> [<id>...]
 soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
-soundclaw request <project> [<id> --note "<what should change>"] [--by <author>]
+soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
 soundclaw reply <project> <request> "<answer>" [--by <author>]
 soundclaw cancel <project> <request> ["<why>"] [--by <author>]
 soundclaw work <project> list | claim [<request>] | progress [<request>] "<note>" | block [<request>] "<question>" | done [<request>] "<what changed>" [--by <agent>]
@@ -219,13 +227,45 @@ MCP `view` tool returns the image itself.
 settings), then the numbers. `check` runs the checks with scores, thresholds and the exact ranges;
 it exits 1 when any sound fails.
 
+### What others changed
+
+`changes <project>` (MCP `changes`) tells an agent what other hands did since it last looked. Every
+history group after the agent's **cursor** is listed with its author, its commands, and for each
+sound it changed: the parameters before and after (`freq 0.437 → 0.7`), the numbers before and
+after (duration, loudness, spectral centroid, pitch) and a before/after compare view saved as a PNG
+under `<project>/.cache/views/change-<group>-<sound>.png` (the same picture as `view … compare`).
+
+```
+$ soundclaw changes demo.sclaw --by human
+1 change by people since #2 (your cursor is now #3):
+
+g2 #3 human:ana 2026-11-06T10:00:01Z
+  sound set beep freq=0.7
+  beep (edited):
+    freq 0.437 → 0.7
+    numbers: duration 0.192 → 0.192 s; loudness -9.6 → -7.9 LUFS; centroid 4686 → 6402 Hz; pitch 679 → 1742 Hz
+    compare view (before above, after below): demo.sclaw/.cache/views/change-g2-beep.png
+```
+
+- The cursor is per agent (`--as`, default `agent:claude`), kept in `<project>/.cache/changes-seen.json`
+  (ignored by git) as the highest command number read. Reading moves it; `--peek` and `--since` do not.
+  `--since` takes a command number or a time.
+- Without `--by` the list is everyone but the asking agent; `--by human` people only, `--by agent`
+  agents, `--by human:ana` one author.
+- The newest 12 changes are detailed; older ones are counted.
+- A group a later undo took out of effect is marked. An `undo` by a person is a change too.
+- Call it before editing a sound a person has touched, and never undo a person's edit silently: say
+  so (a reply, a question) before changing it back.
+
 ### Import and export
 
 `import <project> sfxr <source>` makes classic sounds: from a `synth.csv` (one sound per row; the key
 column is the id: a column named `id`, `key`, `sound` or `name`, else the first; the other columns
 are parameter names in any order plus an optional `seed`; a missing column, an empty cell or `NA`
 takes the default), from a single-patch file (the file name gives the id, or `--id`), or from the
-patch text itself. One undo group.
+patch text itself. One undo group. A sound id that appears twice in a csv is read as the engine
+reads it: the id keeps the position of its first row and the values of its last, and a warning names
+both lines (`warning: synth.csv: 'zip' is on line 2 and again on line 4; …`).
 
 `export --format`: `wav` (default; 16-bit PCM, 44,100 Hz, mono; a classic sound is written in the
 engine's pre-rendered form, each sample `trunc(s × 32000)`), `patch` (`<id>.sfxr`, the single-patch
@@ -268,6 +308,14 @@ timeout, 1 if no server can be reached. The MCP tool `await_requests` does the s
 seconds. While an await is open the dashboard shows an agent is listening; when there is none, a
 card says so and offers a prompt to hand to an agent.
 
+**Feedback tags.** A card's *Feedback* button opens quick tags (too loud, too quiet, too long, too
+short, too harsh, too dull, too similar to another sound, good) and a text box. Sending makes one
+request carrying the tags (and, for *too similar*, the other sound), which reaches the agent through
+`await` as `request r3 (beep) from human:ana [too loud, too harsh]: "a bit softer"` and is shown on
+the card. Like *Ask for changes* it marks the sound rejected; the tag `good` on its own is
+praise: a `feedback` request that marks nothing and that the agent just closes. The CLI files the
+same with `request <project> <id> --tag "too loud" [--note …] [--like <sound>]`.
+
 `soundclaw work` is the agent's side for a session without MCP: `list` hands over the open requests
 (marking them seen), `claim` takes the next one (or a named one) and prints what is asked and the
 sound as it stands, `progress` posts a note the person sees, `block` stops with one question the
@@ -290,7 +338,8 @@ is also served over HTTP at `/mcp` with the token as a bearer.
 | `check` | `sounds` (default all): the checks with scores, thresholds and flagged ranges. |
 | `import` | `source` (csv or patch text, or a path), `id`: make classic sounds. |
 | `export` | `sounds` (default all), `format` (`wav` default, `patch`, `csv`), `out` (default `<project>/exports`). |
-| `request` | File (`sound`, `note`), `reply` (`id`, `text`) or `cancel` a request. |
+| `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |
+| `request` | File (`sound`, `note`, `tags`, `like`), `reply` (`id`, `text`) or `cancel` a request. |
 | `work` | `next` (default), `progress`, `done`, `blocked`, `list`. |
 | `await_requests` | Wait for people; `cursor` from the previous call. |
 

@@ -4,7 +4,7 @@
 // (answer it here), done.
 
 import { useState } from 'react';
-import { CLASSIC_FIELDS, WAVE_NAMES, checkSummary, checksPass, type Sound, type WorkRequest } from '@soundclaw/core';
+import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, tagsNote, checkSummary, checksPass, type Sound, type WorkRequest } from '@soundclaw/core';
 import { NoListener, unattended, useNow } from './Listening.tsx';
 import type { Store } from './store.ts';
 import { Spectrogram } from './Spectrogram.tsx';
@@ -20,7 +20,10 @@ function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
   return (
     <div className="request" data-testid={`request-${q.id}`} data-state={q.state}>
       <div>
-        <b>{q.id}</b> <span className={`chip state-${q.state}`}>{label}</span> <span className="dim">“{q.note}”</span>
+        <b>{q.id}</b> <span className={`chip state-${q.state}`}>{label}</span>
+        {(q.tags ?? []).map((t) => <span key={t} className={`chip tag${t === 'good' ? ' good' : ''}`} data-testid={`request-tag-${q.id}`}>{t}</span>)}
+        {q.other && <span className="dim" data-testid={`request-other-${q.id}`}>like {q.other}</span>}
+        {(!(q.tags ?? []).length || q.note !== tagsNote(q.tags, q.other)) && <span className="dim"> “{q.note}”</span>}
         {(q.state === 'open' || q.state === 'claimed' || q.state === 'blocked') && (
           <button className="link" data-testid={`cancel-${q.id}`} onClick={() => void store.request({ action: 'cancel', id: q.id })}>withdraw</button>
         )}
@@ -39,8 +42,44 @@ function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
   );
 }
 
+const slug = (t: string): string => t.replace(/[^a-z]+/g, '-');
+
+/** Listening feedback: click quick tags, add a few words, send. It reaches the agent as a request with the tags. */
+function Feedback({ store, sound }: { store: Store; sound: Sound }) {
+  const [tags, setTags] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [other, setOther] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const similar = tags.includes(SIMILAR_TAG);
+  const toggle = (t: string) => setTags((xs) => (xs.includes(t) ? xs.filter((x) => x !== t) : [...xs, t]));
+  const others = store.sounds.filter((x) => x.id !== sound.id);
+  const send = async () => {
+    const r = await store.feedback(sound.id, tags, note, similar && other ? other : undefined);
+    if (r.ok) { setTags([]); setNote(''); setOther(''); setProblem(null); } else setProblem(r.error ?? 'refused');
+  };
+  return (
+    <div className="feedback" data-testid={`feedback-${sound.id}`}>
+      <div className="tags">
+        {FEEDBACK_TAGS.map((t) => (
+          <button key={t} className={`tag${tags.includes(t) ? ' on' : ''}${t === 'good' ? ' good' : ''}`} aria-pressed={tags.includes(t)} data-testid={`tag-${sound.id}-${slug(t)}`} onClick={() => toggle(t)}>{t}</button>
+        ))}
+      </div>
+      {similar && (
+        <select value={other} onChange={(e) => setOther(e.target.value)} data-testid={`tag-other-${sound.id}`} aria-label="Which sound is it too similar to?">
+          <option value="">which sound? (optional)</option>
+          {others.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}
+        </select>
+      )}
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="A few words, if the tags are not enough" data-testid={`feedback-text-${sound.id}`} />
+      <button disabled={!tags.length && !note.trim()} data-testid={`feedback-send-${sound.id}`} onClick={() => void send()}>Send feedback</button>
+      {problem && <div className="error" data-testid={`feedback-error-${sound.id}`}>{problem}</div>}
+    </div>
+  );
+}
+
 export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
   const [asking, setAsking] = useState(false);
+  const [feeding, setFeeding] = useState(false);
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const samples = store.render(sound);
@@ -48,7 +87,7 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
   const pass = checksPass(measured.checks);
   const failing = measured.checks.filter((k) => !k.pass);
   const playing = store.playing === sound.id;
-  const plays = store.played.filter((p) => p.id === sound.id).length;
+  const plays = store.played.filter((p) => p.id === sound.id && !p.slot).length;
   const mine = store.requests.filter((q) => q.sound === sound.id);
   const send = async () => {
     const r = await store.askForChanges(sound.id, note);
@@ -70,7 +109,7 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
           <span>{fmt(sound.frequency)} Hz</span><span>{fmt(sound.duration)} s</span><span>volume {fmt(sound.volume)}</span>
         </div>
       ) : (
-        <div className="params classic" data-testid={`params-${sound.id}`} data-voice="classic" title="The classic voice's 25 parameters (read-only here; the editor comes next). Changed from the default in bold.">
+        <div className="params classic" data-testid={`params-${sound.id}`} data-voice="classic" title="The classic voice's 25 parameters; Edit opens the sliders. Changed from the default in bold.">
           {CLASSIC_FIELDS.map((f) => (
             <span key={f.name} className={sound.patch[f.name] === f.default ? 'dim' : 'changed'} data-testid={`param-${sound.id}-${f.name}`} title={f.help}>
               {f.name} {f.name === 'wave' ? WAVE_NAMES[sound.patch.wave] : fmt(sound.patch[f.name])}
@@ -89,7 +128,10 @@ export function SoundCard({ store, sound }: { store: Store; sound: Sound }) {
         </button>
         <button data-testid={`approve-${sound.id}`} disabled={sound.status === 'approved'} onClick={() => void store.approve(sound.id)}>Approve</button>
         <button data-testid={`reject-${sound.id}`} onClick={() => setAsking(!asking)}>Ask for changes</button>
+        <button data-testid={`feedback-toggle-${sound.id}`} aria-expanded={feeding} onClick={() => setFeeding(!feeding)}>Feedback</button>
+        <a className="button" href={`#/sound/${sound.id}`} data-testid={`edit-${sound.id}`}>Edit</a>
       </div>
+      {feeding && <Feedback store={store} sound={sound} />}
       {asking && (
         <div className="ask">
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should change? (e.g. softer, a little lower)" data-testid={`reject-text-${sound.id}`} rows={2} />

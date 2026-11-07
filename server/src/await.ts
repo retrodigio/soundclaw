@@ -21,6 +21,8 @@ export interface AgentEvent {
   id: string | null;
   sound: string;
   note: string;
+  /** Quick tags on the request (too loud, good, …). */
+  tags?: string[];
   by: string;
   at: string;
   next: 'work' | 'history';
@@ -91,7 +93,7 @@ export class Hub {
   syncRequests(records: RequestRecord[], reqs: ReadonlyMap<string, WorkRequest>): void {
     if (records.length < this.consumed) this.consumed = 0;
     for (const r of records.slice(this.consumed)) {
-      if (r.type === 'request') this.push({ kind: 'request', id: r.id, sound: r.sound, note: r.note, by: r.by, at: r.at, next: 'work' });
+      if (r.type === 'request') this.push({ kind: 'request', id: r.id, sound: r.sound, note: r.note, ...(r.tags?.length ? { tags: r.tags } : {}), by: r.by, at: r.at, next: 'work' });
       else if (r.type === 'reply' || r.type === 'cancel') {
         this.push({ kind: r.type, id: r.id, sound: reqs.get(r.id)?.sound ?? '', note: r.text ?? '', by: r.by, at: r.at, next: 'work' });
       }
@@ -199,7 +201,7 @@ export function unseenOpen(reqs: ReadonlyMap<string, WorkRequest>): AgentEvent[]
     .sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)))
     .map((q) => {
       const reply = q.events.filter((e) => e.type === 'reply').at(-1);
-      return { seq: 0, kind: reply ? 'reply' as const : 'request' as const, id: q.id, sound: q.sound, note: reply?.text ?? q.note, by: reply?.by ?? q.by, at: reply?.at ?? q.at, next: 'work' as const };
+      return { seq: 0, kind: reply ? 'reply' as const : 'request' as const, id: q.id, sound: q.sound, note: reply?.text ?? q.note, ...(!reply && q.tags.length ? { tags: q.tags } : {}), by: reply?.by ?? q.by, at: reply?.at ?? q.at, next: 'work' as const };
     });
 }
 
@@ -209,7 +211,7 @@ export function formatEvents(events: AgentEvent[], cursor: string, o: { cli?: st
   const out: string[] = [`${events.length} event${events.length === 1 ? '' : 's'}:`];
   for (const e of events) {
     const what = e.id ? `${e.kind} ${e.id} (${e.sound})` : `${e.kind} ${e.sound}`;
-    out.push(`  ${what} from ${e.by} at ${e.at}${e.note ? `: "${e.note}"` : ''}`);
+    out.push(`  ${what} from ${e.by} at ${e.at}${e.tags?.length ? ` [${e.tags.join(', ')}]` : ''}${e.note ? `: "${e.note}"` : ''}`);
     out.push(e.next === 'work'
       ? `    next: work${e.kind === 'cancel' ? ' (action "list"; stop if you hold it)' : e.id ? ` (claim it: work id=${e.id})` : ''}` +
         (o.cli && e.kind !== 'cancel' && e.id ? `; without MCP: soundclaw work ${o.cli} claim ${e.id}` : '')

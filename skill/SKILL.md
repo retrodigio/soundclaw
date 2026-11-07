@@ -25,9 +25,13 @@ Code). Without MCP, use the `soundclaw` command line, which does the same.
 
 1. `project` (CLI: `soundclaw list <project>`). Give the person the watch link it prints, so they can
    listen, approve, and ask for changes on each sound's card.
-2. `history` at the start of every turn while someone watches, and whenever they say they did
-   something (`by=human:<name>` to pick one person). Carry on from their edits; never silently
-   redo them.
+2. `changes` (CLI: `soundclaw changes <project> --by human`) at the start of every turn while
+   someone watches, **and before you edit any sound a person has touched**. It lists what people
+   changed since you last looked: the parameters before and after, the numbers before and after
+   (duration, loudness, centroid, pitch) and a before/after compare picture (a PNG path). People
+   edit with sliders in the dashboard, as `human:<name>`. Carry on from their edits; **never undo
+   or overwrite a person's edit silently** (if you think it is wrong, say so in a reply or a
+   question first). `history` shows the raw tape (`by=human:<name>` to pick one person).
 3. **Keep a background wait running** on a served project, so people's requests reach you:
    `soundclaw await <project folder>` (run it in the background; it blocks, prints what people
    asked for and a cursor, then exits). When it exits, handle what it printed (`work` for a
@@ -40,7 +44,8 @@ Code). Without MCP, use the `soundclaw` command line, which does the same.
 `run` takes commands, one per line or separated by `;`:
 
 ```
-sound new zap voice=classic preset=laser seed=3     # presets: pickup laser explosion powerup hit jump blip
+sound new zap voice=classic preset=laser seed=3     # presets: pickup laser explosion powerup hit jump blip random
+sound generate zap random seed=9                    # a new patch for zap from a category (or any sound: random)
 sound set zap wave=saw freq=0.6 slide=-0.3 decay=0.25 volume=0.2
 sound patch zap "wave=1,freq=0.6,slide=-0.3"       # or all 25 values from sfxr text
 sound mutate zap amount=0.05 as=zap2                 # a small seeded change, into a new sound
@@ -80,7 +85,11 @@ redo
 
 ## Requests from people
 
-A person writes what should change on a sound's card (**Ask for changes**), or approves it.
+A person writes what should change on a sound's card (**Ask for changes**), clicks quick tags
+(too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound,
+good), or approves it. A tagged request arrives as `request r3 (beep) from human:ana [too loud, too
+harsh]: "…"`; *too similar* names the other sound (`view <sound> compare <other>` shows the
+distance); `good` alone is praise: nothing to change, close it with `work done`.
 Take requests before anything else:
 
 1. `work` (CLI: `soundclaw work <project> claim`): claims the next open request and shows what is

@@ -6,7 +6,7 @@
 
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTHOR_RE, foldRequests, nextRequestId, openRequests, quote, requestProblem, serializeSound, type RequestRecord, type WorkRequest } from '@soundclaw/core';
+import { AUTHOR_RE, SIMILAR_TAG, foldRequests, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, type RequestRecord, type WorkRequest } from '@soundclaw/core';
 import { unseenOpen, type AgentEvent } from './await.ts';
 import { checkLine, failingChecks } from './ears.ts';
 import { REQUESTS_FILE, ProjectError, type Project } from './project.ts';
@@ -54,13 +54,25 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   if (q.action === 'cancel') return appendRequest(p, { type: 'cancel', id: q.id, by, at, ...(q.text ? { text: q.text } : {}) });
   const reqs = readRequests(p);
   const id = nextRequestId(reqs);
-  const note = (q.note ?? '').trim();
+  const text = (q.note ?? '').trim();
+  const tags = [...new Set(q.tags ?? [])];
+  for (const t of tags) if (!isFeedbackTag(t)) throw new ProjectError(`no tag '${t}' (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good)`);
   w.sound(q.sound); // throws when there is no such sound
-  if (!note) throw new ProjectError('say what should change');
-  const rec: RequestRecord = { type: 'request', id, sound: q.sound, kind: 'change', note, by, at };
+  if (q.other !== undefined) {
+    if (!tags.includes(SIMILAR_TAG)) throw new ProjectError(`other names the sound a '${SIMILAR_TAG}' tag points at`);
+    if (!w.has(q.other)) throw new ProjectError(`no sound '${q.other}' to compare with`);
+    if (q.other === q.sound) throw new ProjectError('a sound is not similar to itself: name another');
+  }
+  const note = text || tagsNote(tags, q.other);
+  if (!note) throw new ProjectError('say what should change, or pick a tag');
+  // Praise alone is feedback: nothing to change, so the sound is not marked.
+  const kind = tags.length && tags.every((t) => t === 'good') ? 'feedback' : 'change';
+  const rec: RequestRecord = { type: 'request', id, sound: q.sound, kind, note, ...(tags.length ? { tags } : {}), ...(q.other ? { other: q.other } : {}), by, at };
   const problem = requestProblem(reqs, rec);
   if (problem) throw new ProjectError(problem);
-  const r = w.hub.withoutMarkEvents(() => w.run({ commands: `sound mark ${q.sound} rejected ${quote(note)}`, by }));
+  if (kind === 'feedback') return appendRequest(p, rec);
+  const markNote = [tags.length && text ? `[${tags.join(', ')}]` : '', note].filter(Boolean).join(' ');
+  const r = w.hub.withoutMarkEvents(() => w.run({ commands: `sound mark ${q.sound} rejected ${quote(markNote)}`, by }));
   if (!r.ok) throw new ProjectError(r.errors.map((e) => e.message).join('; '));
   return appendRequest(p, { ...rec, mark: r.added.at(-1)?.seq });
 }
@@ -70,11 +82,11 @@ export function requestLine(q: WorkRequest): string {
   // An open request an agent was handed reads as the dashboard's card does: "seen by agent:claude".
   const state = q.state === 'claimed' ? `claimed by ${q.claimedBy}` : q.state === 'blocked' ? `blocked: "${q.question}"`
     : q.state === 'open' && q.seen.length ? `seen by ${q.seen.map((x) => x.by).join(', ')}` : q.state;
-  return `${q.id} change ${q.sound}${q.note ? `: "${q.note}"` : ''} (from ${q.by} at ${q.at}; ${state})`;
+  return `${q.id} ${q.kind} ${q.sound}${q.tags.length ? ` [${q.tags.join(', ')}]` : ''}${q.note && q.note !== tagsNote(q.tags, q.other) ? `: "${q.note}"` : ''}${q.other ? ` (like ${q.other})` : ''} (from ${q.by} at ${q.at}; ${state})`;
 }
 
 /** A request, reply or cancel from the CLI or MCP as the dashboard's message. Checked here for shape; personRequest checks it against the project. */
-export function toPersonRequest(a: { action?: string; sound?: string; note?: string; id?: string; text?: string }): PersonRequest {
+export function toPersonRequest(a: { action?: string; sound?: string; note?: string; id?: string; text?: string; tags?: string[]; other?: string }): PersonRequest {
   const action = a.action ?? 'request';
   if (action === 'reply' || action === 'cancel') {
     if (!a.id || !/^r\d+$/.test(a.id)) throw new ProjectError(`${action}: give the request's id (like r3)`);
@@ -86,7 +98,7 @@ export function toPersonRequest(a: { action?: string; sound?: string; note?: str
   }
   if (action !== 'request') throw new ProjectError(`unknown action '${action}' (request, reply, cancel)`);
   if (!a.sound) throw new ProjectError('request: give the sound');
-  return { action, kind: 'change', sound: a.sound, note: a.note ?? '' };
+  return { action, kind: 'change', sound: a.sound, note: a.note ?? '', ...(a.tags?.length ? { tags: a.tags } : {}), ...(a.other ? { other: a.other } : {}) };
 }
 
 /** An agent's name as an author: `claude` and `agent:claude` both give `agent:claude`. */
@@ -175,7 +187,7 @@ export function agentWork(w: Writer, agent: string, q: AgentWork, steps: WorkSte
     throw new ProjectError(`${id} is not done: sound '${target.sound}' no longer exists. Make it again, or ${steps.blocked(id)} if you cannot`);
   }
   // done needs the sound's checks to pass: the person is handed something measured, not just claimed
-  if (q.action === 'done' && target && target.state === 'claimed' && target.claimedBy === agent && w.has(target.sound)) {
+  if (q.action === 'done' && target && target.kind === 'change' && target.state === 'claimed' && target.claimedBy === agent && w.has(target.sound)) {
     const failing = failingChecks(w, target.sound);
     if (failing) throw new ProjectError(`${id} is not done: ${target.sound}'s checks fail (${failing}). Fix it (see \`check\`), or ${steps.blocked(id)} if you cannot`);
   }
@@ -216,6 +228,11 @@ export function requestBrief(w: Writer, q: WorkRequest, steps: WorkSteps = MCP_S
   const out = [requestLine(q)];
   if (w.has(q.sound)) out.push(`the sound now:\n${serializeSound(w.sound(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else out.push(`sound '${q.sound}' does not exist any more`);
+  if (q.kind === 'feedback') {
+    out.push(`This is praise (tag good): nothing needs to change. Close it with ${steps.done(q.id, 'a short acknowledgement')}.`);
+    return out.join('\n');
+  }
+  if (q.other) out.push(`The person finds it too like ${q.other}: \`view ${q.sound} compare ${q.other}\` shows how close they are.`);
   if (w.has(q.sound)) out.push(`${checkLine(w.measure(q.sound))} (finishing the request needs every check to pass; \`check\` lists what fails and where, \`view\` and \`describe\` let you hear the change)`);
   out.push(`Change it as asked with \`sound set ${q.sound} …\` (the request is also a \`sound mark ${q.sound} rejected\` on the history${q.mark ? ` at #${q.mark}` : ''}; the history shows the person's own edits); then ${steps.done(q.id, 'what changed')}.`);
   if (q.events.some((x) => x.type === 'reply')) out.push(`The person answered: "${q.events.filter((x) => x.type === 'reply').at(-1)!.text}"`);

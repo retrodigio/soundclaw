@@ -1,4 +1,4 @@
-// soundclaw: new | run | list | history | render | view | describe | check | import | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
+// soundclaw: new | run | list | history | changes | render | view | describe | check | import | export | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
 
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, openRequests, type ViewKind } from '@soundclaw/core';
 import {
-  EXPORT_FORMATS, ProjectError, Writer, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, changesText, ProjectError, Writer, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
@@ -45,6 +45,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         sound set <id> <param>=<value> ...                  tone: frequency duration volume; classic: the 25
                                                             parameters (wave=square|saw|sine|noise) and seed
         sound patch <id> "<single-patch text>"              all 25 values from sfxr patch text
+        sound generate <id> <category|random> [seed=<n>]    a new patch for a classic sound from a category's ranges
         sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change (also: mutate <id> ...)
         sound mark <id> approved|rejected|draft ["note"]
         undo [group=<g>] [by=<author>]    redo [group=<undo group>] [by=<author>]   (each alone in its batch)
@@ -78,9 +79,18 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       Default wav: 16-bit PCM, 44,100 Hz, mono (classic sounds as pre-rendered WAVs, trunc(s*32000)).
       patch: <id>.sfxr single-patch text; csv: one synth.csv. Without ids, all sounds. Default
       folder: <project>/exports/.
-  soundclaw request <project> [<id> --note "<what should change>"] [--by <author>]
+  soundclaw changes <project> [--since <command number | time>] [--by human|agent|<author>] [--as <agent>] [--peek]
+      What other hands changed since this agent last looked (a cursor kept per agent in the
+      project): each history group with the parameters before and after, the numbers before and
+      after (duration, loudness, centroid, pitch) and a before/after compare view saved as a PNG.
+      Without --by: everyone but the agent itself; --by human: people only. Reading moves the
+      cursor (not with --since or --peek). Never undo a person's edit silently.
+  soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
       Ask for a change on a sound, as the dashboard's Ask for changes does (also writes
-      sound mark <id> rejected "<note>" on the history). Without an id, lists the requests still
+      sound mark <id> rejected "<note>" on the history). --tag adds the quick tags of the cards
+      (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another
+      sound, good; with --like naming the other sound); a note may then be left out, and the tag
+      good alone is praise (no mark). Without an id, lists the requests still
       open, claimed or blocked (open ones say seen by <agent> once an agent has been handed them).
       --by is human:<name> (default human:cli).
   soundclaw reply <project> <request> "<answer>" [--by <author>]      answer a blocked request (it opens again)
@@ -179,7 +189,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
   export: [['out', 'format'], []],
   import: [['id', 'by'], []],
-  request: [['note', 'by'], []],
+  request: [['note', 'by', 'tag', 'like'], []],
   reply: [['by'], []],
   cancel: [['by'], []],
   work: [['by'], []],
@@ -311,13 +321,22 @@ function cmdImport(io: Io, p: Parsed): number {
   if (extra.length) throw new UsageError(`import: put the patch text in quotes (unexpected '${extra[0]}')`);
   assertNoServer(dir, io);
   const w = wr(io, dir);
-  const { commands, ids } = importCommands(source, one(p, 'id') ?? null);
+  const { commands, ids, warnings } = importCommands(source, one(p, 'id') ?? null);
   const r = w.run({ commands, by: author(p, 'agent:claude', (n) => `agent:${n}`) });
   if (!r.ok) {
     io.err(formatErrors('import', r.errors) + '\n');
     return 1;
   }
-  io.out(`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}\n${r.touched.map((id) => soundSummary(w, id)).join('\n')}\n`);
+  io.out(`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}\n${warnings.map((x) => `warning: ${x}\n`).join('')}${r.touched.map((id) => soundSummary(w, id)).join('\n')}\n`);
+  return 0;
+}
+
+/** `changes`: what others changed since this agent looked. Reads the tape; only the agent's cursor file is written. */
+function cmdChanges(io: Io, p: Parsed): number {
+  const [dir, ...extra] = p.pos;
+  if (!dir || extra.length) throw new UsageError('changes: give a project folder');
+  const o = { agent: agentName(one(p, 'as')), since: one(p, 'since'), by: one(p, 'by'), peek: p.flags.has('peek') };
+  io.out(changesText(wr(io, dir), o) + '\n');
   return 0;
 }
 
@@ -342,7 +361,7 @@ function cmdRequest(io: Io, p: Parsed): number {
   }
   assertNoServer(dir, io);
   const w = wr(io, dir);
-  const q = personRequest(w, author(p, 'human:cli', humanName), toPersonRequest({ action: 'request', sound, note: one(p, 'note') }));
+  const q = personRequest(w, author(p, 'human:cli', humanName), toPersonRequest({ action: 'request', sound, note: one(p, 'note'), tags: p.flags.get('tag'), other: one(p, 'like') }));
   w.requestsChanged();
   io.out(`${requestLine(q)}\n`);
   return 0;
@@ -443,6 +462,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'describe': return cmdDescribe(io, parseArgs(rest, [], []));
       case 'check': return cmdCheck(io, parseArgs(rest, [], []));
       case 'import': return cmdImport(io, parseArgs(rest, ...WRITE_OPTS.import!));
+      case 'changes': return cmdChanges(io, parseArgs(rest, ['since', 'by', 'as'], ['peek']));
       case 'export': return cmdExport(io, parseArgs(rest, ...WRITE_OPTS.export!));
       case 'request': return cmdRequest(io, parseArgs(rest, ...WRITE_OPTS.request!));
       case 'reply': case 'cancel': return cmdAnswer(io, cmd, parseArgs(rest, ...WRITE_OPTS.reply!));

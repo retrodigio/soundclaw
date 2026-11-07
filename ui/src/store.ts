@@ -19,13 +19,23 @@ export type RunResult = { ok: true; group: string | null; seq: number | null } |
 /** A playback the page started: kept so tests (and curious people) can see what was played. */
 export interface Played {
   id: string;
+  /** Which side of an A/B comparison was played (absent: the sound itself). */
+  slot?: 'A' | 'B';
   /** Hash of the samples played; the CLI and MCP print its first 12 digits. */
   hash: string;
   samples: number;
   key: string;
 }
 
-/** The author name this page writes as: ?name=…, else the last one used here, else human:guest. */
+/** What a sound's A side is: a snapshot of its parameters, or another sound (followed as it changes). */
+export type Pin = { kind: 'snapshot'; sound: Sound; label: string } | { kind: 'sound'; id: string };
+
+/** The sound the page's route names (#/sound/<id>), or null for the list of cards. */
+export function routeSound(hash: string): string | null {
+  return /^#\/sound\/([a-z][a-z0-9_-]*)$/.exec(hash)?.[1] ?? null;
+}
+
+/** The author name this page writes as: ?name=…, else the last one used here, else human:owner. */
 function initialAuthor(): string {
   const q = new URLSearchParams(location.search).get('name');
   const stored = (() => {
@@ -36,7 +46,7 @@ function initialAuthor(): string {
     }
   })();
   for (const c of [q && (q.startsWith('human:') ? q : `human:${q}`), stored]) if (c && HUMAN_RE.test(c)) return c;
-  return 'human:guest';
+  return 'human:owner';
 }
 
 export class Store {
@@ -49,8 +59,14 @@ export class Store {
   presence: Presence | null = null;
   me: string = initialAuthor();
   error: string | null = null;
-  /** The sound playing now. */
+  /** The sound playing now (its id; `<id>#A` for the A side of a comparison). */
   playing: string | null = null;
+  /** The sound whose editor is open, from the address (#/sound/<id>). */
+  editing: string | null = routeSound(location.hash);
+  /** Replay a sound each time it changes in the editor. */
+  playOnChange = true;
+  /** The A side of each sound's A/B comparison. */
+  pins = new Map<string, Pin>();
   played: Played[] = [];
   /** Bumped on every change; React's snapshot. */
   version = 0;
@@ -77,6 +93,7 @@ export class Store {
 
   connect(token: string): void {
     this.token = token;
+    window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.changed(); });
     const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     this.ws = ws;
@@ -172,6 +189,37 @@ export class Store {
     return this.request({ action: 'request', kind: 'change', sound, note });
   }
 
+  /** Listening feedback: quick tags and/or a note on a sound, as a request the agent receives through await. */
+  feedback(sound: string, tags: string[], note: string, other?: string): Promise<Answer> {
+    return this.request({ action: 'request', kind: 'change', sound, note, tags, ...(other ? { other } : {}) });
+  }
+
+  /** The A side of a sound's comparison, as a sound document (null: nothing pinned, or the other sound is gone). */
+  pinned(id: string): { sound: Sound; label: string } | null {
+    const pin = this.pins.get(id);
+    if (!pin) return null;
+    if (pin.kind === 'snapshot') return { sound: pin.sound, label: pin.label };
+    const s = this.sounds.find((x) => x.id === pin.id);
+    return s ? { sound: s, label: pin.id } : null;
+  }
+
+  pinSnapshot(id: string): void {
+    const s = this.sounds.find((x) => x.id === id);
+    if (!s) return;
+    this.pins.set(id, { kind: 'snapshot', sound: s.voice === 'classic' ? { ...s, patch: { ...s.patch } } : { ...s }, label: `${id} as it was at #${this.tape.at(-1)?.seq ?? 0}` });
+    this.changed();
+  }
+
+  pinOther(id: string, other: string): void {
+    this.pins.set(id, { kind: 'sound', id: other });
+    this.changed();
+  }
+
+  unpin(id: string): void {
+    this.pins.delete(id);
+    this.changed();
+  }
+
   undo(): Promise<RunResult> {
     return this.run('undo');
   }
@@ -243,12 +291,22 @@ export class Store {
   /** Play a sound: rendered here with core, handed to Web Audio at the renderer's own rate. */
   async play(id: string): Promise<void> {
     const s = this.sounds.find((x) => x.id === id);
-    if (!s) return;
-    if (this.playing === id) { this.stop(); return; }
+    if (s) await this.playDoc(id, s);
+  }
+
+  /** Play one side of a comparison: A is the pinned sound, B the sound as it stands. */
+  async playSide(id: string, slot: 'A' | 'B'): Promise<void> {
+    const doc = slot === 'A' ? this.pinned(id)?.sound : this.sounds.find((x) => x.id === id);
+    if (doc) await this.playDoc(slot === 'A' ? `${id}#A` : id, doc, id, slot);
+  }
+
+  /** Play a sound document under a playing key (a toggle: playing it again stops it). */
+  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false): Promise<void> {
+    if (this.playing === key && !restart) { this.stop(); return; }
     this.stop();
     const samples = this.render(s);
-    this.played.push({ id, hash: samplesHash(samples), samples: samples.length, key: renderKey(s) });
-    this.playing = id;
+    this.played.push({ id, ...(slot ? { slot } : {}), hash: samplesHash(samples), samples: samples.length, key: renderKey(s) });
+    this.playing = key;
     this.changed();
     try {
       this.ctx ??= new AudioContext({ sampleRate: 44100 });

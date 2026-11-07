@@ -1,0 +1,206 @@
+// `changes`: what other hands (people, usually) did to the sounds since an agent last looked.
+// Each group on the tape after the agent's cursor is shown with the parameters before and after,
+// the numbers before and after, and a before/after compare view saved as a PNG. The cursor is
+// kept per agent in the project (.cache/changes-seen.json, ignored by git), the way `await`
+// remembers what an agent has seen.
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { AUTHOR_RE, CLASSIC_FIELDS, TONE_PARAMS, WAVE_NAMES, activeGroups, compareView, groupsOf, replay, serializeSound, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
+import { ProjectError } from './project.ts';
+import type { Writer } from './writer.ts';
+
+export const CHANGES_FILE = join('.cache', 'changes-seen.json');
+
+/** The most changes shown in detail (the newest); older ones are counted. */
+export const MAX_DETAILED = 12;
+
+type Cursors = Record<string, number>;
+
+function readCursors(w: Writer): Cursors {
+  const f = join(w.project.dir, CHANGES_FILE);
+  if (!existsSync(f)) return {};
+  try {
+    const v = JSON.parse(readFileSync(f, 'utf8')) as Cursors;
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCursor(w: Writer, agent: string, seq: number): void {
+  const c = readCursors(w);
+  c[agent] = seq;
+  const f = join(w.project.dir, CHANGES_FILE);
+  mkdirSync(join(f, '..'), { recursive: true });
+  writeFileSync(f, JSON.stringify(c, null, 2) + '\n');
+}
+
+/** The tape number an agent has looked up to (0: never). */
+export function changesCursor(w: Writer, agent: string): number {
+  return readCursors(w)[agent] ?? 0;
+}
+
+export interface ChangesOptions {
+  /** The agent asking: `agent:<name>`. Its own groups are left out unless `by` names it. */
+  agent: string;
+  /** A command number or a time; with it the agent's cursor is neither read nor moved. */
+  since?: string;
+  /** `human`, `agent`, or one author (`human:ana`); default: everyone but the asking agent. */
+  by?: string;
+  /** Look without moving the cursor. */
+  peek?: boolean;
+}
+
+export interface SoundChange {
+  id: string;
+  /** `new`, `removed` or `edited`. */
+  kind: 'new' | 'removed' | 'edited';
+  /** `name old → new` lines. */
+  params: string[];
+  /** The numbers before and after, as text (empty for a new or removed sound). */
+  numbers: string[];
+  /** The compare view PNG, when both sides exist. */
+  view: string | null;
+}
+
+export interface GroupChange {
+  group: string;
+  first: number;
+  last: number;
+  by: string;
+  at?: string;
+  commands: string[];
+  /** The group is out of effect now (undone later). */
+  undone: boolean;
+  sounds: SoundChange[];
+}
+
+export interface ChangesResult {
+  changes: GroupChange[];
+  /** Groups after the cursor that matched but are older than the detailed ones. */
+  omitted: number;
+  /** Where the agent had looked up to, and where it has now. */
+  from: number;
+  cursor: number;
+  explicit: boolean;
+}
+
+function matchesAuthor(by: string, filter: string | undefined, agent: string): boolean {
+  if (!filter) return by !== agent;
+  if (filter === 'human' || filter === 'agent') return by.startsWith(`${filter}:`);
+  return by === filter;
+}
+
+/** The tape's seq to start after: a number is a command number; anything else is a time (UTC). */
+function sinceSeq(entries: readonly TapeEntry[], since: string): number {
+  if (/^#?\d+$/.test(since)) return Number(since.replace('#', ''));
+  const t = Date.parse(since);
+  if (Number.isNaN(t)) throw new ProjectError(`--since is a command number (like 14) or a time (like 2026-11-06T10:00:00Z), not '${since}'`);
+  let last = 0;
+  for (const e of entries) {
+    if (e.at && Date.parse(e.at) <= t) last = e.seq;
+  }
+  return last;
+}
+
+const num = (v: number, d = 1): string => (Number.isFinite(v) ? v.toFixed(d) : '−∞');
+
+function paramLines(a: Sound | undefined, b: Sound | undefined): string[] {
+  const out: string[] = [];
+  if (a && b && a.voice === 'classic' && b.voice === 'classic') {
+    for (const f of CLASSIC_FIELDS) {
+      if (a.patch[f.name] === b.patch[f.name]) continue;
+      const show = (v: number) => (f.name === 'wave' ? WAVE_NAMES[v] ?? String(v) : String(v));
+      out.push(`${f.name} ${show(a.patch[f.name])} → ${show(b.patch[f.name])}`);
+    }
+    if (a.patch.seed !== b.patch.seed) out.push(`seed ${a.patch.seed ?? 'auto'} → ${b.patch.seed ?? 'auto'}`);
+  } else if (a && b && a.voice === 'tone' && b.voice === 'tone') {
+    for (const p of TONE_PARAMS) {
+      const k = p.name as 'frequency' | 'duration' | 'volume';
+      if (a[k] !== b[k]) out.push(`${k} ${a[k]} → ${b[k]}`);
+    }
+  }
+  if (a && b && a.status !== b.status) out.push(`status ${a.status} → ${b.status}`);
+  return out;
+}
+
+function libraryAt(entries: readonly TapeEntry[], upTo: number): Library {
+  return replay(entries.filter((e) => e.seq <= upTo)).library;
+}
+
+/** The changes after the cursor, with the numbers and the compare views worked out. */
+export function collectChanges(w: Writer, o: ChangesOptions): ChangesResult {
+  if (o.by !== undefined && o.by !== 'human' && o.by !== 'agent' && !AUTHOR_RE.test(o.by)) throw new ProjectError(`--by is human, agent, or one author (human:<name>, agent:<name>), not '${o.by}'`);
+  const entries = w.tape();
+  const explicit = o.since !== undefined;
+  const from = explicit ? sinceSeq(entries, o.since!) : changesCursor(w, o.agent);
+  const cursor = entries.reduce((n, e) => Math.max(n, e.seq), 0);
+  const active = activeGroups(entries);
+  const wanted = [...groupsOf(entries)].filter(([, es]) => es[0]!.seq > from && matchesAuthor(es[0]!.by, o.by, o.agent));
+  const shown = wanted.slice(-MAX_DETAILED);
+  const changes: GroupChange[] = shown.map(([g, es]) => {
+    const first = es[0]!;
+    const last = es.at(-1)!;
+    const before = libraryAt(entries, first.seq - 1);
+    const after = libraryAt(entries, last.seq);
+    const sounds: SoundChange[] = [];
+    for (const id of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+      const a = before.get(id);
+      const b = after.get(id);
+      if (a && b && serializeSound(a) === serializeSound(b)) continue;
+      const kind = !a ? 'new' : !b ? 'removed' : 'edited';
+      const sc: SoundChange = { id, kind, params: paramLines(a, b), numbers: [], view: null };
+      if (a && b) {
+        const ra = w.cache.render(a);
+        const rb = w.cache.render(b);
+        const ma = w.measureSound(a, ra);
+        const mb = w.measureSound(b, rb);
+        const A = ma.analysis;
+        const B = mb.analysis;
+        const hz = (v: number | null) => (v === null ? 'none' : v.toFixed(0));
+        if (ra.key !== rb.key) {
+          sc.numbers = [
+            `duration ${num(A.duration, 3)} → ${num(B.duration, 3)} s`,
+            `loudness ${num(A.lufs)} → ${num(B.lufs)} LUFS`,
+            `centroid ${hz(A.centroid.mean)} → ${hz(B.centroid.mean)} Hz`,
+            `pitch ${hz(A.pitch.start)} → ${hz(B.pitch.start)} Hz`,
+          ];
+          const c = compareView(ra.samples, rb.samples, `${id} before ${g}`, `${id} after ${g}`);
+          const file = join(w.project.dir, '.cache', 'views', `change-${g}-${id}.png`);
+          mkdirSync(join(file, '..'), { recursive: true });
+          writeFileSync(file, c.image.png);
+          sc.view = file;
+        } else sc.numbers = ['the samples are the same'];
+      }
+      sounds.push(sc);
+    }
+    return { group: g, first: first.seq, last: last.seq, by: first.by, ...(first.at ? { at: first.at } : {}), commands: es.map((e) => e.cmd), undone: !active.has(g), sounds };
+  });
+  if (!o.peek && !explicit) writeCursor(w, o.agent, cursor);
+  return { changes, omitted: wanted.length - shown.length, from, cursor, explicit };
+}
+
+export function formatChanges(r: ChangesResult, o: ChangesOptions): string {
+  const who = o.by ? (o.by === 'human' ? 'people' : o.by) : `anyone but ${o.agent}`;
+  if (!r.changes.length) return `no changes by ${who} since #${r.from}${r.explicit || o.peek ? '' : ` (your cursor is now #${r.cursor})`}`;
+  const lines = [`${r.changes.length + r.omitted} change${r.changes.length + r.omitted === 1 ? '' : 's'} by ${who} since #${r.from}${r.explicit || o.peek ? '' : ` (your cursor is now #${r.cursor})`}:`];
+  if (r.omitted) lines.push(`  (${r.omitted} older ${r.omitted === 1 ? 'one is' : 'ones are'} not detailed; ask for them with --since)`);
+  for (const c of r.changes) {
+    lines.push('', `${c.group} #${c.first}${c.last > c.first ? `-#${c.last}` : ''} ${c.by}${c.at ? ' ' + c.at : ''}${c.undone ? '  (out of effect: undone)' : ''}`);
+    for (const cmd of c.commands) lines.push(`  ${cmd}`);
+    for (const s of c.sounds) {
+      lines.push(`  ${s.id} (${s.kind}):`);
+      for (const p of s.params) lines.push(`    ${p}`);
+      if (s.numbers.length) lines.push(`    numbers: ${s.numbers.join('; ')}`);
+      if (s.view) lines.push(`    compare view (before above, after below): ${s.view}`);
+    }
+    if (!c.sounds.length) lines.push('  (no sound differs after it)');
+  }
+  lines.push('', 'These are other hands\' edits: carry on from them, and do not undo or overwrite one silently. If you disagree, say so (reply, or ask the person) before changing it back.');
+  return lines.join('\n');
+}
+
+export function changesText(w: Writer, o: ChangesOptions): string {
+  return formatChanges(collectChanges(w, o), o);
+}

@@ -6,6 +6,7 @@ import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { openRequests } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
+import { changesText } from './changes.ts';
 import { checkText, describeText, exportFormat, formatExportFiles, importCommands, renderText, viewSound } from './ears.ts';
 import { ProjectError } from './project.ts';
 import { formatErrors, plural } from './report.ts';
@@ -27,6 +28,7 @@ Make sounds with \`run\` (one batch = one undo group; any error applies nothing)
   sound new <id>                                   a placeholder sine tone (frequency 20-20000 Hz, duration 0.01-10 s, volume 0-1)
   sound set <id> <param>=<value> [<param>=<value>...]   classic parameters (wave=square|saw|sine|noise, attack, sustain, punch, decay, freq, minFreq, slide, deltaSlide, vibratoDelay, vibratoDepth, vibratoSpeed, changeAmount, changeSpeed, duty, dutySweep, repeatSpeed, phaserOffset, phaserSweep, lowPass, lowPassSweep, resonance, highPass, highPassSweep, volume; seed) with their ranges in docs/commands.md
   sound patch <id> "<single-patch text>"           all 25 values at once (sfxr text: numbers in order, or name=value pairs)
+  sound generate <id> <category|random> [seed=<n>]   a new random patch for a classic sound, from a category's ranges (or any sound: random)
   sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change to a classic sound
   sound mark <id> approved|rejected|draft ["note"]   a status mark (people use the buttons; the note says why)
   undo [group=<g>] [by=<author>]   |   redo [group=<undo group>] [by=<author>]      run alone, as the only command of the batch
@@ -118,6 +120,24 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     }
   }));
 
+  server.registerTool('changes', {
+    title: 'What others changed',
+    description: 'What people (or other agents) changed since you last looked: each history group after your cursor with the parameters before and after, the numbers before and after (duration, loudness, centroid, pitch) and a before/after compare view saved as a PNG (the path is in the text). ' +
+      'Your cursor is kept per agent in the project and moves when you read, unless you pass since or peek. Call this before editing a sound a person has touched, and never undo a person\'s edit silently.',
+    annotations: { readOnlyHint: false },
+    inputSchema: z.object({
+      since: z.string().optional().describe('A command number (like 14) or a time: read from there, and leave the cursor alone'),
+      by: z.string().optional().describe('human (people only), agent, or one author like human:ana. Default: everyone but you'),
+      peek: z.boolean().optional().describe('Read without moving the cursor'),
+    }),
+  }, (a) => w.enqueue(() => {
+    try {
+      return { content: [text(changesText(w, { agent: AGENT, since: a.since, by: a.by, peek: a.peek }))] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
   server.registerTool('render', {
     title: 'Render a sound',
     description: 'Render a sound (through the content-hash cache) and return its numbers (samples, peak, rms, a hash of the samples; duration, loudness, true peak, attack, tail, brightness, pitch, onsets), a plain-words description, and the check summary as the last line. The same document always gives the same hash; the dashboard plays exactly these samples.',
@@ -186,10 +206,10 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     }),
   }, (a) => w.enqueue(() => {
     try {
-      const { commands, ids } = importCommands(a.source, a.id ?? null);
+      const { commands, ids, warnings } = importCommands(a.source, a.id ?? null);
       const r = w.run({ commands, by: AGENT });
       if (!r.ok) return fail(formatErrors('import', r.errors));
-      return { content: [text([`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}`, ...r.touched.map((id) => soundSummary(w, id))].join('\n'))] };
+      return { content: [text([`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}`, ...warnings.map((x) => `warning: ${x}`), ...r.touched.map((id) => soundSummary(w, id))].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -219,13 +239,15 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({
       action: z.enum(['request', 'reply', 'cancel']).optional().describe('Default request'),
       sound: z.string().optional().describe('request: the sound'),
-      note: z.string().optional().describe('request: what should change'),
+      note: z.string().optional().describe('request: what should change (may be left out when tags say it)'),
+      tags: z.array(z.enum(['too loud', 'too quiet', 'too long', 'too short', 'too harsh', 'too dull', 'too similar to another sound', 'good'])).optional().describe('request: the cards\' quick tags (good alone is praise: no mark)'),
+      like: z.string().optional().describe('request with the tag too similar to another sound: the other sound'),
       id: z.string().regex(/^r\d+$/).optional().describe('reply, cancel: the request'),
       text: z.string().optional().describe('reply: the answer; cancel: why'),
     }),
   }, (a) => w.enqueue(() => {
     try {
-      const q = personRequest(w, AGENT, toPersonRequest(a));
+      const q = personRequest(w, AGENT, toPersonRequest({ ...a, other: a.like }));
       w.requestsChanged();
       return { content: [text(requestLine(q))] };
     } catch (e) {

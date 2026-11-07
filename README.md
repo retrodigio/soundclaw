@@ -7,8 +7,8 @@ machine, and can be edited and checked by a person and an agent alike.
 
 > **Status: early.** The project folder, history, rendering, the server and dashboard, the request
 > loop between a person and an agent, the classic (sfxr-style) voice, and the views and checks an
-> agent "hears" with are in. The sound editors, the enhanced voices and the music tracker come
-> next. Expect the commands and documents to change.
+> agent "hears" with are in, and so is the sound editor (sliders, A/B, feedback tags). The enhanced
+> voices and the music tracker come next. Expect the commands and documents to change.
 
 ## What works today
 
@@ -32,7 +32,11 @@ machine, and can be edited and checked by a person and an agent alike.
 - **A live dashboard.** `soundclaw serve` shows every sound as a card with a play button, a
   waveform, a spectrogram, its checks and the history. The browser renders with the same code as the agent, so what plays is
   what the agent rendered (the card and the CLI print the same hash).
-- **People and agents talk through requests.** "Ask for changes" and "Approve" on a card reach an
+- **A sound editor.** Open a classic sound from its card: its 25 parameters as sliders in sfxr's
+  groups that replay as you move them, the category buttons and `random`, mutate, A/B, and WAV,
+  patch text and CSV downloads. Every edit is a command written as `human:<name>`, the line an
+  agent would write (a drag is one command), so `soundclaw changes` shows an agent what you did.
+- **People and agents talk through requests.** "Ask for changes", quick feedback tags (too loud, too harsh, good, …) and "Approve" on a card reach an
   agent that is waiting with `soundclaw await` (it exits with the events, which wakes the agent) or
   the MCP `await_requests`; the agent takes them with `soundclaw work` or the MCP `work` tool.
 

@@ -131,6 +131,34 @@ export function isCategory(name: string): name is CategoryName {
   return Object.prototype.hasOwnProperty.call(CATEGORIES, name);
 }
 
+/**
+ * sfxr's "randomize": any sound, not a kind of sound. Its ranges are data like the categories'
+ * (uniform draws, each group of parameters used with the chance written beside it; what is not
+ * drawn keeps its default), not sfxr's hidden power-law shaping.
+ */
+export const RANDOM: Category = {
+  help: 'anything: every parameter group used with the chance written here',
+  always: { wave: { pick: [0, 1, 2, 3] }, attack: 0, sustain: [0.05, 0.4], decay: [0.05, 0.5], freq: [0.1, 0.9], punch: [0, 0.5] },
+  maybe: [
+    { chance: 0.3, rules: { attack: [0.02, 0.15] } },
+    { chance: 0.6, rules: { slide: [-0.5, 0.5] } },
+    { chance: 0.2, rules: { minFreq: [0.05, 0.3] } },
+    { chance: 0.2, rules: { deltaSlide: [-0.3, 0.3] } },
+    { chance: 0.3, rules: { vibratoDepth: [0, 0.6], vibratoSpeed: [0.1, 0.6], vibratoDelay: [0, 0.4] } },
+    { chance: 0.3, rules: { changeSpeed: [0.3, 0.9], changeAmount: [-0.8, 0.8] } },
+    { chance: 0.4, rules: { duty: [0, 0.8], dutySweep: [-0.3, 0.3] } },
+    { chance: 0.2, rules: { repeatSpeed: [0.3, 0.9] } },
+    { chance: 0.25, rules: { phaserOffset: [-0.4, 0.6], phaserSweep: [-0.3, 0.3] } },
+    { chance: 0.3, rules: { lowPass: [0.2, 0.9], lowPassSweep: [-0.3, 0.3], resonance: [0, 0.5] } },
+    { chance: 0.3, rules: { highPass: [0, 0.4], highPassSweep: [-0.2, 0.2] } },
+  ],
+};
+
+/** The categories and `random`: what `sound generate` and `preset=` accept. */
+export const GENERATOR_NAMES: readonly string[] = [...CATEGORY_NAMES, 'random'];
+export type GeneratorName = CategoryName | 'random';
+export const isGenerator = (name: string): name is GeneratorName => name === 'random' || isCategory(name);
+
 /** Three decimals: readable, and survives the single-patch text's six significant digits. */
 const round3 = (v: number): number => Math.round(v * 1000) / 1000;
 
@@ -153,8 +181,8 @@ function applyRules(rng: Rng, into: Record<string, number>, rules: Rules): void 
 export const defaultGenSeed = (category: string, id: string): number => hashText(`${category}:${id}`);
 
 /** A patch from a category and a seed. The same pair always gives the same patch. */
-export function generate(category: CategoryName, seed: number): ClassicPatch {
-  const cat: Category = CATEGORIES[category];
+export function generate(category: GeneratorName, seed: number): ClassicPatch {
+  const cat: Category = category === 'random' ? RANDOM : CATEGORIES[category];
   const rng = new Rng(seed);
   const v: Record<string, number> = {};
   applyRules(rng, v, cat.always);
@@ -213,8 +241,8 @@ export function categoriesTable(): string {
   const fmt = (r: Rule): string => (typeof r === 'number' ? String(r) : Array.isArray(r) ? `${r[0]}..${r[1]}` : `one of ${(r as { pick: readonly number[] }).pick.join(', ')}`);
   const list = (rules: Rules): string => Object.entries(rules).map(([k, r]) => `${k} ${fmt(r as Rule)}`).join('; ');
   const lines = ['| Category | Meaning | Always | One of (weight) | Maybe (chance) |', '|---|---|---|---|---|'];
-  for (const name of CATEGORY_NAMES) {
-    const c: Category = CATEGORIES[name];
+  for (const name of GENERATOR_NAMES) {
+    const c: Category = name === 'random' ? RANDOM : CATEGORIES[name as CategoryName];
     lines.push(`| \`${name}\` | ${c.help} | ${list(c.always)} | ${(c.one ?? []).map((o) => `${list(o.rules)} (${o.weight})`).join(' / ') || '-'} | ${(c.maybe ?? []).map((m) => `${list(m.rules)} (${m.chance})`).join(' / ') || '-'} |`);
   }
   return lines.join('\n');

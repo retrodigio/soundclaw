@@ -16,14 +16,17 @@
 // request again and clears who has seen it, since the new answer has not been seen yet. Files
 // written before `seen` existed read the same: they simply hold no such records.
 
-export const REQUEST_KINDS = ['change'] as const;
+import { isFeedbackTag } from './editor.ts';
+
+/** `change`: something should be different. `feedback`: only praise (the tag `good`); nothing to change, the agent just acknowledges it. */
+export const REQUEST_KINDS = ['change', 'feedback'] as const;
 export type RequestKind = (typeof REQUEST_KINDS)[number];
 export const REQUEST_STATES = ['open', 'claimed', 'blocked', 'done', 'cancelled'] as const;
 export type RequestState = (typeof REQUEST_STATES)[number];
 
 /** One line of requests.jsonl. */
 export type RequestRecord =
-  | { type: 'request'; id: string; sound: string; kind: RequestKind; note: string; by: string; at: string; /** The `sound mark … rejected` it goes with (tape seq). */ mark?: number }
+  | { type: 'request'; id: string; sound: string; kind: RequestKind; note: string; by: string; at: string; /** The `sound mark … rejected` it goes with (tape seq). */ mark?: number; /** Quick tags a person clicked (too loud, good, …). */ tags?: string[]; /** With `too similar to another sound`: the other sound. */ other?: string }
   | { type: 'claim' | 'progress' | 'done' | 'blocked' | 'reply' | 'cancel' | 'seen'; id: string; by: string; at: string; text?: string };
 
 export interface RequestEvent {
@@ -42,6 +45,10 @@ export interface WorkRequest {
   by: string;
   at: string;
   mark?: number;
+  /** The quick tags on the request (empty when it has none). */
+  tags: string[];
+  /** The sound a `too similar` tag points at. */
+  other?: string;
   state: RequestState;
   /** Who claimed it (while claimed, and after). */
   claimedBy: string | null;
@@ -68,6 +75,9 @@ export function requestProblem(reqs: ReadonlyMap<string, WorkRequest>, r: Reques
     if (!(REQUEST_KINDS as readonly string[]).includes(r.kind)) return `a request's kind is ${REQUEST_KINDS.join(', ')}`;
     if (typeof r.note !== 'string') return 'a request has a note (it may be empty)';
     if (!r.note.trim()) return 'a change request says what should change';
+    if (r.tags !== undefined && (!Array.isArray(r.tags) || r.tags.some((t) => typeof t !== 'string' || !isFeedbackTag(t)))) return 'tags are from the list on the card (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good)';
+    if (r.other !== undefined && (typeof r.other !== 'string' || !NAME_RE.test(r.other))) return 'the other sound is a sound id';
+    if (r.kind === 'feedback' && !(r.tags?.length && r.tags.every((t) => t === 'good'))) return 'a feedback request carries the tag good and nothing else';
     return null;
   }
   const q = reqs.get(r.id);
@@ -98,7 +108,7 @@ export function requestProblem(reqs: ReadonlyMap<string, WorkRequest>, r: Reques
 export function applyRequest(reqs: Map<string, WorkRequest>, r: RequestRecord): void {
   if (r.type === 'request') {
     reqs.set(r.id, {
-      id: r.id, sound: r.sound, kind: r.kind, note: r.note, by: r.by, at: r.at, ...(r.mark !== undefined ? { mark: r.mark } : {}),
+      id: r.id, sound: r.sound, kind: r.kind, note: r.note, by: r.by, at: r.at, ...(r.mark !== undefined ? { mark: r.mark } : {}), tags: [...(r.tags ?? [])], ...(r.other ? { other: r.other } : {}),
       state: 'open', claimedBy: null, latest: null, question: null, seen: [], events: [],
     });
     return;

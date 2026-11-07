@@ -39,7 +39,7 @@ const utcNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The sound a tape command is about (its first argument), if any. */
 function soundOf(cmd: string): string | null {
-  return /^sound (?:new|set|mark|patch|mutate) (\S+)/.exec(cmd)?.[1] ?? null;
+  return /^sound (?:new|set|mark|patch|generate|mutate) (\S+)/.exec(cmd)?.[1] ?? null;
 }
 
 export class Writer {
@@ -137,7 +137,11 @@ export class Writer {
 
   /** The sound's numbers and checks, measured once for each distinct render. */
   measure(id: string): Measured {
-    const r = this.render(id);
+    return this.measureSound(this.sound(id), this.render(id));
+  }
+
+  /** The numbers and checks of any sound document (a past state, say), kept by the render's key. */
+  measureSound(s: Sound, r: Rendered = this.cache.render(s)): Measured {
     let m = this.measured.get(r.key);
     if (!m) {
       const analysis = analyze(r.samples);

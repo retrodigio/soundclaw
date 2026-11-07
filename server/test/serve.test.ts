@@ -208,7 +208,7 @@ describe('MCP over stdio', () => {
   it('lists the tools, runs commands, reports numbers, reads the history, renders and exports', async () => {
     const m = await connect();
     const tools = (await client!.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['await_requests', 'check', 'describe', 'export', 'history', 'import', 'project', 'render', 'request', 'run', 'view', 'work']);
+    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'history', 'import', 'project', 'render', 'request', 'run', 'view', 'work']);
     expect((await m.call('project')).text).toMatch(/sounds: none yet/);
     const r = await m.call('run', { commands: 'sound new beep\nsound set beep frequency=880 volume=0.4' });
     expect(r.isError).toBe(false);

@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import { activeGroups, type TapeEntry } from '@soundclaw/core';
+import { Editor } from './Editor.tsx';
 import { ListenerChip } from './Listening.tsx';
 import { SoundCard } from './SoundCard.tsx';
 import type { Store } from './store.ts';
@@ -45,12 +46,14 @@ export function App({ store }: { store: Store }) {
       </header>
       {store.error && <div className="error banner" data-testid="error" role="alert">{store.error} <button className="link" onClick={() => { store.error = null; store.changed(); }}>dismiss</button></div>}
       <main>
-        <section className="sounds" data-testid="sounds" aria-label="Sounds">
-          {store.sounds.length === 0 && store.status === 'open' && (
-            <p className="empty" data-testid="empty">No sounds yet. Ask the agent to make one, or run <code>soundclaw run &lt;project&gt; -e "sound new beep"</code>.</p>
-          )}
-          {store.sounds.map((s) => <SoundCard key={s.id} store={store} sound={s} />)}
-        </section>
+        {store.editing ? <Editor key={store.editing} store={store} id={store.editing} /> : (
+          <section className="sounds" data-testid="sounds" aria-label="Sounds">
+            {store.sounds.length === 0 && store.status === 'open' && (
+              <p className="empty" data-testid="empty">No sounds yet. Ask the agent to make one, or run <code>soundclaw run &lt;project&gt; -e "sound new beep"</code>.</p>
+            )}
+            {store.sounds.map((s) => <SoundCard key={s.id} store={store} sound={s} />)}
+          </section>
+        )}
         <History tape={store.tape} />
       </main>
     </div>

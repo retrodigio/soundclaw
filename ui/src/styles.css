@@ -59,3 +59,37 @@ button.play { min-width: 84px; border-color: var(--accent); }
 .analysis { font-size: 11px; margin: 2px 0; }
 .chip.check-pass { color: #58c4a6; }
 .chip.check-fail { color: #f0a25a; }
+
+/* feedback tags, the editor */
+a.button { display: inline-block; background: #2a2d36; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; text-decoration: none; }
+a.button:hover { border-color: var(--accent); }
+.feedback { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+button.tag { border-radius: 12px; padding: 1px 9px; font-size: 12px; }
+button.tag.on { background: #24413a; border-color: var(--accent); color: #fff; }
+button.tag.good.on { background: #2a4a2a; border-color: var(--good); }
+.chip.tag { color: var(--warn); border-color: var(--warn); } .chip.tag.good { color: var(--good); border-color: var(--good); }
+.editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.editor-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.editor-head h2 { margin: 0; font-size: 18px; }
+.back { color: var(--dim); text-decoration: none; }
+.editor-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr); gap: 14px; align-items: start; }
+.params-col { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+fieldset.group { border: 1px solid var(--line); border-radius: 8px; margin: 0; padding: 6px 10px 8px; background: var(--panel); }
+fieldset.group legend { color: var(--dim); font-size: 12px; padding: 0 4px; }
+.slider { display: grid; grid-template-columns: 8.5em minmax(60px, 1fr) 3.8em 5.6em 1.4em; gap: 6px; align-items: center; font-size: 12px; }
+.slider input[type=range] { width: 100%; accent-color: var(--accent); }
+.slider output { font: 12px ui-monospace, Menlo, monospace; text-align: right; padding-right: 4px; }
+.slider.changed label { font-weight: 600; }
+.slider .range { font-size: 10px; white-space: nowrap; padding-left: 4px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row.wrap { flex-wrap: wrap; }
+.row button.on { border-color: var(--accent); background: #24413a; }
+.seed input { width: 7em; margin-left: 4px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.panel h3 { margin: 0; font-size: 13px; color: var(--dim); font-weight: 600; }
+.side-col { display: flex; flex-direction: column; gap: 12px; }
+.ab-table { font-size: 11px; border-collapse: collapse; } .ab-table th, .ab-table td { padding: 1px 6px; text-align: right; } .ab-table th:first-child { text-align: left; }
+button[data-playing=true] { border-color: var(--accent); background: #24413a; }
+.toggle { font-size: 12px; }
+@media (max-width: 1100px) { .editor-grid { grid-template-columns: 1fr; } }

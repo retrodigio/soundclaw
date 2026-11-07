@@ -6,6 +6,29 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### The SFX editor
+- A sound's page in the dashboard (`#/sound/<id>`, "Edit" on its card): the classic voice's 25
+  parameters as sliders in sfxr's groups, each showing its value and range, double-click or ↺ for the
+  default; wave buttons and a seed; the category buttons and `random`; mutate with an amount.
+  Every change re-renders in the browser with the same core and replays (a *play on change*
+  toggle, a stop button, space plays). Download the WAV (the pre-rendered form), the patch text
+  or a CSV row.
+- Human edits are commands: the page sends `sound set` / `sound generate` / `sound mutate` as
+  `human:<name>`, the lines an agent would write; a drag is coalesced into one command (on release,
+  or after a pause). Undo and redo work from the page.
+- A/B: pin a snapshot (or another sound) as A, switch playback between A and the live B, *Keep A*
+  restores A's parameters as one command.
+- `sound generate <id> <category|random> [seed=<n>]`, and `random` (sfxr's randomize, with its ranges as
+  data) as a preset.
+- `changes <project> [--since …] [--by human] [--as …] [--peek]` and the MCP `changes` tool: what
+  other hands changed since the agent last looked (a per-agent cursor), with parameters and numbers
+  before and after and a compare PNG. The skill says to call it before editing a sound a person touched.
+- Listening feedback on cards: quick tags (too loud, too quiet, too long, too short, too harsh, too
+  dull, too similar to another sound, good) with free text become requests carrying the tags, shown on
+  the card and delivered through `await`; `request --tag` from the CLI and `tags` on the MCP tool.
+- A `synth.csv` with a repeated sound id is read as the engine reads it (first position, last row's
+  values) with a warning naming both lines, instead of being rejected.
+
 ### The classic voice and the agent's ears
 - The classic voice: sfxr's 25 parameters rendered sample-exactly (a port of a reference
   synthesiser, with a platform-proof sine and cube), noise seeded by FNV-1a, `sound new <id>

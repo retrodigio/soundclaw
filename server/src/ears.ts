@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  CHECK_NAMES, checkSummary, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatch, formatPatchNamed, parseCsv, parsePatch,
+  CHECK_NAMES, checkSummary, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
   pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, type Analysis, type CheckResult, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -148,7 +148,7 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
       if (s.voice !== 'classic' && !ids.length) { notes.push(`skipped ${id} (not a classic sound)`); continue; }
       const p = classicOf(s, 'a patch');
       // A seed cannot ride in the positional form: write the named form, which the engine's parser also reads.
-      const body = p.seed !== undefined ? `1\n${formatPatchNamed(p)}\n` : formatPatch(p);
+      const body = patchFileText(p);
       const file = join(dir, `${id}.sfxr`);
       writeFileSync(file, body);
       files.push(base(id, file, Buffer.byteLength(body), 'patch'));
@@ -181,15 +181,16 @@ export function readSfxrSource(source: string): { text: string; name: string | n
 }
 
 /** The command text that makes the sounds an sfxr csv, patch file or patch text describes. */
-export function importCommands(source: string, id: string | null): { commands: string; ids: string[] } {
+export function importCommands(source: string, id: string | null): { commands: string; ids: string[]; warnings: string[] } {
   const { text, name } = readSfxrSource(source);
   let rows: CsvRow[];
+  let warnings: string[] = [];
   try {
     const first = text.split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#')) ?? '';
     // A csv has a header of names; a patch is numbers or name=value pairs.
     const isCsv = /^[A-Za-z_]+(,[A-Za-z_]+)+/.test(first) && !first.includes('=');
     if (isCsv) {
-      rows = parseCsv(text);
+      ({ rows, warnings } = readCsv(text));
       if (id && rows.length === 1) rows = [{ id, patch: rows[0]!.patch }];
       else if (id) throw new ProjectError('--id names one sound; the csv has several rows (their ids are used)');
     } else {
@@ -203,5 +204,5 @@ export function importCommands(source: string, id: string | null): { commands: s
   }
   for (const r of rows) if (!SOUND_ID_RE.test(r.id)) throw new ProjectError(`'${r.id}' is not a sound id (a-z, 0-9, _ and -, starting with a letter)`);
   const lines = rows.flatMap((r) => [`sound new ${r.id} voice=classic`, `sound patch ${r.id} "${formatPatchNamed(r.patch)}"`]);
-  return { commands: lines.join('\n'), ids: rows.map((r) => r.id) };
+  return { commands: lines.join('\n'), ids: rows.map((r) => r.id), warnings };
 }

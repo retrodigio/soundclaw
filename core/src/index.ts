@@ -18,3 +18,4 @@ export * from './png.ts';
 export * from './checks.ts';
 export * from './describe.ts';
 export * from './views.ts';
+export * from './editor.ts';

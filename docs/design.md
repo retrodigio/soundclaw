@@ -153,8 +153,40 @@ exit is what wakes an agent that ran it in the background. A `seen` record notes
 was handed a request, so a card can say "seen by agent:claude". The server also knows who is
 listening (open waits, agents that called a tool lately), and a card says plainly when nobody is.
 
+## The editor and human edits
+
+A classic sound's page (`#/sound/<id>`, opened from its card) is the editor: the 25 parameters as
+sliders in sfxr's groups (`EDITOR_GROUPS` in core), wave buttons, the category and `random`
+generators, mutate with an amount, A/B and exports. The page renders with the same core as the
+agent's renders, so what plays is what `render` measures.
+
+**Every edit is a command.** The editor sends the line an agent would write: `sound set <id> …`
+(the parameters in the table's order, the wave by name), `sound generate <id> <category> seed=<n>`,
+`sound mutate <id> amount=<a> seed=<n>`, and "Keep A" as one `sound set` of the parameters that
+differ. The page picks a seed when it asks for a random patch, and the seed is on the tape, so
+the history replays. Commands go through the writer as `human:<name>` like any batch.
+
+**A drag is one command.** Moving a slider changes a local draft (drawn and measured at once, not
+written). `Coalescer` in core holds the latest value of each parameter and writes one `sound set`
+when the control is released (a double-click window of 250 ms later, so a double-click can reset
+instead), or when it has not moved for 700 ms; a value equal to the sound's is not written. Undo
+and redo on the page are the same `undo` and `redo` commands.
+
+**Replay.** A change to the sound as the server holds it (a person's commit, an undo, an agent's
+edit) replays it when *play on change* is on. A/B pins a snapshot of the parameters (or another
+sound) as A and switches playback between A and the live B; the pin lives in the page only.
+
+**`changes`.** For the agent: every tape group after its cursor by other authors, with the sound
+replayed before and after the group (the tape up to the group's first and last entry), the
+parameters that differ, the numbers (duration, loudness, centroid, pitch) and a compare PNG. The
+cursor is the highest command number read, per agent, in `.cache/changes-seen.json`.
+
+**Feedback tags** are fields on a request record (`tags`, `other`), so they use the whole
+requests machinery: state, `seen`, `await`, the card. The tag `good` alone is a `feedback`
+request: no mark, no checks to pass before the agent closes it.
+
 ## Not yet
 
-The enhanced voices, instruments, songs and sets, the classic voice's editor in the dashboard (a
-card shows the 25 parameters read-only), sets and loop checks, OGG export, and a headless worker
+The enhanced voices, instruments, songs and sets, a time range on feedback ("0.4–0.7 s too harsh"),
+sets and loop checks, OGG export, and a headless worker
 that takes requests with no agent session.

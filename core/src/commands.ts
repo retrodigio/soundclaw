@@ -5,13 +5,14 @@
 //   sound new <id> [voice=tone|classic] [preset=<category>] [seed=<n>]
 //   sound set <id> <param>=<value> [<param>=<value> ...]
 //   sound patch <id> "<single-patch text>"
+//   sound generate <id> <category|random> [seed=<n>]
 //   sound mutate <id> [amount=<0..1>] [seed=<n>] [as=<new id>]      (also written `mutate <id> ...`)
 //   sound mark <id> approved|rejected|draft ["note"]
 //   undo [group=<group>] [by=<author>]
 //   redo [group=<group>] [by=<author>]
 
 import { CLASSIC_FIELDS, ClassicError, WAVE_NAMES, formatPatchNamed, parsePatch, type ClassicPatch } from './classic.ts';
-import { CATEGORY_NAMES, MUTATE_AMOUNT, defaultGenSeed, defaultMutateSeed, generate, isCategory, mutate } from './generators.ts';
+import { GENERATOR_NAMES, MUTATE_AMOUNT, defaultGenSeed, defaultMutateSeed, generate, isGenerator, mutate, type GeneratorName } from './generators.ts';
 import { SOUND_ID_RE, TONE_PARAMS, cloneSound, fmtNumber, isParamName, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
 
 export interface Diag {
@@ -100,6 +101,7 @@ export type Command =
   | { op: 'new'; id: string; voice: VoiceKind; preset: string | null; seed: number | null; text: string }
   | { op: 'set'; id: string; values: [string, SetValue][]; text: string }
   | { op: 'patch'; id: string; patch: ClassicPatch; text: string }
+  | { op: 'generate'; id: string; category: string; seed: number; text: string }
   | { op: 'mutate'; id: string; amount: number; seed: number | null; as: string | null; text: string }
   | { op: 'mark'; id: string; status: SoundStatus; note: string; text: string }
   | { op: 'undo' | 'redo'; group: string | null; by: string | null; text: string };
@@ -147,7 +149,7 @@ function parseLine(l: RawLine): Command {
   const line = l.line;
   if (head!.v === 'sound') {
     const [verb, ...args] = rest;
-    if (!verb) throw new DiagError(line, head!.col, 'sound: new, set or mark');
+    if (!verb) throw new DiagError(line, head!.col, 'sound: new, set, patch, generate, mutate or mark');
     if (verb.v === 'new') {
       const id = checkId(args[0], line, 'sound new');
       let voice: VoiceKind | null = null;
@@ -160,7 +162,7 @@ function parseLine(l: RawLine): Command {
           if (m[2] !== 'tone' && m[2] !== 'classic') throw new DiagError(line, t.col, `voice is tone or classic (not '${m[2]}')`);
           voice = m[2];
         } else if (m[1] === 'preset') {
-          if (!isCategory(m[2]!)) throw new DiagError(line, t.col, `no preset '${m[2]}' (presets: ${CATEGORY_NAMES.join(', ')})`);
+          if (!isGenerator(m[2]!)) throw new DiagError(line, t.col, `no preset '${m[2]}' (presets: ${GENERATOR_NAMES.join(', ')})`);
           preset = m[2]!;
         } else {
           const n = numberOf(m[2]!);
@@ -223,6 +225,20 @@ function parseLine(l: RawLine): Command {
       }
       return { op: 'patch', id, patch, text: `sound patch ${id} ${quote(formatPatchNamed(patch))}` };
     }
+    if (verb.v === 'generate') {
+      const id = checkId(args[0], line, 'sound generate');
+      const cat = args[1];
+      if (!cat || !isGenerator(cat.v)) throw new DiagError(line, (cat ?? verb).col, `sound generate ${id}: give a category (${GENERATOR_NAMES.join(', ')})`);
+      let seed: number | null = null;
+      for (const t of args.slice(2)) {
+        const m = /^seed=(.*)$/.exec(t.v);
+        const n = m ? numberOf(m[1]!) : null;
+        if (n === null || !Number.isInteger(n) || n < 0 || n > 4294967295) throw new DiagError(line, t.col, `sound generate: unexpected '${t.v}' (seed=<whole number from 0 to 4294967295>)`);
+        seed = n;
+      }
+      seed ??= defaultGenSeed(cat.v, id);
+      return { op: 'generate', id, category: cat.v, seed, text: `sound generate ${id} ${cat.v} seed=${seed}` };
+    }
     if (verb.v === 'mutate') return parseMutate(args, verb.col, line);
     if (verb.v === 'mark') {
       const id = checkId(args[0], line, 'sound mark');
@@ -232,7 +248,7 @@ function parseLine(l: RawLine): Command {
       const note = args[2]?.v ?? '';
       return { op: 'mark', id, status: st.v as SoundStatus, note, text: `sound mark ${id} ${st.v}${note ? ' ' + quote(note) : ''}` };
     }
-    throw new DiagError(line, verb.col, `unknown sound command '${verb.v}' (new, set, patch, mutate, mark)`);
+    throw new DiagError(line, verb.col, `unknown sound command '${verb.v}' (new, set, patch, generate, mutate, mark)`);
   }
   if (head!.v === 'undo' || head!.v === 'redo') {
     let group: string | null = null;
@@ -317,6 +333,13 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       if (!s) throw new Error(`no sound '${c.id}'`);
       if (s.voice !== 'classic') throw new Error(`${c.id} is a tone; a patch is for a classic sound (sound new <id> voice=classic)`);
       lib.set(c.id, { ...s, patch: { ...c.patch } });
+      return undefined;
+    }
+    case 'generate': {
+      const s = lib.get(c.id);
+      if (!s) throw new Error(`no sound '${c.id}'`);
+      if (s.voice !== 'classic') throw new Error(`${c.id} is a tone; generate is for classic sounds`);
+      lib.set(c.id, { ...s, patch: generate(c.category as GeneratorName, c.seed) });
       return undefined;
     }
     case 'mutate': {
