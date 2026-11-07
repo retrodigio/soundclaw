@@ -28,6 +28,9 @@ All notable changes to SoundClaw are listed here. The format follows
 - **Helpers that write notes** into a pattern and go on the history tape with every option resolved and the rows they wrote
   (`written="…"`), so a replay puts back exactly those notes: `chords`, `bass`, `arp`, `drums`, `humanise`, `motif write|sequence`.
   Notes they write outside the key are marked `!`.
+- **A pitch rule per instrument** for `render-match`: `instrument set <id> pitch-check=full|class|onset` (the note; the pitch class with
+  the octave ignored; timing only). The built-in `fm_bell` uses `class` (its inharmonic partials make the pitch tracker hear an octave
+  low), and the item-get stinger plays it again.
 - **Scales and chords**: twelve more scales (`whole-tone`, `phrygian-dominant`, `hungarian-minor`, `hirajoshi`, `octatonic` …);
   `soundclaw scale <key> | list | <project> <song>` and the MCP tool `scale` print a key's notes and its chords by roman numeral.
 - **`chords <song> <pattern> <channel> "<progression>"`**: roman numerals with inversions (`I6`, `V65`), sevenths, `sus2`/`sus4`, `add9`,

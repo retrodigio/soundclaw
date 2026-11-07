@@ -168,7 +168,9 @@ pass you just made.
    key's chords by roman numeral; `scale list` every scale). Decide the sections and their length in bars first (a loop:
    8 bars of A, 8 of B ...), and the channels: `song channel add <song> <name> inst=<instrument>|kit=default`. Use the
    built-in instruments first (square_lead, pulse_lead, triangle_bass, saw_pad, fm_bell, fm_bass, pluck, kick, snare, hat,
-   hat_open); `instrument new <id> from=<built-in>` then `instrument set` to change one. A fanfare or jingle is a stinger:
+   hat_open); `instrument new <id> from=<built-in>` then `instrument set` to change one. An inharmonic voice (a bell) is
+   heard an octave off by a pitch tracker: `instrument set <id> pitch-check=class` has `render-match` check its pitch class
+   only (`fm_bell` has it), `pitch-check=onset` its timing only. A fanfare or jingle is a stinger:
    `song new win kind=stinger template=victory|game-over|level-up|item-get` writes a whole one in the project's key to edit.
 2. **Harmony.** `chords <song> <pattern> pad "I vi ii65 V7" bars=1 rhythm=beats` writes the chords with smooth voice leading
    into the `pad` row (making the pattern when it is new: as long as the progression). Inversions (`I6`, `V65`), sevenths,

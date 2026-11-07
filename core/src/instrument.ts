@@ -42,9 +42,21 @@ export interface Instrument {
   range: [number, number] | null;
   /** Semitones over time since the note began (a kick's drop, a chirp). */
   pitchEnv: Env | null;
+  /**
+   * How `render-match` hears the instrument's pitch: `full` (the note, octave included; the default),
+   * `class` (the pitch class, octave ignored: an inharmonic voice such as a bell, whose partials make
+   * a pitch tracker hear an octave off) or `onset` (timing only). Left out when full.
+   */
+  pitchCheck?: PitchCheck;
   /** Set on the built-in instruments: the name they are listed under. */
   builtin?: true;
 }
+
+export const PITCH_CHECKS = ['full', 'class', 'onset'] as const;
+export type PitchCheck = (typeof PITCH_CHECKS)[number];
+
+/** The pitch rule an instrument is checked by (full when it declares none). */
+export const pitchCheckOf = (i: Pick<Instrument, 'pitchCheck'> | undefined): PitchCheck => i?.pitchCheck ?? 'full';
 
 export const INSTRUMENT_PARAMS = {
   attack: { min: 0.001, max: 4, unit: 's', help: 'time to reach full level' },
@@ -80,6 +92,7 @@ export function serializeInstrument(i: Instrument): string {
   const lines = ['soundclaw instrument 1', `id ${i.id}`, `root ${noteLabel(i.root)}`, `pitched ${i.pitched ? 'yes' : 'no'}`,
     `note-envelope ${fmtNum(i.attack)} ${fmtNum(i.decay)} ${fmtNum(i.sustain)} ${fmtNum(i.release)}`, `velocity ${fmtNum(i.velocity)}`,
     `range ${i.range ? `${noteLabel(i.range[0])}-${noteLabel(i.range[1])}` : 'none'}`, `pitch-envelope ${i.pitchEnv ? formatEnv(i.pitchEnv) : 'none'}`];
+  if (pitchCheckOf(i) !== 'full') lines.push(`pitch-check ${pitchCheckOf(i)}`);
   lines.push(...serializeLayered(i.voice));
   return lines.join('\n') + '\n';
 }
@@ -246,7 +259,7 @@ function buildBuiltins(): Record<string, Instrument> {
       { kind: 'osc', p: { wave: 'saw', freq: 442.6, pan: 0.4, filter: 'lp', cutoff: 2400, gain: 0.5 } },
     ], gain: 0.28, attack: 0.25, decay: 0.3, sustain: 0.8, release: 0.5, range: [36, 84],
   });
-  out.fm_bell = make('fm_bell', { layers: [{ kind: 'fm', p: { freq: 440, ops: 2, ratio1: 1, ratio2: 3.5, index2: 2.4 } }], gain: 0.45, attack: 0.002, decay: 1.4, sustain: 0, release: 0.3, range: [60, 108] });
+  out.fm_bell = make('fm_bell', { layers: [{ kind: 'fm', p: { freq: 440, ops: 2, ratio1: 1, ratio2: 3.5, index2: 2.4 } }], gain: 0.45, attack: 0.002, decay: 1.4, sustain: 0, release: 0.3, range: [60, 108], pitchCheck: 'class' });
   out.fm_bell.voice.layers[0]!.envs.index2 = env('0:4 1.2:0.3@exp');
   out.fm_bass = make('fm_bass', { layers: [{ kind: 'fm', p: { freq: 440, ops: 2, ratio1: 1, ratio2: 1, index2: 2.2 } }], gain: 0.6, attack: 0.002, decay: 0.2, sustain: 0.65, release: 0.05, range: [24, 55] });
   out.fm_bass.voice.layers[0]!.envs.index2 = env('0:3.2 0.15:1.2@exp');
@@ -319,7 +332,7 @@ export function builtinTable(): string {
     const layers = i.voice.layers.map((l) => (l.kind === 'osc' ? (l.p.wave === 'square' && l.p.duty !== 0.5 ? `pulse ${l.p.duty}` : String(l.p.wave)) : l.kind === 'fm' ? `fm ${l.p.ops}op` : l.kind)).join(' + ');
     const range = i.range ? `${noteLabel(i.range[0])}-${noteLabel(i.range[1])}` : 'none';
     const env = [i.attack, i.decay, i.sustain, i.release].join(' / ');
-    return `| \`${i.id}\` | ${layers} | ${i.pitched ? `root ${noteLabel(i.root)}` : 'unpitched'} | ${env} | ${range} | ${i.velocity} |`;
+    return `| \`${i.id}\` | ${layers} | ${i.pitched ? `root ${noteLabel(i.root)}` : 'unpitched'} | ${env} | ${range} | ${i.velocity} | ${i.pitched ? pitchCheckOf(i) : '-'} |`;
   });
-  return ['| instrument | voice | pitch | attack / decay / sustain / release (s, s, level, s) | range | velocity sensitivity |', '|---|---|---|---|---|---|', ...rows].join('\n');
+  return ['| instrument | voice | pitch | attack / decay / sustain / release (s, s, level, s) | range | velocity sensitivity | pitch check |', '|---|---|---|---|---|---|---|', ...rows].join('\n');
 }

@@ -3,7 +3,7 @@
 //
 //   instrument new <id> [from=<instrument>] [kind=osc|fm|ks|classic|sample] [seed=<n>]
 //   instrument from-sound <id> <sound> [root=<note>]
-//   instrument set <id> <key>=<value> ...     root pitched attack decay sustain release adsr velocity range pitchenv gain seed
+//   instrument set <id> <key>=<value> ...     root pitched attack decay sustain release adsr velocity range pitchenv pitch-check gain seed
 //   instrument layer|fx|env <…> <id> …        the layer, fx and env commands, on the instrument's template
 //   instrument copy|rename <id> <to>   instrument remove <id>
 //   pattern set <song>.<name> "<pattern text>"  (a block under `pattern <song>.<name> steps=.. tpb=..` in scripts)
@@ -19,7 +19,7 @@
 import { CLASS_NAME_RE } from './checks.ts';
 import { DiagError, quote, type Command, type Token } from './commands.ts';
 import {
-  INSTRUMENT_ID_RE, INSTRUMENT_PARAMS, builtinInstruments, cloneInstrument, fromBuiltin, guessRoot, instrumentFromSound, newInstrument, type Instrument,
+  INSTRUMENT_ID_RE, INSTRUMENT_PARAMS, PITCH_CHECKS, builtinInstruments, cloneInstrument, fromBuiltin, guessRoot, instrumentFromSound, newInstrument, type Instrument, type PitchCheck,
 } from './instrument.ts';
 import { SOURCE_KINDS, newLayer, parseEnv, type Env, type SourceKind, formatEnv } from './layered.ts';
 import type { Library } from './sets.ts';
@@ -113,6 +113,10 @@ export function parseInstValue(key: string, v: string): [string, InstValue][] {
       if (xs.length !== 4 || xs.some((x) => x === null)) throw new Error('adsr=<attack>,<decay>,<sustain>,<release> (seconds, seconds, level 0 to 1, seconds)');
       return (['attack', 'decay', 'sustain', 'release'] as const).flatMap((k, i) => parseInstValue(k, String(xs[i])));
     }
+    case 'pitch-check': {
+      if (!(PITCH_CHECKS as readonly string[]).includes(v)) throw new Error(`pitch-check is full (the note, octave included), class (the pitch class, octave ignored: bells and other inharmonic voices) or onset (timing only), got '${v}'`);
+      return [['pitch-check', v]];
+    }
     case 'range': {
       if (v === 'none') return [['range', null]];
       const r = parseRange(v);
@@ -125,7 +129,7 @@ export function parseInstValue(key: string, v: string): [string, InstValue][] {
       for (const p of e) if (p.v < -60 || p.v > 60) throw new Error(`pitchenv values are semitones from -60 to 60 (got ${p.v})`);
       return [['pitchenv', e]];
     }
-    default: throw new Error(`no instrument setting '${key}' (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, gain, seed; layers have: instrument layer set <id> <n> <param>=<value>)`);
+    default: throw new Error(`no instrument setting '${key}' (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, gain, seed; layers have: instrument layer set <id> <n> <param>=<value>)`);
   }
 }
 
@@ -176,7 +180,7 @@ function parseInstrument(head: Token, rest: Token[], line: number, parseSub: Par
   if (verb.v === 'set') {
     const id = checkIn(args[0], line, 'instrument set', INSTRUMENT_ID_RE, 'instrument id');
     const ps = pairs(args.slice(1), line, `instrument set ${id}`);
-    if (!ps.length) throw new DiagError(line, verb.col, `instrument set ${id}: give at least one <key>=<value> (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, gain, seed)`);
+    if (!ps.length) throw new DiagError(line, verb.col, `instrument set ${id}: give at least one <key>=<value> (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, gain, seed)`);
     const values: [string, InstValue][] = [];
     for (const p of ps) {
       try { values.push(...parseInstValue(p.key, p.value)); } catch (e) { throw new DiagError(line, p.t.col, `${id}: ${(e as Error).message}`); }
@@ -505,6 +509,7 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         else if (k === 'seed') i.voice.seed = v as number;
         else if (k === 'range') i.range = v as [number, number] | null;
         else if (k === 'pitchenv') i.pitchEnv = v as Env | null;
+        else if (k === 'pitch-check') { if (v === 'full') delete i.pitchCheck; else i.pitchCheck = v as PitchCheck; }
       }
       lib.instruments.set(c.id, i);
       return undefined;

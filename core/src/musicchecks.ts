@@ -15,7 +15,7 @@
 import { SAMPLE_RATE } from './sound.ts';
 import { integratedLoudness, stft, truePeak, yinPitch, type PitchFrame } from './analysis.ts';
 import { SEAM_STEP_FACTOR, classTable, seamNumbers, type CheckRange, type Style } from './checks.ts';
-import { builtinInstruments, type Instrument } from './instrument.ts';
+import { builtinInstruments, pitchCheckOf, type Instrument } from './instrument.ts';
 import { inKey, midiFreq, noteLabel, parseKey, pitchClassName } from './music.ts';
 import { arrange, channelNotes, layerOrder, type NoteEv, type SongDoc } from './song.ts';
 import { parallelPairs } from './theory.ts';
@@ -321,6 +321,8 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
     const track = pitched ? yinPitch(x, { hop: 1024, fmin: 50, fmax: 4200 }) : [];
     const chan = song.channels.find((c) => c.name === part.name)!;
     const attack = chan.inst ? (lookup(chan.inst)?.attack ?? 0) : 0;
+    // the instrument's declared pitch rule: the note, its pitch class (an inharmonic bell), or timing alone
+    const rule = chan.inst ? pitchCheckOf(lookup(chan.inst)) : 'full';
     const tolerance = MATCH_TIMING_MS / 1000 + 0.5 * attack;
     pitchTracks.set(part.name, track);
     const onsets: number[] = [];
@@ -352,7 +354,7 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
       // pitch
       let hz: number | null = null;
       const pitchedGroup = grp.filter((e) => e.midi !== null);
-      if (!problem && pitchedGroup.length === 1 && !pitchedGroup[0]!.fx.arp && midiFreq(pitchedGroup[0]!.midi!) >= 55) {
+      if (!problem && rule !== 'onset' && pitchedGroup.length === 1 && !pitchedGroup[0]!.fx.arp && midiFreq(pitchedGroup[0]!.midi!) >= 55) {
         const len = first.len;
         const a = tw + Math.min(0.08, len * 0.3), b = tw + Math.max(Math.min(len, 0.5) * 0.9, 0.05);
         const vals = track.filter((f) => f.hz !== null && f.t >= a && f.t <= b && f.clarity > 0.7).map((f) => f.hz!);
@@ -361,7 +363,7 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
           const diffs = pitchedGroup.map((e) => 12 * Math.log2(hz! / midiFreq(e.midi!)));
           const best = diffs.reduce((m, d) => (Math.abs(d) < Math.abs(m) ? d : m), diffs[0]!);
           const oct = Math.round(best / 12);
-          if (Math.abs(best) > MATCH_PITCH_SEMITONES) {
+          if (Math.abs(best) > MATCH_PITCH_SEMITONES && !(rule === 'class' && Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES)) {
             const want = noteLabel(pitchedGroup[0]!.midi!);
             const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)));
             problem = Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES && oct !== 0
@@ -382,7 +384,7 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
     check: {
       name: 'render-match', advisory: false, skipped: measured === 0, pass: bad.length === 0, score: measured ? clamp01(1 - bad.length / measured * 3) : 1,
       value: measured === 0 ? 'no notes' : bad.length === 0 ? `all ${measured} notes sound when and what they are written` : `${bad.length} of ${measured} notes differ from what is written`,
-      threshold: `each note's onset within ${MATCH_TIMING_MS} ms (plus half its instrument's attack) and a single note's pitch within ${MATCH_PITCH_SEMITONES} semitones of the written one (chords and ~arp notes: timing only)`, ranges,
+      threshold: `each note's onset within ${MATCH_TIMING_MS} ms (plus half its instrument's attack) and a single note's pitch within ${MATCH_PITCH_SEMITONES} semitones of the written one (chords and ~arp notes: timing only; an instrument's pitch-check may ask for the pitch class only, or timing only)`, ranges,
     },
     notes, pitch: pitchTracks, onsets: onsetLists,
   };

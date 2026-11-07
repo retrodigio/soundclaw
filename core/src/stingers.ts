@@ -56,7 +56,7 @@ export const STINGER_TEMPLATES: Readonly<Record<string, StingerTemplate>> = {
     about: 'a quick sparkle up two octaves to a held tonic, about 1.7 s',
     tempo: 140, tpb: 4,
     parts: [
-      { name: 'lead', inst: 'pulse_lead', gain: 0.65, octave: 4, row: '1 3 5 8 10 12 15 - - - - - - - - -' },
+      { name: 'lead', inst: 'fm_bell', gain: 0.65, octave: 4, row: '1 3 5 8 10 12 15 - - - - - - - - -' },
       { name: 'harm', inst: 'pluck', gain: 0.47, octave: 4, row: '. . . . . . t1 - - - - - - - - -' },
       { name: 'bass', inst: 'triangle_bass', gain: 0.69, octave: 3, row: '. . . . . . 1 - - - - - - - - -' },
     ],

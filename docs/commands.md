@@ -582,7 +582,7 @@ An instrument is any voice of the layered sound (classic, osc, fm, ks, sample, s
 ```
 instrument new <id> [from=<instrument or built-in>] [kind=osc|fm|ks|classic|sample] [seed=<n>]
 instrument from-sound <id> <sound> [root=<note>]       the sound's layers; root: the note it sounds at (found from an osc, fm or ks layer's freq when left out, else A4)
-instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none gain=<g> seed=<n>
+instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none pitch-check=full|class|onset gain=<g> seed=<n>
                   (also attack= decay= sustain= release=)
 instrument layer|fx|env <the sound commands, with the instrument's id>      instrument layer add bell osc wave=sine freq=880
 instrument copy|rename <id> <new>       instrument remove <id>     (refused while a channel plays it)
@@ -599,6 +599,7 @@ instrument copy|rename <id> <new>       instrument remove <id>     (refused whil
 | `velocity` | 0 to 1 | how much velocity changes the level: level = 1 - v + v x velocity / 127 |
 | `range` | two notes | the notes the instrument is meant to play: the `range` check |
 | `pitchenv` | semitones over time | a pitch envelope on every note (a kick's drop: `0:30 0.07:0@exp`) |
+| `pitch-check` | `full`, `class`, `onset` | how `render-match` hears the instrument's pitch: the note itself (default), its pitch class with the octave ignored (a bell, whose inharmonic partials make a pitch tracker hear an octave off; `fm_bell` uses it), or timing only |
 | `gain`, `seed` | | the instrument's level and noise seed |
 
 Pitch effects (a pitch envelope, `~slide`, `~vib`, `~arp`) move osc, fm and sample layers continuously. A pluck (ks) and a classic layer are tuned at the note's start and keep their pitch. A pulse wave off 50 % duty has a DC offset: give it a high-pass filter (`filter=hp cutoff=35`), as `pulse_lead` has.
@@ -606,19 +607,19 @@ Pitch effects (a pitch envelope, `~slide`, `~vib`, `~arp`) move osc, fm and samp
 The built-in instruments (generated from the data; a test keeps this table equal to it):
 
 <!-- builtins:begin -->
-| instrument | voice | pitch | attack / decay / sustain / release (s, s, level, s) | range | velocity sensitivity |
-|---|---|---|---|---|---|
-| `square_lead` | square | root A4 | 0.004 / 0.08 / 0.75 / 0.06 | C3-C7 | 1 |
-| `pulse_lead` | pulse 0.25 | root A4 | 0.003 / 0.1 / 0.65 / 0.08 | C3-C7 | 1 |
-| `triangle_bass` | triangle | root A4 | 0.003 / 0.05 / 0.9 / 0.05 | C1-C4 | 1 |
-| `saw_pad` | saw + saw | root A4 | 0.25 / 0.3 / 0.8 / 0.5 | C2-C6 | 1 |
-| `fm_bell` | fm 2op | root A4 | 0.002 / 1.4 / 0 / 0.3 | C4-C8 | 1 |
-| `fm_bass` | fm 2op | root A4 | 0.002 / 0.2 / 0.65 / 0.05 | C1-G3 | 1 |
-| `pluck` | ks | root A4 | 0.001 / 0 / 1 / 0.2 | C2-E6 | 1 |
-| `kick` | sine + white | unpitched | 0.001 / 0.2 / 0 / 0.02 | none | 0.8 |
-| `snare` | white + triangle | unpitched | 0.001 / 0.14 / 0 / 0.02 | none | 0.8 |
-| `hat` | white | unpitched | 0.001 / 0.045 / 0 / 0.01 | none | 0.8 |
-| `hat_open` | white | unpitched | 0.001 / 0.3 / 0 / 0.05 | none | 0.8 |
+| instrument | voice | pitch | attack / decay / sustain / release (s, s, level, s) | range | velocity sensitivity | pitch check |
+|---|---|---|---|---|---|---|
+| `square_lead` | square | root A4 | 0.004 / 0.08 / 0.75 / 0.06 | C3-C7 | 1 | full |
+| `pulse_lead` | pulse 0.25 | root A4 | 0.003 / 0.1 / 0.65 / 0.08 | C3-C7 | 1 | full |
+| `triangle_bass` | triangle | root A4 | 0.003 / 0.05 / 0.9 / 0.05 | C1-C4 | 1 | full |
+| `saw_pad` | saw + saw | root A4 | 0.25 / 0.3 / 0.8 / 0.5 | C2-C6 | 1 | full |
+| `fm_bell` | fm 2op | root A4 | 0.002 / 1.4 / 0 / 0.3 | C4-C8 | 1 | class |
+| `fm_bass` | fm 2op | root A4 | 0.002 / 0.2 / 0.65 / 0.05 | C1-G3 | 1 | full |
+| `pluck` | ks | root A4 | 0.001 / 0 / 1 / 0.2 | C2-E6 | 1 | full |
+| `kick` | sine + white | unpitched | 0.001 / 0.2 / 0 / 0.02 | none | 0.8 | - |
+| `snare` | white + triangle | unpitched | 0.001 / 0.14 / 0 / 0.02 | none | 0.8 | - |
+| `hat` | white | unpitched | 0.001 / 0.045 / 0 / 0.01 | none | 0.8 | - |
+| `hat_open` | white | unpitched | 0.001 / 0.3 / 0 / 0.05 | none | 0.8 | - |
 <!-- builtins:end -->
 
 The drum kit a drum channel uses by default maps the hit names `k`/`kick` to `kick`, `s`/`snare` to `snare`, `h`/`hat` to `hat` and `oh`/`hat_open` to `hat_open`.
