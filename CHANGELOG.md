@@ -6,6 +6,24 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Music
+- **Instruments** (`instruments/<id>.inst`): any voice (classic, osc, fm, ks, sample, layered, with effects) played at a pitch, with a note envelope,
+  an optional pitch envelope, velocity sensitivity and a declared range. Eleven built-ins to play by name: `square_lead`, `pulse_lead`,
+  `triangle_bass`, `saw_pad`, `fm_bell`, `fm_bass`, `pluck`, `kick`, `snare`, `hat`, `hat_open`. `instrument new|from-sound|set|layer|fx|env|copy|rename|remove`.
+- **The pattern text**: a step grid per channel (`lead: C5 . E5 - | G5v80 . E5~slide .`), `-` hold, `.` rest, `|` bars, velocity, `!` for an
+  accidental on purpose, `~slide` `~vib` `~arp(0,4,7)`, chords with `+`, drum hits as lower-case words, note lists, a normal form, and errors with line and column.
+  Patterns live in their song (`songs/<song>/patterns/<name>.pat`); in scripts they are indented blocks.
+- **Songs** (`songs/<id>.song`): tempo, swing, time signature, key, channels bound to instruments or a drum kit with gain, pan and a game layer, sections with
+  repeats, an intro that plays once, a loop region, an ending, and a master chain. `song new|set|channel|section|order|intro|ending|loop|fx|copy|rename|remove|mark`.
+- **Rendering**: deterministic and the same bytes in Node and in the browser; channels are cached parts; WAV and OGG export of the song, of the loop (seamless: the
+  tail wraps into the start) and of the stems of each game layer; loudness classes `music` (-16 LUFS) and `stinger` (-14); `normalize` for a song.
+- **MIDI**: `midi import` (type 0 and 1; tempo, time signature, tracks and channels, drums on channel 10) and `midi export` / `export --format midi` of a song or a pattern.
+- **Ears**: the `notes` view (written notes against detected onsets and pitch, per channel) and the `mix` view (energy by band over time, masking in amber); song numbers
+  (length, loop length, loudness, true peak, per-channel loudness, tempo); the checks `key`, `range`, `render-match`, `loop-music`, `masking` (advisory) and `clip`, `loudness`,
+  `dc` on the mix. `work done` on a request about a song needs them to pass.
+- **Dashboard**: song cards with play, the loop playing repeatedly, the pattern text read-only with the current step lit, and mute/solo for listening (not stored).
+- The command text now reads `\n` in a quoted word as a line break (the pattern text on the tape).
+
 ### Fixes from the second large use
 - **Samples**: a sample layer with no envelope and no trim plays the file as it is (no 2 ms fades, not cut by `duration=auto`), so `measure`
   of a reference equals the file. A stereo file stays stereo through `side=left` / `side=right` on two hard-panned layers (`sample import`

@@ -8,8 +8,9 @@ machine, and can be edited and checked by a person and an agent alike.
 > **Status: early.** The project folder, history, rendering, the server and dashboard, the request
 > loop between a person and an agent, the classic (sfxr-style) voice, and the views and checks an
 > agent "hears" with are in, and so is the sound editor (sliders, A/B, feedback tags) and the layered
-> voice (layers, FM, plucks, samples, envelopes, effects, stereo). Sets and variants, loops and the
-> music tracker come next. Expect the commands and documents to change.
+> voice (layers, FM, plucks, samples, envelopes, effects, stereo), sets and loops, and the music core
+> (instruments, a text pattern grid, songs with game layers, MIDI, and the views and checks for music).
+> The music editor (piano roll) and the composition helpers come next. Expect the commands and documents to change.
 
 ## What works today
 
@@ -30,6 +31,12 @@ machine, and can be edited and checked by a person and an agent alike.
   a sound, each a real sound, matched to a loudness target; `family` makes a sound near, far or muffled; `sound loop` makes a seamless
   bed (wind, rain, fire and crowd recipes). A `set` view and a `set-spread` check keep a set alike but never identical. Export to WAV
   or OGG Vorbis with a manifest; import sfxr, jsfxr and Bfxr patch strings; an audition page to go through every sound with the keyboard.
+- **Music.** Instruments (any voice at a pitch, plus eleven chip and synth built-ins), a text pattern grid
+  (`lead: C5 . E5 - | G5v80 . E5~slide .`, chords, drum hits, `~arp`, `~vib`), and songs with tempo, swing, channels, sections, an
+  intro, a loop region and game layers. A song renders deterministically (the same bytes in Node and the browser), exports to
+  WAV or OGG, as a seamless loop, as aligned stems per layer, and as MIDI; MIDI files import as songs. The `notes` view puts the
+  written notes against what the render plays, the `mix` view shows channels fighting over a band, and the checks `key`, `range`,
+  `render-match`, `loop-music` and `masking` hold a song to what was written. `docs/examples/chip-exploration.txt` is a 16-bar loop.
 - **Ears for an agent that cannot listen.** Every result carries numbers (loudness in LUFS, true
   peak, attack, tail, brightness, pitch, onsets) and a check summary; `view` draws the waveform, a
   mel spectrogram, the pitch track, or two sounds compared; `describe` says it in words; `check`

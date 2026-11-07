@@ -1,6 +1,6 @@
 ---
 name: soundclaw
-description: Make sound effects with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, changes, render, view, describe, check, measure, normalize, import, sample, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
+description: Make sound effects and music (instruments, patterns, songs) with SoundClaw, a workbench driven by commands through its MCP tools (project, run, history, changes, render, view, describe, check, measure, normalize, import, sample, export, request, work, await_requests) or the soundclaw CLI, while a person listens, approves and asks for changes in the browser. Use when asked to create, change or export game sound effects, or to work through a person's change requests on sounds.
 ---
 
 # SoundClaw
@@ -149,6 +149,46 @@ Use these instead of making sounds one at a time whenever a game plays the same 
 - **Listening in a batch:** the dashboard's **Audition** page (`#/audition`, or `#/audition/<set>`) shows every sound as a compact
   card with the check badge; the person goes through them with the keyboard (arrows, space, `a` approves, `r` asks for changes) and
   their approvals and requests reach you through `await` as ever. A set has its own page (`#/set/<id>`).
+
+## Music: write a song in passes, and check each pass
+
+A song is **instruments** (a voice at a pitch), **patterns** (a grid of notes per channel) and a **song** (tempo,
+channels bound to instruments, the order of the patterns, the loop). The full reference is docs/commands.md
+("Music"); `docs/examples/chip-exploration.txt` is a complete 16-bar loop in two game layers to copy from.
+You cannot hear a song, so you work in passes and run `check <song>` after each: the failure is then in the
+pass you just made.
+
+1. **Structure.** `song new <id> tempo=<bpm> key=<tonic:mode> time=4/4 class=music` (`class=stinger` for a short fanfare:
+   -14 LUFS instead of -16). Decide the sections and their length in bars first (a loop: 4 bars of A, 4 of B ...), the
+   game layers (`base`, `tension`, `combat`: the channels that fade in and out together), and the channels with
+   `song channel add <song> <name> inst=<instrument>|kit=default layer=<layer>`. Patterns are 1 to 4 bars: `steps=16 tpb=4`
+   is one bar of sixteenth notes in 4/4. Use the built-in instruments first (square_lead, pulse_lead, triangle_bass, saw_pad,
+   fm_bell, fm_bass, pluck, kick, snare, hat, hat_open); `instrument new <id> from=<built-in>` then `instrument set` to change one.
+2. **Harmony.** Write the chords as a `pad` or arpeggio channel (`C4+E4+G4`, or `C4~arp(0,4,7)` for the chip shimmer),
+   one chord per bar or two. `check` runs `key`: every written note must be in the song's key; a note you mean to be out
+   of it is written `G#5!`. Notes made by `~arp` are not checked, so write the arp's root in key.
+3. **Bass.** Roots and fifths in the bass instrument's range (triangle_bass is C1-C4; `range` flags anything outside).
+   The bass pitches lock to the chord roots of pass 2. Under C2 the `render-match` pitch check cannot hear the note.
+4. **Melody.** Hold notes with `-`, rest with `.`, slide with `~slide`, vibrato with `~vib`, velocity with `v80`. Keep the lead in
+   the instrument's range. `view <song> notes` draws the written notes against what the render plays: a red note differs
+   (an instrument whose `root` is wrong plays an octave off, and `render-match` says `wrong octave ... check the instrument's root`).
+5. **Drums.** A drum channel is `kit=default` and rows of `k`, `s`, `h`, `oh`; a kick and a hat at once need two channels
+   (a row holds one hit per step). Put the drums in the `base` layer.
+6. **Arrangement.** `song section add <song> <name> <patterns...> x<n>`, `song intro`/`song ending` for a part that plays once,
+   `song loop <song> <from>..<to>` for the repeating region (`off` for a jingle). `loop-music` checks the seam: a loop whose
+   loud last beat runs into a quiet first beat, or a cut note, is flagged. The loop render folds the tail of the last
+   notes onto the start, so a reverb tail is not a seam.
+7. **Mix.** `normalize <project> <song>` writes `song set <id> gain=...` to the class target; then `view <song> mix`: channels
+   sharing the main band at the same time are amber, and `masking` warns (advisory: it never blocks `work done`). Fix it by
+   moving a part to another octave, thinning its notes, or panning it, not by turning it down.
+
+What the checks hold the song to: `clip`, `loudness` (class `music` -16 ±2 LUFS), `dc` (a pulse wave off 50 % duty needs a
+high-pass), `key`, `range`, `render-match` (every note's onset within 20 ms and its pitch right), `loop-music`, `masking`.
+`work done` on a request about a song needs all of them but `masking` to pass. `export <song> --loop` is the seamless loop,
+`--stems` one aligned file per game layer (before the master chain: they sum to the mix), `--format midi` a MIDI file;
+`midi import` brings a MIDI file in as a song. People mute and solo channels on the song card for listening; that is
+not stored, and a request from a person on a song is a `song mark <id> rejected` with their note. Change a pattern with `pattern set
+<song>.<name> "<text>"` (or the block form in a script); the history shows a person's edits like any other.
 
 ## Loudness classes: one target does not fit a whole game
 
