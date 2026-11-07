@@ -20,6 +20,9 @@ All notable changes to SoundClaw are listed here. The format follows
   `tail`. Renders of delay and reverb sounds, and of sounds with a late faint piece, changed: `RENDER_VERSION` is 4 and 20 layered goldens were
   regenerated (`master-chain`, `amp-adsr`, `fx-delay`, `fx-reverb`, and the recipes footstep 1-2, door 1-3, magic 1-3, creak 1, bell 1 and 3,
   voice-vowel 1-2, voice-cluck 2, voice-giggle 2-3).
+- **Limiter**: `limit` has `mode=true` (the default; the 4x-oversampled peak between the samples is held under the ceiling, so a limited
+  burst train passes the `clip` check) and `mode=sample`; its default release is 20 ms (was 50), so each hit of a train is limited on its own.
+  The recipes keep the sample-peak limiter and its 50 ms release they were tuned with; the `fx-limit` and `master-compress-limit` goldens moved.
 - **Measuring**: a classic sound is measured as its exported WAV holds it (`trunc(s * 32000)` of 32768), so `measure` agrees with the file
   within 0.05 dB and with ffmpeg's `ebur128`; the clip check counts a run at that level as full scale.
 - **Normalize**: a layered sound that gain 4 cannot bring to its target gets the rest from the new `out` (dB, after the master chain, up to

@@ -153,9 +153,10 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
     fxNum('makeup', 0, 24, 0, 'dB', 'gain added after compressing'),
   ],
   limit: [
-    fxNum('ceiling', -24, 0, -1, 'dB', 'no sample goes above this level (dBFS) after the limiter'),
-    fxNum('release', 1, 1000, 50, 'ms', 'how fast the gain comes back after a peak'),
-    fxNum('lookahead', 0, 20, 5, 'ms', 'how long before a peak the gain starts to come down (0: it drops at once)'),
+    fxNum('ceiling', -24, 0, -1, 'dB', 'nothing goes above this level (dBFS, or dBTP in true mode) after the limiter'),
+    fxNum('release', 1, 1000, 20, 'ms', 'how fast the gain comes back after a peak (20 ms lets a train of hits each be limited on its own; a long release makes the hits after a loud one quieter)'),
+    fxNum('lookahead', 0, 20, 5, 'ms', 'how long before a peak the gain starts to come down (0: it drops at once; in true mode at least 1 ms)'),
+    choice('mode', ['true', 'sample'], 'true', 'true: the 4x-oversampled peak between the samples is held under the ceiling (0.1 dB inside it), so the clip check passes; sample: only the samples are'),
   ],
 };
 

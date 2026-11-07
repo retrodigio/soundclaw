@@ -163,7 +163,7 @@ class they are made for. `check` and `measure` say which class applied.
   names the sound and writes nothing. A classic sound's `volume` stops at 1 or where it would clip, and the warning says how far short; `sound layer-up` lets gain go to 4).
   `measure` of a classic sound is taken from its exported WAV (`trunc(s * 32000)`), so it agrees with the file.
 - **Loud and not clipping: put dynamics in the chain, where the checks see them.** `fx add <id> compress threshold=-20 ratio=4`
-  and `fx add <id> limit ceiling=-1` (on the master chain, or `layer=<n>`), then raise `gain`. The checks measure the sound after
+  and `fx add <id> limit ceiling=-1` (on the master chain, or `layer=<n>`; it holds the true peak between samples under the ceiling, so `clip` passes, and its 20 ms release limits each hit of a burst train on its own), then raise `gain`. The checks measure the sound after
   the master chain; the export limiter only guards the true-peak ceiling and never makes anything louder. When `check` prints a
   **binding rule** (harsh against loudness: lower the 2–5 kHz energy first, then raise gain; clip against loudness: limit first),
   fix them in that order.

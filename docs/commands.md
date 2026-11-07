@@ -335,15 +335,16 @@ parameter's range. Setting a fixed value with `layer set` or `fx set` removes th
 | `release` | 5 to 2000 ms | 100 | - | how fast the detector lets go after the level falls |
 | `makeup` | 0 to 24 dB | 0 | - | gain added after compressing |
 
-*limit*: a look-ahead peak limiter: after it no sample is above `ceiling` (sample peaks; the export limiter below still guards the 4×-oversampled true peak). The gain a peak needs is reached `lookahead` ms before the peak (a running minimum over the window, averaged so it moves smoothly) and comes back with a one-pole `release`; under the ceiling the gain is exactly 1, so a quieter sound is left bit for bit as it was. There is no delay. In a stereo sound each channel is limited on its own. Use it on the master chain (or on one layer) so a sparse, spiky sound can be loud without clipping: gain up, then `fx add <id> limit ceiling=-1`.
+*limit*: a look-ahead peak limiter. In `mode=true` (the default) nothing is above `ceiling`, the samples **and the points between them**: the signal is 4× oversampled with the same kernel as the export limiter (deterministic: the sine is fdlibm's, only + − × ÷ otherwise), and the peaks of that are held 0.1 dB inside the ceiling, so a limited sound passes the `clip` check (a train of bursts included; `ceiling` is then a true-peak level, dBTP). In `mode=sample` only the samples are held (the old behaviour). The gain a peak needs is reached `lookahead` ms before the peak (a running minimum over the window, averaged so it moves smoothly; in true mode at least 1 ms, because a point between samples depends on the 48 around it) and comes back with a one-pole `release`; the default release of 20 ms lets each hit of a train of bursts be limited on its own, where a long release leaves the hits after a loud one quieter. Under the ceiling the gain is exactly 1, so a quieter sound is left bit for bit as it was. There is no delay. In a stereo sound each channel is limited on its own. Use it on the master chain (or on one layer) so a sparse, spiky sound can be loud without clipping: gain up, then `fx add <id> limit ceiling=-1`.
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
-| `ceiling` | -24 to 0 dB | -1 | - | no sample goes above this level (dBFS) after the limiter |
-| `release` | 1 to 1000 ms | 50 | - | how fast the gain comes back after a peak |
-| `lookahead` | 0 to 20 ms | 5 | - | how long before a peak the gain starts to come down (0: it drops at once) |
+| `ceiling` | -24 to 0 dB | -1 | - | nothing goes above this level (dBFS, or dBTP in true mode) after the limiter |
+| `release` | 1 to 1000 ms | 20 | - | how fast the gain comes back after a peak (20 ms lets a train of hits each be limited on its own; a long release makes the hits after a loud one quieter) |
+| `lookahead` | 0 to 20 ms | 5 | - | how long before a peak the gain starts to come down (0: it drops at once; in true mode at least 1 ms) |
+| `mode` | `true`, `sample` | true | - | true: the 4x-oversampled peak between the samples is held under the ceiling (0.1 dB inside it), so the clip check passes; sample: only the samples are |
 
-**The sound.** `sound set <id> duration=<s|auto> gain=<g> seed=<n>`:
+**The sound.** `sound set <id> duration=<s|auto> gain=<g> out=<dB> seed=<n>`:
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|

@@ -437,20 +437,58 @@ function runCompressor(buf: Float64Array, f: Fx): void {
 /**
  * A look-ahead peak limiter: no sample ends above `ceiling`. The gain that a peak needs is reached `lookahead` ms before the peak (a
  * running minimum over the window, averaged over it so the gain moves smoothly), and comes back with a one-pole `release`. The output has
- * no delay: the gain was already down when the peak arrives. Sample peaks, not true peaks (the export limiter, which works on 4x
- * oversampled peaks, still guards the style's true-peak ceiling and changes nothing under it).
+ * no delay: the gain was already down when the peak arrives. In `mode=true` (the default) the peaks counted are those of the 4x oversampled
+ * signal, found with the export limiter's kernel and kept 0.1 dB inside the ceiling; in `mode=sample` only the samples are.
  */
 function runLimiter(buf: Float64Array, f: Fx): void {
   const n = buf.length;
   const ceil = exp2((f.p.ceiling as number) * DB_TO_LOG2);
   const need = new Float64Array(n).fill(1);
   let any = false;
-  for (let i = 0; i < n; i++) {
-    const ax = buf[i]! < 0 ? -buf[i]! : buf[i]!;
-    if (ax > ceil) { need[i] = ceil / ax; any = true; }
+  if (f.p.mode === 'sample') {
+    for (let i = 0; i < n; i++) {
+      const ax = buf[i]! < 0 ? -buf[i]! : buf[i]!;
+      if (ax > ceil) { need[i] = ceil / ax; any = true; }
+    }
+  } else {
+    // true-peak mode: the points between the samples (4x oversampled, the export limiter's kernel) count too, 0.1 dB inside the ceiling;
+    // the gain a point between samples i and i+1 needs is asked of both of them
+    const c = ceil * LIM_MARGIN;
+    const h = kernel();
+    // a point between samples is a weighted sum of the 48 around it, so it cannot pass (the largest of them) x (the sum of the weights' sizes):
+    // where the blocks around are that far under the ceiling the point is skipped, which leaves the answer exactly as it would be
+    let wsum = 0;
+    for (const row of h) { let t = 0; for (const w of row) t += w < 0 ? -w : w; if (t > wsum) wsum = t; }
+    const nb = Math.ceil(n / 64);
+    const bmax = new Float64Array(nb);
+    for (let i = 0; i < n; i++) { const a = buf[i]! < 0 ? -buf[i]! : buf[i]!; if (a > bmax[i >> 6]!) bmax[i >> 6] = a; }
+    for (let i = 0; i < n; i++) {
+      const x0 = buf[i]!;
+      let pk = x0 < 0 ? -x0 : x0;
+      if (pk > c) { need[i] = Math.min(need[i]!, c / pk); any = true; }
+      pk = 0;
+      const b = i >> 6;
+      if (Math.max(bmax[b]!, b > 0 ? bmax[b - 1]! : 0, b + 1 < nb ? bmax[b + 1]! : 0) * wsum <= c) continue;
+      for (let ph = 0; ph < 3; ph++) {
+        let acc = 0;
+        for (let k = -LIM_HALF + 1; k <= LIM_HALF; k++) {
+          const j = i + k;
+          if (j >= 0 && j < n) acc += buf[j]! * h[ph]![k + LIM_HALF - 1]!;
+        }
+        const a = acc < 0 ? -acc : acc;
+        if (a > pk) pk = a;
+      }
+      if (pk > c) {
+        const g = c / pk;
+        if (g < need[i]!) need[i] = g;
+        if (i + 1 < n && g < need[i + 1]!) need[i + 1] = g;
+        any = true;
+      }
+    }
   }
   if (!any) return;
-  const W = Math.max(1, Math.round((f.p.lookahead as number) * 0.001 * SR));
+  // (in true-peak mode the look-ahead is at least 1 ms, LIM_WINDOW samples: a point between samples depends on the 48 samples around it, so the gain has to be steady over them)
+  const W = Math.max(f.p.mode === 'sample' ? 1 : LIM_WINDOW, Math.round((f.p.lookahead as number) * 0.001 * SR));
   // m[j] = the least gain needed in [j, j + W - 1] (a monotonic queue)
   const m = new Float64Array(n);
   const q = new Int32Array(n + W);

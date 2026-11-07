@@ -379,6 +379,8 @@ function drawEnv(rng: Rng, pts: readonly Pt[], spec: PSpec | undefined): Env {
 
 function drawFx(rng: Rng, r: FxRecipe): Fx {
   const f = newFx(r.kind);
+  // the recipes' limiters were tuned with the sample-peak limiter and its 50 ms release; they keep them (a new limit effect defaults to true-peak mode and 20 ms)
+  if (r.kind === 'limit') { f.p.mode = 'sample'; f.p.release = 50; }
   for (const [k, rule] of Object.entries(r.p)) f.p[k] = clampTo(specOf(FX_SPECS[r.kind], k), draw(rng, rule));
   for (const [k, pts] of Object.entries(r.envs ?? {})) f.envs[k] = drawEnv(rng, pts, specOf(FX_SPECS[r.kind], k));
   return f;
