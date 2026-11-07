@@ -5,6 +5,7 @@ import { Editor } from './Editor.tsx';
 import { ListenerChip } from './Listening.tsx';
 import { SetPage } from './SetPage.tsx';
 import { SoundCard } from './SoundCard.tsx';
+import { SongCard } from './SongCard.tsx';
 import type { Store } from './store.ts';
 
 function History({ tape }: { tape: TapeEntry[] }) {
@@ -73,8 +74,14 @@ export function App({ store }: { store: Store }) {
                   </div>
                 </section>
               )}
+              {store.songs.length > 0 && (
+                <section className="songs" data-testid="songs" aria-label="Songs">
+                  <h2>Songs</h2>
+                  {store.songs.map((x) => <SongCard key={x.id} store={store} song={x} />)}
+                </section>
+              )}
               <section className="sounds" data-testid="sounds" aria-label="Sounds">
-                {store.sounds.length === 0 && store.status === 'open' && (
+                {store.sounds.length === 0 && store.songs.length === 0 && store.status === 'open' && (
                   <p className="empty" data-testid="empty">No sounds yet. Ask the agent to make one, or run <code>soundclaw run &lt;project&gt; -e "sound new beep"</code>.</p>
                 )}
                 {store.sounds.map((s) => <SoundCard key={s.id} store={store} sound={s} />)}

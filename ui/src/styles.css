@@ -147,3 +147,24 @@ fieldset.fx { margin-bottom: 6px; }
 .card.aud h2 { font-size: 14px; }
 .card.aud.selected { outline: 2px solid var(--warn); }
 .card.aud .card-actions button { padding: 3px 8px; font-size: 12px; }
+
+/* songs */
+.songs { margin-bottom: 1.5rem; }
+.song-card { max-width: none; }
+.song-card .channels { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+.song-card .channel { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid #2c313c; }
+.song-card .channel[data-audible="false"] { opacity: 0.4; }
+.song-card .channel.layer-tension .channel-name { color: #f0be46; }
+.song-card .channel.layer-combat .channel-name { color: #eb5050; }
+.song-card .channel-name { font-weight: 600; }
+.song-card .mini { padding: 0 0.35rem; font-size: 0.75rem; min-width: 1.4rem; }
+.song-card .mini.on { background: #58c4a6; color: #111; }
+.song-card .patterns { display: flex; flex-wrap: wrap; gap: 0.75rem; font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem; margin-top: 0.5rem; }
+.song-card .pattern { background: #181b22; border-radius: 4px; padding: 0.35rem 0.5rem; }
+.song-card .pattern-name { color: #8d93a3; margin-bottom: 0.2rem; }
+.song-card .pattern-row { display: flex; white-space: nowrap; }
+.song-card .pattern-chan { display: inline-block; width: 4.2em; color: #8d93a3; }
+.song-card .step { display: inline-block; min-width: 2.2em; padding: 0 0.15em; color: #c9ced8; }
+.song-card .step.rest, .song-card .step.hold { color: #4a505e; }
+.song-card .step.bar { margin-left: 0.6em; }
+.song-card .step.now { background: #58c4a6; color: #111; border-radius: 2px; }

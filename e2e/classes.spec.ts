@@ -20,7 +20,7 @@ test('the sound page shows the class rule, the menu changes it as a command, and
   await expect(page.getByTestId('loudness-target')).toHaveText('-16.0 LUFS ±1');
   await expect(page.getByTestId('loudness-target')).toHaveAttribute('title', 'class standard');
   const options = await page.getByTestId('loudness-class').locator('option').allTextContents();
-  expect(options).toEqual(['default (standard)', 'standard', 'ui', 'foley', 'impact', 'ambience', 'voice', 'music-sting']);
+  expect(options).toEqual(['default (standard)', 'standard', 'ui', 'foley', 'impact', 'ambience', 'voice', 'music-sting', 'music', 'stinger']);
   await page.getByTestId('loudness-class').selectOption('ui');
   await expect(page.getByTestId('loudness-target')).toHaveText('-28.0 LUFS ±3');
   await expect(page.getByTestId('loudness-target')).toHaveAttribute('title', 'class ui');
