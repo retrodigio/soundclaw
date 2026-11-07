@@ -97,7 +97,7 @@ export function paramProblem(name: string, value: number, voice: VoiceKind = 'to
 
 /** The parameter names of the voices together (the command parser checks a name against these; the sound's voice decides at apply time). */
 export function isParamName(name: string): boolean {
-  return name === 'seed' || name === 'gain' || name === 'class' || name === 'loudness' || TONE_PARAMS.some((p) => p.name === name) || CLASSIC_FIELDS.some((f) => f.name === name);
+  return name === 'seed' || name === 'gain' || name === 'out' || name === 'class' || name === 'loudness' || TONE_PARAMS.some((p) => p.name === name) || CLASSIC_FIELDS.some((f) => f.name === name);
 }
 
 /** A number as written in the tape and documents: shortest round-trip form, no exponent noise. */

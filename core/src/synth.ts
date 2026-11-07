@@ -676,6 +676,7 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
   mix.forEach((ch, c) => {
     if (s.gain !== 1) for (let i = 0; i < n; i++) ch[i] = ch[i]! * s.gain;
     for (const f of s.master) runFx(ch, f, c);
+    if (s.out) { const g = exp2(s.out * DB_TO_LOG2); for (let i = 0; i < n; i++) ch[i] = ch[i]! * g; } // the output level, after the master chain
   });
   let end = n;
   if (s.duration === null) {

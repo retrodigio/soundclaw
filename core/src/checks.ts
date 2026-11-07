@@ -141,7 +141,7 @@ const f1 = (v: number): string => (Number.isFinite(v) ? v.toFixed(1) : v > 0 ? '
 const sec = (n: number): number => Math.round((n / SAMPLE_RATE) * 10000) / 10000;
 
 /** Runs of samples at or above full scale (in any channel), merged when within 1 ms, as time ranges. */
-function fullScaleRanges(x: Samples): CheckRange[] {
+function fullScaleRanges(x: Samples, level = 0.9999): CheckRange[] {
   const out: CheckRange[] = [];
   let start = -1, last = -1;
   const flush = (): void => {
@@ -149,7 +149,7 @@ function fullScaleRanges(x: Samples): CheckRange[] {
     start = -1;
   };
   for (let i = 0; i < x.length; i++) {
-    if (Math.abs(x[i]!) >= 0.9999) {
+    if (Math.abs(x[i]!) >= level) {
       if (start >= 0 && i - last > 44) flush();
       if (start < 0) start = i;
       last = i;
@@ -212,6 +212,8 @@ export interface CheckOptions {
   loudnessClass?: string;
   /** The sound is a loop: the click check looks at the seam, and the tail check does not ask for a fade-out. */
   loop?: boolean;
+  /** The level that counts as full scale for the clip check's runs (default 0.9999; the classic voice's, measured as exported, is a little lower: see `fullScaleOf`). */
+  fullScale?: number;
 }
 
 export function runChecks(input: Samples | readonly Samples[], a: Analysis, style: Style = DEFAULT_STYLE, o: CheckOptions = {}): CheckResult[] {
@@ -235,7 +237,7 @@ export function runChecks(input: Samples | readonly Samples[], a: Analysis, styl
 
   // clip
   {
-    const all = fullScaleRanges(x);
+    const all = fullScaleRanges(x, o.fullScale);
     const ranges = all.slice(0, 12);
     const over = a.truePeakDb - style.truePeakMax;
     const pass = !a.silent && over <= 0 && !ranges.length;

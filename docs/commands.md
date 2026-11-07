@@ -30,7 +30,7 @@ editor writes `sound set` with the parameters in the table's order and the wave 
 | `sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]` | A small seeded change to a classic sound (also written `mutate <id> ...`): each parameter except the wave and the volume moves, with a chance of one half, by up to `amount`, kept in its range. `as=` leaves the original alone and makes a new sound. The seed used is written into the normal form. |
 | `sound mark <id> approved\|rejected\|draft ["note"]` | Set the sound's status. People use the dashboard's Approve and Ask for changes buttons, which write this. |
 | `sound new <id> voice=layered [preset=<recipe>] [seed=<n>]` | Make a layered sound: up to 8 layers, envelopes, effects (below). `preset=` takes a layered recipe (`footstep`, `ui-click`, `door`, `magic`) or a classic category (one classic layer). The seed (the sound's noise seed; the recipe's seed too) is written into the normal form. |
-| `sound set <id> duration=<s\|auto> gain=<g> seed=<n>` | On a layered sound: its length (`auto` follows the layers), master level and noise seed. |
+| `sound set <id> duration=<s\|auto> gain=<g> out=<dB> seed=<n>` | On a layered sound: its length (`auto` follows the layers), master level (before the master chain), output level in dB (after it) and noise seed. |
 | `sound set <id> class=<name>\|none loudness=<LUFS>\|auto` | On any sound: its loudness class (what the `loudness` check holds it to: "Loudness classes" below), or a loudness for this sound alone. The class must be in the project's style. |
 | `sound copy <id> <new>` | A copy of the sound under a new id, as a draft, in no set. |
 | `sound rename <id> <new>` | Give the sound a new id (a case-only change is allowed); the sets that name it (members, source) and the variants that name it as their source follow. |
@@ -348,7 +348,8 @@ parameter's range. Setting a fixed value with `layer set` or `fx set` removes th
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
 | `duration` | 0.01 to 120 s | auto | - | length of the sound; `auto` (the default) is as long as the layers and their tails |
-| `gain` | 0 to 4 | 1 | - | master level |
+| `gain` | 0 to 4 | 1 | - | master level (before the master chain) |
+| `out` | -48 to 48 dB | 0 | - | output level in dB, after the master chain (0 = off); `normalize` uses it when gain 4 is not enough |
 | `seed` | 0 to 4294967295 (whole) | 1 | - | the sound's noise seed (layers derive theirs from it) |
 
 An automatic length is as long as the layers that sound (not muted; if any is soloed, those) and their effects' tails, then
@@ -578,7 +579,7 @@ One loudness target for every sound is wrong for a game: a UI tick is not as lou
 - Which rule holds a sound, most specific first: its own `loudness`, its own `class`, the `target` of its set, the class of its set, the style's `defaultClass` (`standard`). A far or muffled family variant is held to that target plus its offset.
 - `check`, `measure` and `describe --json` say which rule applied: `held to -28.0 LUFS ±3 (class ui)`, `(class ui; own loudness)`, `(class standard; target of set steps)`. The recipes (ui-click, footstep, door, magic and the sound-effect recipes below) start their sounds in the class they were made for.
 - The project style adds to or replaces the classes: `"style": { "loudnessClasses": { "ui": { "target": -30, "tolerance": 3 }, "boss": { "target": -9 } }, "defaultClass": "foley" }` (tolerance defaults to 1 LU; a class name is `a-z`, `0-9`, `-`).
-- `normalize <project> <id|set>... [<class> | target=<LUFS>]` writes the gain that brings sounds to their class (or to a class you name, which they join, or to a target they are then held to). A layered sound's gain goes up to 4; a classic sound's `volume` stops at 1, and the warning says how many LU it falls short (`sound layer-up` first lets gain go to 4).
+- `normalize <project> <id|set>... [<class> | target=<LUFS>]` writes the gain that brings sounds to their class (or to a class you name, which they join, or to a target they are then held to). A layered sound's gain goes up to 4 and, if that is not enough (a quiet or sparse sound), the rest is `out` (up to +36 dB, after the master chain); when even that cannot reach the target `normalize` stops with an error naming the sound and what it measures at the most, and writes nothing. A classic sound's `volume` stops at 1 or at the volume where it would start to clip (the clip check would fail above it), whichever is lower, and the warning says how many LU it falls short (`sound layer-up` first lets gain go to 4).
 - **When two checks pull against each other**, `check` names the rule that binds, so they are fixed in the right order: harsh and loudness ("louder is harsher": lower the 2–5 kHz energy first, then raise gain), and clip and loudness (shave the peaks with `compress` / `limit` first, then raise gain).
 
 ### Checks and the project style
@@ -596,6 +597,8 @@ and the exact time ranges it flags.
 | `harsh` | sustained energy at 2 to 5 kHz: the level of that band (dBFS, RMS of the band content, from 1024-sample Hann spectra; a full-scale sine inside it reads -3) stays above the limit for at least the minimum time (the ranges are where) | at most -20 dBFS for 80 ms |
 
 | `set-spread` | (a set, `check <set>`) members closer together than `setSpreadMin` or farther apart than `setSpreadMax`, or a member's loudness off the set's target | 1 dB; 20 dB; ±1 LU |
+
+**A classic sound is measured as its exported WAV holds it**: the engine's pre-rendered form is `trunc(s × 32000)` in 16 bits, so a classic sound's samples are read as that value over 32768 (a full-scale 1.0 is 0.977, 0.2 dB under full scale). Its peak, true peak, rms and loudness therefore agree with the exported file within 0.05 dB (and with ffmpeg's `ebur128` on it), and the `clip` check counts a run at that level (31,996 of 32,768 and up) as full scale. Layered sounds already export at the scale they render at. The `render` summary line (peak, rms) is the float render; `measure`, `describe` and `check` are the exported scale.
 
 Every check works on stereo (below). A sound shorter than 400 ms is measured as one block over its whole length (BS.1770 needs 400 ms
 blocks; padding with silence would lower the figure). `work` `done` on a request is refused while the
@@ -737,7 +740,7 @@ A number that is not finite (a silent sound has no loudness) is `null`. Numbers 
 
 **`normalize <project> <id|set>... [<class> | target=<LUFS>]`** writes the gain commands that bring sounds (or a set's members) to a loudness, as one undo group, and prints them: each
 sound's own class target with no argument; a class name (the sounds join that class: `sound set <id> class=<name>`); or `target=<LUFS>` (they are given `loudness=<LUFS>` and held to it).
-The gain is a layered sound's `gain` or a classic sound's `volume`; a classic sound that cannot get loud enough is a warning that says by how many LU.
+The gain is a layered sound's `gain`, then `out` (dB, after the master chain: the sound is first brought to gain 4, and the rest is `out`, up to +36 dB; when the sound is louder than the target `out` is taken back first); a target out of reach even then is an error that names the sound and the loudness it reaches, and nothing is written. A classic sound's gain is its `volume`, which stops at 1 or where the sound would clip (no sample at full scale, exported true peak within `truePeakMax`), whichever is lower: a classic sound that cannot get loud enough that way is a warning that says by how many LU. Loudness matching sees a classic sound as `measure` does, at the exported scale (below).
 
 ### What others changed
 

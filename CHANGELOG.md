@@ -15,6 +15,11 @@ All notable changes to SoundClaw are listed here. The format follows
   (`sample-plain`, `sample-trim-pitch-reverse`, `sample-pitch-envelope`).
 - **Sets**: in `set-spread` a member's own `loudness=` replaces the set's target for that member, and the check reports the per-member targets.
 - **Bursts**: `bursts(times=... level=a,b,c)` takes a level for each hit.
+- **Measuring**: a classic sound is measured as its exported WAV holds it (`trunc(s * 32000)` of 32768), so `measure` agrees with the file
+  within 0.05 dB and with ffmpeg's `ebur128`; the clip check counts a run at that level as full scale.
+- **Normalize**: a layered sound that gain 4 cannot bring to its target gets the rest from the new `out` (dB, after the master chain, up to
+  +36 dB; `sound set <id> out=<dB>`), and an unreachable target is an error naming the sound and what it reaches, with nothing written.
+  A classic sound's volume stops at the clip limit and the warning says how far short it is.
 
 ### Fixes from the first large use
 - **Loudness classes**: the style names classes with a target and a tolerance (`ui`, `foley`, `impact`, `ambience`, `voice`,

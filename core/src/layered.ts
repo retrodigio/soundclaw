@@ -162,7 +162,8 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
 /** Sound-wide values (`sound set <id> …` on a layered sound). */
 export const SOUND_SPECS: readonly PSpec[] = [
   { ...num('duration', 0.01, MAX_DURATION, 0, 's', 'length of the sound; `auto` (the default) is as long as the layers and their tails'), optional: true },
-  num('gain', 0, 4, 1, '', 'master level'),
+  num('gain', 0, 4, 1, '', 'master level (before the master chain)'),
+  num('out', -48, 48, 0, 'dB', 'output level in dB, after the master chain (0 = off); `normalize` uses it when gain 4 is not enough'),
   num('seed', 0, 4294967295, 1, '', 'the sound\'s noise seed (layers derive theirs from it)', false, true),
 ];
 
@@ -272,6 +273,8 @@ export interface LayeredSound {
   /** null: as long as the layers and their tails. */
   duration: number | null;
   gain: number;
+  /** Output level in dB after the master chain; absent: 0. */
+  out?: number;
   seed: number;
   /** A looping bed: the sound is loop.length seconds long and its seam is made seamless. */
   loop?: LoopSpec;
@@ -414,6 +417,7 @@ export const fmtValue = (v: Value): string => (typeof v === 'number' ? String(v)
 /** The text of a layered sound's file: every value, one layer per block. */
 export function serializeLayered(s: LayeredSound): string[] {
   const lines = [`seed ${s.seed}`, `duration ${s.duration === null ? 'auto' : fmtNum(s.duration)}`, `gain ${fmtNum(s.gain)}`];
+  if (s.out) lines.push(`out ${fmtNum(s.out)}`);
   if (s.loop) lines.push(`loop ${fmtNum(s.loop.length)} fade ${fmtNum(s.loop.fade)}`);
   if (s.family) lines.push(`family ${s.family.kind} of ${s.family.of} offset ${fmtNum(s.family.offsetDb)}`);
   if (s.loudClass) lines.push(`class ${s.loudClass}`);
@@ -440,6 +444,7 @@ export function serializeLayered(s: LayeredSound): string[] {
 export function layeredBody(s: LayeredSound, sampleHash: (name: string) => string): string {
   const fx = (f: Fx): string => `${f.kind}(${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(',')};${Object.keys(f.envs).sort().map((k) => `${k}=${formatEnv(f.envs[k]!)}`).join(',')})`;
   const parts = [`dur=${s.duration ?? 'auto'}`, `gain=${s.gain}`, `seed=${s.seed}`];
+  if (s.out) parts.push(`out=${s.out}`);
   if (s.loop) parts.push(`loop=${s.loop.length}/${s.loop.fade}`);
   s.layers.forEach((l) => {
     if (l.mute) { parts.push(`L${l.salt}:muted`); return; }

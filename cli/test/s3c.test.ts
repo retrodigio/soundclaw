@@ -125,7 +125,7 @@ describe('normalize', () => {
     run('sound new k voice=classic preset=blip seed=2\nsound set k sustain=0.02 decay=0.02 volume=0.2\n');
     const r = sc(['normalize', proj, 'k', 'target=-3']);
     expect(r.code).toBe(0);
-    expect(r.out).toMatch(/warning: k: volume would need to be above 1/);
+    expect(r.out).toMatch(/warning: k: volume stops at [\d.]+, .* LU under the target -3/);
     expect(sc(['normalize', proj, 'k', 'loudest']).err).toMatch(/no sound or set 'loudest'|neither a loudness class/);
     expect(sc(['normalize', proj, 'k', 'target=5']).err).toMatch(/LUFS from -60 to 0/);
     expect(sc(['normalize', proj]).err).toMatch(/normalize:/);

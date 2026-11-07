@@ -188,6 +188,7 @@ export function normalizeCommands(w: Writer, names: string[], spec?: string): { 
   lib.sets = new Map(w.sets().map((x) => [x.id, x] as const));
   const out: string[] = [];
   const notes: string[] = [];
+  const unreachable: string[] = [];
   for (const id of unique) {
     const pre = cls ? `sound set ${id} class=${cls} loudness=auto` : loud !== null ? `sound set ${id} loudness=${loud}` : null;
     if (pre) {
@@ -197,10 +198,12 @@ export function normalizeCommands(w: Writer, names: string[], spec?: string): { 
     }
     const sound = lib.get(id)!;
     const rule = loudnessFor(sound, lib.sets.values(), w.style);
-    const m = matchGain(sound, rule.target, w.samples);
+    const m = matchGain(sound, rule.target, w.samples, w.style);
+    if (m.error) unreachable.push(m.error);
     if (m.command) out.push(m.command);
     if (m.note) notes.push(m.note);
   }
+  if (unreachable.length) throw new ProjectError(`normalize: ${unreachable.join('\n  ')}\n  (nothing was changed)`);
   const target = cls ? `class ${cls} (${classTable(w.style)[cls]!.target} LUFS)` : loud !== null ? `${loud} LUFS` : 'each sound\'s own class';
   return { commands: out.join('\n'), notes, ids: unique, target };
 }

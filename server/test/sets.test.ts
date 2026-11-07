@@ -94,7 +94,7 @@ describe('set new through the writer', () => {
   });
   it('says, as a warning, when a classic member cannot reach the target with its volume', () => {
     const r = run('sound new coin voice=classic preset=pickup seed=3\nset new c from=coin count=3 target=-3 spread="freq±0.04" seed=1');
-    expect(r.warnings.join('\n')).toMatch(/volume would need to be above 1.*layer-up/);
+    expect(r.warnings.join('\n')).toMatch(/volume stops at [\d.]+, .* LU under the target -3.*layer-up/);
     expect(f.w.sound('c_1').voice).toBe('classic');
   });
   it('is atomic: an error in the batch applies none of it', () => {

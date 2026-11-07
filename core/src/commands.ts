@@ -502,13 +502,13 @@ function parseLine(l: RawLine): Command {
     if (verb.v === 'set') {
       const id = checkId(args[0], line, 'sound set');
       const pairs = args.slice(1);
-      if (!pairs.length) throw new DiagError(line, verb.col, `sound set ${id}: give at least one <param>=<value> (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, seed)`);
+      if (!pairs.length) throw new DiagError(line, verb.col, `sound set ${id}: give at least one <param>=<value> (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, out, seed)`);
       const values: [string, SetValue][] = [];
       for (const t of pairs) {
         const m = /^([A-Za-z]+)=(.*)$/.exec(t.v);
         if (!m) throw new DiagError(line, t.col, `'${t.v}' is not <param>=<value>`);
         const name = m[1]!;
-        if (!isParamName(name)) throw new DiagError(line, t.col, `no parameter '${name}' (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, seed; any sound: class, loudness)`);
+        if (!isParamName(name)) throw new DiagError(line, t.col, `no parameter '${name}' (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, out, seed; any sound: class, loudness)`);
         let value: SetValue;
         if (name === 'class') {
           if (m[2] !== 'none' && !CLASS_NAME_RE.test(m[2]!)) throw new DiagError(line, t.col, `class is a loudness class name (like ui, foley, impact) or none (got '${m[2]}')`);
@@ -524,7 +524,7 @@ function parseLine(l: RawLine): Command {
           const voices = (['tone', 'classic', 'layered'] as const).filter((v) => voiceParams(v).some((p) => p.name === name));
           if (name === 'seed') {
             if (!Number.isFinite(n)) throw new DiagError(line, t.col, 'seed must be a number');
-          } else if (name === 'gain') {
+          } else if (name === 'gain' || name === 'out') {
             const problem = paramProblem(name, n, 'layered');
             if (problem) throw new DiagError(line, t.col, problem);
           } else if (name === 'duration') {
@@ -719,10 +719,13 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       if (next.voice === 'layered') {
         for (const [n, v] of values) {
           if (n === 'duration') next.duration = v === 'auto' ? null : checkNumber(specOf(SOUND_SPECS, 'duration')!, v as number, c.id);
-          else if (n === 'gain' || n === 'seed') {
+          else if (n === 'out') {
+            const dB = checkNumber(specOf(SOUND_SPECS, n)!, v as number, c.id);
+            if (dB === 0) delete next.out; else next.out = dB;
+          } else if (n === 'gain' || n === 'seed') {
             if (v === 'auto') throw new Error(`${c.id}: a layered sound's seed is a number (it has no auto)`);
             (next as unknown as Record<string, number>)[n] = checkNumber(specOf(SOUND_SPECS, n)!, v as number, c.id);
-          } else throw new Error(`${c.id} is a layered sound: sound set takes duration, gain, seed, class and loudness (layers have layer set, effects have fx set)`);
+          } else throw new Error(`${c.id} is a layered sound: sound set takes duration, gain, out, seed, class and loudness (layers have layer set, effects have fx set)`);
         }
         lib.set(c.id, next);
         return undefined;

@@ -47,6 +47,28 @@ export function channelCount(s: Sound): number {
   return s.voice === 'layered' ? layeredChannelCount(s) : 1;
 }
 
+/** A classic sample at the highest the exported file holds: the first quantised step under the voice's full scale of 1 (trunc(0.9999 × 32000) / 32768). */
+export const CLASSIC_FULL_SCALE = 31996 / 32768;
+
+/**
+ * The channels as the exported file holds them, as floats, which is what `measure` looks at: the classic voice exports as
+ * trunc(s × 32000) in 16 bits (a full-scale sample of 1 is 32000 of 32768, 0.2 dB under full scale), so its numbers are taken from
+ * those values and agree with the exported WAV; every other voice already exports at the scale it renders (16-bit, × 32767).
+ */
+export function measuredChannels(s: Sound, chs: Float32Array[]): Float32Array[] {
+  if (s.voice !== 'classic') return chs;
+  return chs.map((c) => {
+    const q = new Float32Array(c.length);
+    for (let i = 0; i < c.length; i++) q[i] = Math.trunc(c[i]! * 32000) / 32768;
+    return q;
+  });
+}
+
+/** The level at which a sample counts as full scale in `measuredChannels` of this sound (the clip check's run detection). */
+export function fullScaleOf(s: Sound): number | undefined {
+  return s.voice === 'classic' ? CLASSIC_FULL_SCALE : undefined;
+}
+
 /** The sound's channels (one array each). Every voice but a panned layered sound is one channel. */
 export function renderChannels(s: Sound, bank?: SampleBank): Float32Array[] {
   return s.voice === 'layered' ? renderLayered(s, bank) : [renderSound(s)];

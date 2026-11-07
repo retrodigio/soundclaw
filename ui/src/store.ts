@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, measuredChannels, fullScaleOf, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
 
 export interface Measured {
@@ -359,9 +359,10 @@ export class Store {
     if (!m) {
       const ch = this.channels(s);
       const x = mixdown(ch);
-      const analysis = analyze(ch);
+      const mc = measuredChannels(s, ch); // a classic sound is measured as its exported WAV holds it
+      const analysis = analyze(mc);
       const hop = Math.max(256, Math.ceil(x.length / 240));
-      m = { analysis, checks: runChecks(ch, analysis, style, { loop, loudnessClass: rule.basis }), spec: melSpectrogram(x, { bands: 48, hop }) };
+      m = { analysis, checks: runChecks(mc, analysis, style, { loop, loudnessClass: rule.basis, fullScale: fullScaleOf(s) }), spec: melSpectrogram(x, { bands: 48, hop }) };
       if (this.ready(s)) {
         this.measures.set(key, m);
         if (this.measures.size > 64) this.measures.delete(this.measures.keys().next().value!);

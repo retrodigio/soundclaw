@@ -3,7 +3,7 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
-import { AUTHOR_RE, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
@@ -171,9 +171,10 @@ export class Writer {
     }
     if (target === null) return out;
     for (const id of ids) {
-      const m = matchGain(lib.get(id)!, target, this.samples);
+      const m = matchGain(lib.get(id)!, target, this.samples, this.style);
       if (m.command) out.commands.push(m.command);
       if (m.note) out.notes.push(m.note);
+      if (m.error) out.notes.push(m.error);
     }
     return out;
   }
@@ -229,8 +230,9 @@ export class Writer {
     const key = `${r.key}|${rule.target}|${rule.tolerance}|${rule.basis}|${loop ? 'loop' : ''}`;
     let m = this.measured.get(key);
     if (!m) {
-      const analysis = analyze(r.channels);
-      m = { analysis, checks: runChecks(r.channels, analysis, style, { loop, loudnessClass: rule.basis }), rule };
+      const chs = measuredChannels(s, r.channels); // a classic sound is measured as its exported WAV holds it
+      const analysis = analyze(chs);
+      m = { analysis, checks: runChecks(chs, analysis, style, { loop, loudnessClass: rule.basis, fullScale: fullScaleOf(s) }), rule };
       this.measured.set(key, m);
       if (this.measured.size > 128) this.measured.delete(this.measured.keys().next().value!);
     }

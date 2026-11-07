@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  FAMILIES, Library, analyze, applyCommand, checkSpread, defaultSetSeed, formatSpread, integratedLoudness, loudnessOf, matchGain, measureSet, mixdown, parse, parseSpread, renderChannels, replay, serializeSet,
+  FAMILIES, Library, analyze, applyCommand, checkSpread, classicClipLimit, cloneSound, fullScaleOf, measuredChannels, defaultSetSeed, formatSpread, integratedLoudness, loudnessOf, matchGain, measureSet, mixdown, parse, parseSpread, renderChannels, replay, serializeSet,
   serializeSound, soundStyle, runChecks, DEFAULT_STYLE, type ClassicSound, type LayeredSound, type Sound, type TapeEntry,
 } from '../src/index.ts';
 import { build } from './layered-helpers.ts';
@@ -188,8 +188,36 @@ describe('loudness matching', () => {
     expect(quieter.command).toMatch(/^sound set coin volume=0\.\d+$/);
     const louder = matchGain(s, own + 30);
     expect(louder.reached).toBe(false);
-    expect(louder.command).toBe('sound set coin volume=1');
-    expect(louder.note).toMatch(/volume would need to be above 1.*layer-up/);
+    const v = Number(/volume=([\d.]+)/.exec(louder.command!)![1]);
+    expect(v).toBeLessThanOrEqual(1);
+    expect(louder.note).toMatch(/volume stops at [\d.]+, .* LU under the target.*layer-up/);
+  });
+  it('never sets a classic volume that clips: it stops at the clip limit and says how far short it is', () => {
+    const l = lib(PICKUP);
+    const s = l.get('coin')!;
+    const limit = classicClipLimit(s);
+    expect(limit).toBeGreaterThan(0.2);
+    expect(limit).toBeLessThan(1); // this one clips at full volume
+    const m = matchGain(s, -3);
+    expect(m.command).toBe(`sound set coin volume=${limit}`);
+    expect(m.reached).toBe(false);
+    expect(m.note).toMatch(/where the sound would start to clip; it is [\d.]+ LU under the target -3/);
+    applyCommand(l, parse(m.command!).commands[0]!);
+    const at = (v: number): boolean => {
+      const t = cloneSound(l.get('coin')!);
+      if (t.voice === 'classic') t.patch.volume = v;
+      const ch = measuredChannels(t, renderChannels(t));
+      const a = analyze(ch);
+      return runChecks(ch, a, DEFAULT_STYLE, { fullScale: fullScaleOf(t) }).find((c) => c.name === 'clip')!.pass;
+    };
+    expect(at(limit)).toBe(true); // the volume it set passes the clip check
+    expect(at(Math.min(1, limit * 1.03))).toBe(false); // a little more would clip
+  });
+  it('a quiet classic sound is matched up to its target without clipping', () => {
+    const s = lib(PICKUP).get('coin')!;
+    const m = matchGain(s, loudnessOf(s) - 8);
+    expect(m.reached).toBe(true);
+    expect(m.note).toBeNull();
   });
   it('is the same on every run', () => {
     const a = matchGain(lib(STEP).get('step')!, -22), b = matchGain(lib(STEP).get('step')!, -22);
@@ -241,7 +269,7 @@ describe('the set-spread check', () => {
     ms[2]!.lufs -= 4;
     const m = measureSet(ms, -20);
     expect(m.result.pass).toBe(false);
-    expect(m.result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 is -24\.\d LUFS, 4\.\d LU from the target -20\.0/);
+    expect(m.result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 is -2[34]\.\d LUFS, [34]\.\d LU from the target -20\.0/);
     expect(measureSet(ms, null).result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 .* from the middle member/);
     expect(measureSet(ms.slice(0, 1), -20).result.pass).toBe(false);
   });
@@ -254,9 +282,9 @@ describe('the set-spread check', () => {
     ms[2]!.own = ms[2]!.lufs; // its own loudness is where it is
     const m = measureSet(ms, -20);
     expect(m.result.ranges.filter((r) => /LUFS, .* LU from/.test(r.note))).toHaveLength(0);
-    expect(m.result.threshold).toMatch(/own targets \(LUFS\): c_3 -24\.\d/);
+    expect(m.result.threshold).toMatch(/own targets \(LUFS\): c_3 -2[34]\.\d$/);
     ms[2]!.own = -30; // an own target it misses is flagged against that target
-    expect(measureSet(ms, -20).result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 is -24\.\d LUFS, 6\.\d LU from the own target -30\.0/);
+    expect(measureSet(ms, -20).result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 is -2[34]\.\d LUFS, [56]\.\d LU from the own target -30\.0/);
   });
   it('holds the members of a set to its target, and a family variant to the target plus its offset', () => {
     const l = lib(`${PICKUP}set new c from=coin count=2 target=-24 seed=1\nfamily coin far\n`);

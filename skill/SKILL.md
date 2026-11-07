@@ -159,7 +159,9 @@ target for one sound; a set takes a class too (`set new … class=foley`, `set c
 class they are made for. `check` and `measure` say which class applied.
 
 - **Bring sounds to their level with `normalize <project> <id|set>... [<class> | target=<LUFS>]`**, not by trial and error: it writes the
-  gain (a classic sound's `volume`, which stops at 1: the warning says how far short; `sound layer-up` lets gain go to 4).
+  gain (layered: `gain` up to 4, then `out`, the output level in dB after the master chain, up to +36 dB; a target out of reach is an error that
+  names the sound and writes nothing. A classic sound's `volume` stops at 1 or where it would clip, and the warning says how far short; `sound layer-up` lets gain go to 4).
+  `measure` of a classic sound is taken from its exported WAV (`trunc(s * 32000)`), so it agrees with the file.
 - **Loud and not clipping: put dynamics in the chain, where the checks see them.** `fx add <id> compress threshold=-20 ratio=4`
   and `fx add <id> limit ceiling=-1` (on the master chain, or `layer=<n>`), then raise `gain`. The checks measure the sound after
   the master chain; the export limiter only guards the true-peak ceiling and never makes anything louder. When `check` prints a
