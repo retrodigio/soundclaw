@@ -1,10 +1,11 @@
 // The agent's ears, server side: a sound's numbers and checks (measured once per distinct render
 // and kept), the views as PNG files, describe, check, and the classic voice's export and import.
 
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  CHECK_NAMES, audibleLayers, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
+  CHECK_NAMES, SAMPLE_RATE, audibleLayers, readSampleWav, resample, resampleMethod, sha256Hex, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
   pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, fmtStep, loopView, seamNumbers, setView, formatSpread, type Analysis, type CheckResult, type LoudnessRule, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
 import { Library, applyCommand, bindingRules, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
@@ -233,17 +234,12 @@ export interface ViewResult {
  */
 export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers' | 'loop' | 'set', o: { other?: string; out?: string } = {}): ViewResult {
   if (kind === 'set') return viewSet(w, id, o.out);
+  if (kind === 'compare') return viewCompare(w, id, o.other, o.out);
   const m = w.measure(id);
   const r = w.render(id);
   let png: Uint8Array;
   let text = `${id}: ${describe(m.analysis)}\n${formatNumbers(m.analysis)}\n${checkLine(m)}`;
-  if (kind === 'compare') {
-    if (!o.other) throw new ProjectError('compare needs a second sound');
-    const r2 = w.render(o.other);
-    const c = compareView(r.samples, r2.samples, id, o.other);
-    png = c.image.png;
-    text = `${formatDistance(c.distance, id, o.other)}\n\n${id}: ${describe(c.a)}\n${o.other}: ${describe(c.b)}`;
-  } else if (kind === 'wave') png = waveView(r.samples, m.analysis, id).png;
+  if (kind === 'wave') png = waveView(r.samples, m.analysis, id).png;
   else if (kind === 'spec') png = specView(r.samples, m.analysis, id).png;
   else if (kind === 'pitch') png = pitchView(m.analysis, id).png;
   else if (kind === 'layers') {
@@ -266,10 +262,80 @@ export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'l
     png = loopView(r.samples, m.analysis, seam, id).png;
     text += `\nloop: ${sound.loop.length} s, crossfade ${sound.loop.fade} s; seam jump ${seam.jump.toFixed(3)} against a local step of ${seam.local.toFixed(3)}, level step ${fmtStep(seam.stepDb)} dB between the last and the first 50 ms`;
   } else throw new ProjectError(`no view '${kind}' (wave, spec, pitch, layers, loop, set, compare)`);
-  const file = o.out ? resolve(o.out) : join(w.project.dir, '.cache', 'views', `${id}${kind === 'compare' ? `-vs-${o.other}` : ''}-${kind}-${r.key.slice(0, 8)}.png`);
+  const file = o.out ? resolve(o.out) : join(w.project.dir, '.cache', 'views', `${id}-${kind}-${r.key.slice(0, 8)}.png`);
   mkdirSync(join(file, '..'), { recursive: true });
   writeFileSync(file, png);
   return { png, file, text: `${kind} view saved to ${file}\n${text}` };
+}
+
+/** Longest reference audio read for a comparison, seconds. */
+const COMPARE_MAX_SECONDS = 120;
+
+export interface CompareSide {
+  /** What the picture and the numbers call it. */
+  label: string;
+  /** Mono, at the project's rate. */
+  samples: Float32Array;
+  /** Where it came from, when not a sound of the project. */
+  note: string | null;
+  /** Something that identifies the audio, for the file name of the picture. */
+  key: string;
+}
+
+/** An audio file outside the project as mono samples at the project's rate: a WAV is read here (any rate, resampled); other formats (OGG) are decoded by ffmpeg when it is installed. */
+export function readAudioFile(path: string): CompareSide {
+  const file = resolve(path);
+  if (!existsSync(file) || !statSync(file).isFile()) throw new ProjectError(`no audio file ${path}`);
+  const bytes = new Uint8Array(readFileSync(file));
+  const base = file.split(/[\\/]/).pop()!;
+  const isWav = bytes.length > 12 && String.fromCharCode(bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!) === 'RIFF';
+  let samples: Float32Array;
+  let note: string;
+  if (isWav) {
+    let wav;
+    try { wav = readSampleWav(bytes, COMPARE_MAX_SECONDS); } catch (e) { throw new ProjectError(`${path}: ${(e as Error).message}`); }
+    samples = wav.rate === SAMPLE_RATE ? wav.data : resample(wav.data, wav.rate, SAMPLE_RATE);
+    note = `${base}: ${wav.channels === 1 ? 'mono' : `${wav.channels} channels mixed to mono`}, ${wav.rate} Hz${wav.rate === SAMPLE_RATE ? '' : ` (${resampleMethod(wav.rate, SAMPLE_RATE)} to ${SAMPLE_RATE} Hz)`}, ${(wav.frames / wav.rate).toFixed(2)} s`;
+  } else {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', file, '-t', String(COMPARE_MAX_SECONDS), '-f', 'f32le', '-ac', '1', '-ar', String(SAMPLE_RATE), '-'], { maxBuffer: COMPARE_MAX_SECONDS * SAMPLE_RATE * 4 + 1024, encoding: 'buffer' });
+    if (r.error || r.status !== 0) {
+      const missing = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+      throw new ProjectError(missing
+        ? `${path} is not a WAV file, and reading other formats needs ffmpeg, which is not installed: convert it to a WAV (ffmpeg -i ${path} reference.wav) and compare that`
+        : `${path}: ffmpeg could not read it${r.stderr?.length ? ` (${r.stderr.toString().trim().split('\n')[0]})` : ''}; give a WAV or OGG file`);
+    }
+    const out = r.stdout as Buffer;
+    samples = new Float32Array(out.buffer.slice(out.byteOffset, out.byteOffset + out.length - (out.length % 4)));
+    note = `${base}: decoded by ffmpeg to mono ${SAMPLE_RATE} Hz, ${(samples.length / SAMPLE_RATE).toFixed(2)} s`;
+  }
+  if (!samples.length) throw new ProjectError(`${path} holds no audio`);
+  return { label: base, samples, note, key: sha256Hex(bytes).slice(0, 8) };
+}
+
+/** One side of a comparison: a sound or a song of the project, else an audio file. */
+function compareSide(w: Writer, what: string): CompareSide {
+  if (w.has(what)) return { label: what, samples: w.render(what).samples, note: null, key: w.render(what).key.slice(0, 8) };
+  if (w.hasSong(what)) {
+    const r = w.bench.render(w.song(what), { mode: 'full' });
+    const n = r.mix[0].length, mono = new Float32Array(n);
+    for (let i = 0; i < n; i++) mono[i] = (r.mix[0][i]! + r.mix[1][i]!) / 2;
+    return { label: what, samples: mono, note: `${what}: the song's full mix, mono`, key: r.key.slice(0, 8) };
+  }
+  if (existsSync(what) && statSync(what).isFile()) return readAudioFile(what);
+  throw new ProjectError(`no sound, song or audio file '${what}' (a sound or song of the project, or the path of a WAV or OGG file)`);
+}
+
+/** `view compare`: two sounds, songs or audio files (a reference outside the project), with the same difference picture and distance numbers. */
+function viewCompare(w: Writer, a: string, b: string | undefined, out?: string): ViewResult {
+  if (!b) throw new ProjectError('compare needs a second sound, song or audio file');
+  const A = compareSide(w, a), B = compareSide(w, b);
+  const c = compareView(A.samples, B.samples, A.label, B.label);
+  const safe = (s: string): string => s.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const file = out ? resolve(out) : join(w.project.dir, '.cache', 'views', `${safe(A.label)}-vs-${safe(B.label)}-compare-${A.key}${B.key}.png`);
+  mkdirSync(join(file, '..'), { recursive: true });
+  writeFileSync(file, c.image.png);
+  const notes = [A.note, B.note].filter((x): x is string => x !== null);
+  return { png: c.image.png, file, text: `compare view saved to ${file}\n${formatDistance(c.distance, A.label, B.label)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}` };
 }
 
 /** The set view: the members side by side and the distance matrix. */

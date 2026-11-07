@@ -199,14 +199,14 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({
       sound: z.string(),
       kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare', 'notes', 'mix']).optional().describe('Default spec (a song: notes, mix, wave, spec, loop; default notes)'),
-      other: z.string().optional().describe('compare: the second sound'),
+      other: z.string().optional().describe('compare: the second sound, song, or the path of a WAV or OGG file (a reference outside the project; `sound` may be a file too)'),
       from: z.number().optional().describe('A song: draw from this second'),
       to: z.number().optional().describe('A song: draw to this second'),
       channels: z.array(z.string()).optional().describe('A song: only these channels'),
     }),
   }, (a) => w.enqueue((): CallToolResult => {
     try {
-      if (w.hasSong(a.sound)) {
+      if (w.hasSong(a.sound) && a.kind !== 'compare') {
         const kind = (a.kind ?? 'notes') as string;
         if (!(SONG_VIEWS as readonly string[]).includes(kind)) return fail(`error: a song has the views ${SONG_VIEWS.join(', ')}`);
         const sv = viewSong(w, a.sound, kind as SongViewKind, { from: a.from, to: a.to, channels: a.channels });

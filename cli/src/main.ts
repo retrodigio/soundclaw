@@ -94,14 +94,15 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw view <project> <id> layers [--out <file.png>]
   soundclaw view <project> <id> loop [--out <file.png>]
   soundclaw view <project> <set> set [--out <file.png>]
-  soundclaw view <project> <id> compare <other> [--out <file.png>]
+  soundclaw view <project> <id|file> compare <other|file> [--out <file.png>]
       The agent's ears as a PNG (saved under <project>/.cache/views, or --out) and the numbers:
       wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers),
       pitch (YIN track over a note grid), layers (a layered sound's layers stacked: waveform and
       spectrogram of each, with their start offsets), loop (a looping sound's end joined to its start,
       the two overlapped, the joined spectrogram, and the level across four repeats), set (a set's members side
       by side with loudness bars, and the pairwise distance matrix), compare (two spectrograms and their difference, with
-      distance numbers).
+      distance numbers; either side is a sound, a song's full mix, or the path of a WAV or OGG file outside the project:
+      a reference to hold the work against; a WAV of any rate is resampled, OGG is read through ffmpeg when it is installed).
   soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
       A song's ears: notes (each channel rendered alone: the written notes, the detected onsets and pitch,
       differences in red), mix (each channel's energy by band over time, overlaps in amber), wave and spec
@@ -403,7 +404,7 @@ function cmdRender(io: Io, p: Parsed): number {
 function cmdView(io: Io, p: Parsed): number {
   const [dir, id, kind, other, ...extra] = p.pos;
   if (!dir || !id || !kind) throw new UsageError('view: give a project folder, a sound id and wave, spec, pitch or compare <other>');
-  if (wr(io, dir).hasSong(id)) {
+  if (wr(io, dir).hasSong(id) && kind !== 'compare') {
     if (!(SONG_VIEWS as readonly string[]).includes(kind)) throw new UsageError(`view: a song has the views ${SONG_VIEWS.join(', ')} (not '${kind}')`);
     if (other !== undefined || extra.length) throw new UsageError(`view ${kind}: unexpected '${other}'`);
     const num = (k: string): number | undefined => { const v = one(p, k); if (v === undefined) return undefined; const n = Number(v); if (!(n >= 0)) throw new UsageError(`--${k} is a time in seconds`); return n; };
@@ -412,7 +413,7 @@ function cmdView(io: Io, p: Parsed): number {
     return 0;
   }
   if (!['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, loop, set, compare)`);
-  if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound' : `view ${kind}: unexpected '${other}'`);
+  if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound, song or audio file' : `view ${kind}: unexpected '${other}'`);
   const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers' | 'loop' | 'set', { other, out: one(p, 'out') });
   io.out(v.text + '\n');
   return 0;
