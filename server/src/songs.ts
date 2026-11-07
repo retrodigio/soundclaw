@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  arrange, builtinInstruments, joinChannels, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
+  arrange, builtinInstruments, joinChannels, masterChainForStems, renderStems, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
   type MusicCheck, type PartStore, type SongDoc, type SongReport, type SongRender, midiToScript, type Instrument,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -306,8 +306,10 @@ export interface SongExportOptions {
   loop?: boolean;
   /** One file per game layer, aligned: the loop's stems when the song loops, else the song's. */
   stems?: boolean;
-  /** The loop region repeated this many times in a full export. */
+  /** The loop region repeated this many times: in a full export, or in a loop or stem export of the region. */
   loops?: number;
+  /** Stems: run the master chain's filters over each stem (the compressor and limiter cannot be split among stems). */
+  stemsThroughMaster?: boolean;
   /** MIDI: one pattern instead of the song. */
   pattern?: string;
   out?: string;
@@ -319,49 +321,85 @@ export interface SongExportedFile {
   bytes: number;
   seconds: number;
   kind: string;
+  /** What the export did that the file name does not say (for stems through the master chain). */
+  notes?: string[];
+}
+
+/** Refuse the combinations of export options that mean nothing, each with what to do instead. */
+export function checkSongExportOptions(o: SongExportOptions): void {
+  const bad = (m: string): never => { throw new ProjectError(`export: ${m}`); };
+  if (o.loops !== undefined && !(Number.isInteger(o.loops) && o.loops >= 1 && o.loops <= 16)) bad('--loops is a whole number from 1 to 16');
+  if (o.format === 'midi') {
+    for (const [on, flag] of [[o.loop, '--loop'], [o.stems, '--stems'], [o.loops !== undefined, '--loops'], [o.stemsThroughMaster, '--stems-through-master'], [o.quality !== undefined, '--quality']] as const) {
+      if (on) bad(`${flag} is for wav and ogg audio; a midi export is the written notes (--pattern <name> exports one pattern)`);
+    }
+  } else {
+    if (o.pattern !== undefined) bad('--pattern is for --format midi (an audio export is the whole song, or its loop)');
+    if (o.quality !== undefined && o.format !== 'ogg') bad('--quality is for --format ogg (a wav is not compressed)');
+  }
+  if (o.stemsThroughMaster && !o.stems) bad('--stems-through-master goes with --stems');
 }
 
 export function exportSong(w: Writer, id: string, o: SongExportOptions): SongExportedFile[] {
+  checkSongExportOptions(o);
   const song = w.song(id);
   const dir = o.out ? resolve(o.out) : join(w.project.dir, 'exports');
-  mkdirSync(dir, { recursive: true });
   const files: SongExportedFile[] = [];
-  const put = (name: string, bytes: Uint8Array, seconds: number, kind: string): void => {
+  if (o.format !== 'midi') {
+    const p = playable(w, id);
+    if (!p.ok) throw new ProjectError(`${id} is not playable yet: ${p.why}`);
+  }
+  const loopRegion = o.format === 'midi' ? null : arrange(song).loop;
+  const loops = o.loops ?? 1;
+  if (o.format !== 'midi') {
+    if (o.loop && !loopRegion) throw new ProjectError(`${id} has no loop region (song loop ${id} <from>..<to>)`);
+    if (loops > 1 && !o.loop && !o.stems && !loopRegion) throw new ProjectError(`${id} has no loop region, so --loops ${loops} has nothing to repeat (song loop ${id} <from>..<to>)`);
+    if (loops > 1 && o.stems && !loopRegion) throw new ProjectError(`${id} has no loop region, so --loops ${loops} has nothing to repeat for its stems (song loop ${id} <from>..<to>)`);
+  }
+  mkdirSync(dir, { recursive: true });
+  const put = (name: string, bytes: Uint8Array, seconds: number, kind: string, notes?: string[]): void => {
     const file = join(dir, name);
     writeFileSync(file, bytes);
-    files.push({ file, bytes: bytes.length, seconds, kind });
+    files.push({ file, bytes: bytes.length, seconds, kind, ...(notes?.length ? { notes } : {}) });
   };
   if (o.format === 'midi') {
     const bytes = songToMidi(song, o.pattern);
     put(`${id}${o.pattern ? `-${o.pattern}` : ''}.mid`, bytes, 0, o.pattern ? `pattern ${o.pattern}` : 'song');
     return files;
   }
-  const p = playable(w, id);
-  if (!p.ok) throw new ProjectError(`${id} is not playable yet: ${p.why}`);
-  const loopRegion = arrange(song).loop;
   const encode = (chs: readonly Float32Array[]): Uint8Array => (o.format === 'ogg' ? encodeOgg(chs, 44100, o.quality ?? 0.4) : encodeWavChannels(chs));
   const ext = o.format;
+  // the loop region repeated n times, end to end: what a player hears when it loops
+  const tile = (chs: readonly Float32Array[], n: number): Float32Array[] => chs.map((c) => { if (n === 1) return c; const t = new Float32Array(c.length * n); for (let k = 0; k < n; k++) t.set(c, k * c.length); return t; });
+  let stemInfo: ReturnType<typeof masterChainForStems> | null = null;
   if (o.stems) {
     const mode = loopRegion ? 'loop' : 'full';
     const r = w.bench.render(song, { mode });
-    for (const s of r.stems) put(`${id}-stem-${s.layer}.${ext}`, encode(s.channels), r.length / 44100, `stem ${s.layer} (${mode})`);
+    stemInfo = masterChainForStems(song);
+    const stems = o.stemsThroughMaster ? renderStems(song, r.parts, r.length, mode === 'loop', true) : r.stems;
+    const notes = o.stemsThroughMaster ? [
+      `stems through the master chain: ${stemInfo.applied.length ? `applied ${stemInfo.applied.map((f) => f.kind + ' ' + Object.entries(f.p).map(([k, v]) => `${k}=${v}`).join(' ')).join('; ')}` : 'the chain has no filter to apply'}`,
+      ...stemInfo.skipped.map((x) => `not applied: ${x.fx.kind}: ${x.why}`),
+      stemInfo.skipped.length ? 'the stems sum to the mix as the filters leave it, before the chain\'s other effects: louder than the exported mix, and not limited' : 'the stems sum to the mix',
+    ] : [];
+    for (const s of stems) put(`${id}-stem-${s.layer}.${ext}`, encode(tile(s.channels, loops)), (r.length * loops) / 44100, `stem ${s.layer} (${mode}${loops > 1 ? ` x${loops}` : ''}${o.stemsThroughMaster ? ', through the master filters' : ''})`, notes);
   } else if (o.loop) {
-    if (!loopRegion) throw new ProjectError(`${id} has no loop region (song loop ${id} <from>..<to>)`);
     const r = w.bench.render(song, { mode: 'loop' });
-    put(`${id}-loop.${ext}`, encode(r.mix), r.length / 44100, 'loop');
+    put(`${id}-loop.${ext}`, encode(tile(r.mix, loops)), (r.length * loops) / 44100, loops > 1 ? `loop x${loops}` : 'loop');
   } else {
     const r = w.bench.render(song, { mode: 'full', loops: o.loops });
     put(`${id}.${ext}`, encode(r.mix), r.length / 44100, o.loops && o.loops > 1 ? `full, loop x${o.loops}` : 'full');
   }
   // a manifest: id, files, loop points, loudness, layers
   const rep = w.measureSong(id).report;
-  const man = { id, tempo: song.tempo, time: `${song.time[0]}/${song.time[1]}`, loop: loopRegion ? { start: round(loopRegion.start), length: round(loopRegion.end - loopRegion.start) } : null, lufs: round(rep.numbers.lufs), truePeakDb: round(rep.numbers.truePeakDb), class: rep.numbers.rule.class, layers: rep.numbers.layers, files: files.map((f) => ({ file: f.file.slice(dir.length + 1), kind: f.kind, seconds: round(f.seconds) })) };
+  const man = { id, tempo: song.tempo, time: `${song.time[0]}/${song.time[1]}`, loop: loopRegion ? { start: round(loopRegion.start), length: round(loopRegion.end - loopRegion.start) } : null, lufs: round(rep.numbers.lufs), truePeakDb: round(rep.numbers.truePeakDb), class: rep.numbers.rule.class, layers: rep.numbers.layers, ...(stemInfo ? { stems: { throughMaster: !!o.stemsThroughMaster, applied: o.stemsThroughMaster ? stemInfo.applied.map((f) => f.kind) : [], notApplied: o.stemsThroughMaster ? stemInfo.skipped.map((x) => x.fx.kind) : [] } } : {}), files: files.map((f) => ({ file: f.file.slice(dir.length + 1), kind: f.kind, seconds: round(f.seconds) })) };
   writeFileSync(join(dir, `${id}-manifest.json`), JSON.stringify(man, null, 2) + '\n');
   return files;
 }
 
 export function formatSongExport(files: readonly SongExportedFile[]): string {
-  return files.map((f) => `${f.file}  ${f.kind}${f.seconds ? `, ${secs(f.seconds)}` : ''}, ${f.bytes} bytes`).join('\n');
+  const notes = [...new Set(files.flatMap((f) => f.notes ?? []))];
+  return [...files.map((f) => `${f.file}  ${f.kind}${f.seconds ? `, ${secs(f.seconds)}` : ''}, ${f.bytes} bytes`), ...notes.map((n) => `note: ${n}`)].join('\n');
 }
 
 // ---- loudness -----------------------------------------------------------------------------------------------------

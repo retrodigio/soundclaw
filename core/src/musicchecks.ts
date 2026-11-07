@@ -434,7 +434,10 @@ export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLooku
       const byPitchOnly = legato && touching;
       let pitchAt: number | null = null;
       if (changes && (touching || levelOnset === null || Math.abs(levelOnset - tw) > tolerance)) pitchAt = pitchOnset(x, tw - 0.04, tw + 0.12 + 0.5 * attack, first.midi!);
-      const found = (byPitchOnly ? [pitchAt] : [levelOnset, pitchAt]).filter((v): v is number => v !== null);
+      // The pitch change vouches for a note whose level gives no onset, and convicts one that begins late; it never calls a
+      // note early, for a window that straddles the old and the new note looks like the new one a little too soon.
+      const found = (byPitchOnly ? [] : [levelOnset]).filter((v): v is number => v !== null);
+      if (pitchAt !== null) found.push(pitchAt < tw - tolerance ? tw : pitchAt);
       if (found.length) onset = found.reduce((m, v) => (Math.abs(v - tw) < Math.abs(m - tw) ? v : m));
       if (onset !== null) onsets.push(onset);
       if (winLevel < peakDb - NOT_HEARD_DB) problem = `not heard: the channel is ${f1(peakDb - winLevel)} dB under its loudest at ${r4(tw)} s`;

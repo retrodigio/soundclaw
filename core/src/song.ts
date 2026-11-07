@@ -30,7 +30,14 @@ export interface Channel {
   layer: string;
   /** A harmony part: the voice-leading check looks at it. */
   harmony?: true;
+  /** How much of the channel goes to the song's send reverb and send delay (0..1; left out when 0). */
+  reverb?: number;
+  delay?: number;
 }
+
+/** The song-level send buses a channel can feed. */
+export const SEND_KINDS = ['reverb', 'delay'] as const;
+export type SendKind = (typeof SEND_KINDS)[number];
 
 /** A named note list kept in the song (a melody idea), on its own grid. */
 export interface Motif {
@@ -70,6 +77,9 @@ export interface SongDoc {
   /** null: the whole body loops; false: the song does not loop; else the sections from..to. */
   loop: SongLoop;
   master: Fx[];
+  /** The send reverb and send delay: one shared space for the whole piece. Channels feed them by `reverb=` and `delay=`. Null: not set up. */
+  reverb: Fx | null;
+  delay: Fx | null;
   patterns: Map<string, Pattern>;
   status: 'draft' | 'approved' | 'rejected';
   /** A song, or a stinger (a short piece with a fixed ending that never loops). */
@@ -87,8 +97,10 @@ export const DEFAULT_KIT: Readonly<Record<string, string>> = { k: 'kick', kick: 
 
 export function newSong(id: string): SongDoc {
   const limit: Fx = { kind: 'limit', p: { ...defaultsOf(FX_SPECS.limit), ceiling: -1 }, envs: {} };
-  return { id, tempo: 120, swing: 0, time: [4, 4], key: null, gain: 1, channels: [], sections: [], intro: null, ending: null, loop: null, master: [limit], patterns: new Map(), status: 'draft', kind: 'song', tags: [], bible: null, layers: [], motifs: [] };
+  return { id, tempo: 120, swing: 0, time: [4, 4], key: null, gain: 1, channels: [], sections: [], intro: null, ending: null, loop: null, master: [limit], reverb: null, delay: null, patterns: new Map(), status: 'draft', kind: 'song', tags: [], bible: null, layers: [], motifs: [] };
 }
+
+const cloneFx = (f: Fx): Fx => ({ kind: f.kind, p: { ...f.p }, envs: Object.fromEntries(Object.entries(f.envs).map(([k, e]) => [k, e.map((q) => ({ ...q }))])) });
 
 export function cloneSong(s: SongDoc): SongDoc {
   return {
@@ -97,7 +109,9 @@ export function cloneSong(s: SongDoc): SongDoc {
     channels: s.channels.map((c) => ({ ...c, kit: c.kit ? { ...c.kit } : null })),
     sections: s.sections.map((x) => ({ ...x, patterns: [...x.patterns] })),
     loop: s.loop && typeof s.loop === 'object' ? { ...s.loop } : s.loop,
-    master: s.master.map((f) => ({ kind: f.kind, p: { ...f.p }, envs: Object.fromEntries(Object.entries(f.envs).map(([k, e]) => [k, e.map((q) => ({ ...q }))])) })),
+    master: s.master.map(cloneFx),
+    reverb: s.reverb ? cloneFx(s.reverb) : null,
+    delay: s.delay ? cloneFx(s.delay) : null,
     patterns: new Map([...s.patterns].map(([k, v]) => [k, clonePattern(v)] as const)),
     tags: [...s.tags],
     layers: [...s.layers],
@@ -279,7 +293,7 @@ export function serializeSongHead(s: SongDoc, fmt: (n: number) => string): strin
   if (s.tags.length) lines.push(`tags ${s.tags.join(',')}`);
   if (s.bible) lines.push(`bible ${s.bible}`);
   if (s.layers.length) lines.push(`layers ${s.layers.join(' ')}`);
-  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${Object.entries(c.kit ?? {}).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}`);
+  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${Object.entries(c.kit ?? {}).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}${c.reverb ? ` reverb=${fmt(c.reverb)}` : ''}${c.delay ? ` delay=${fmt(c.delay)}` : ''}`);
   for (const m of s.motifs) lines.push(`motif ${m.name} tpb=${m.tpb} ${motifText(m)}`);
   for (const x of s.sections) lines.push(`section ${x.name} ${x.patterns.join(' ')}${x.repeat > 1 ? ` x${x.repeat}` : ''}${s.intro === x.name ? ' intro' : ''}${s.ending === x.name ? ' ending' : ''}`);
   lines.push(`loop ${s.loop === false ? 'off' : s.loop ? `${s.loop.from}..${s.loop.to}` : 'auto'}`);
@@ -300,6 +314,7 @@ export const songFromJson = (j: SongJson): SongDoc => ({ ...j, patterns: new Map
 /** The song's file (songs/<id>.song): settings, channels, sections. The patterns are files of their own (songs/<id>/patterns/<name>.pat). */
 export function serializeSong(s: SongDoc): string {
   const lines = serializeSongHead(s, String);
+  for (const k of SEND_KINDS) { const f = s[k]; if (f) lines.push(`send ${k} ${Object.entries(f.p).filter(([n]) => n !== 'mix').map(([n, v]) => `${n}=${v}`).join(' ')}`); }
   for (const f of s.master) lines.push(`master ${f.kind} ${Object.entries(f.p).map(([k, v]) => `${k}=${v}`).join(' ')}`);
   return lines.join('\n') + '\n';
 }

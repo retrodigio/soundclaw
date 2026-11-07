@@ -387,7 +387,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       format: z.enum(['wav', 'ogg', 'patch', 'csv', 'midi']).optional().describe('Default wav (a song: wav, ogg or midi)'),
       loop: z.boolean().optional().describe('A song: its loop region (seamless)'),
       stems: z.boolean().optional().describe('A song: one aligned file per game layer'),
-      loops: z.number().int().min(1).max(16).optional().describe('A song: the loop region repeated this many times in a full export'),
+      loops: z.number().int().min(1).max(16).optional().describe('A song: the loop region repeated this many times (in a full export, a loop export or the stems)'),
+      stemsThroughMaster: z.boolean().optional().describe('A song, with stems: run the master chain\'s filters over each stem (its compressor and limiter cannot be split, so the stems sum louder than the mix)'),
       pattern: z.string().optional().describe('A song, midi: one pattern instead of the song'),
       out: z.string().optional().describe('The folder to write into'),
       pack: z.boolean().optional().describe('Pack layout: classic-marked sounds as synth.csv rows, the rest as audio, in one flat folder'),
@@ -399,7 +400,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       if (names.length && names.every((x) => w.hasSong(x))) {
         const f = a.format ?? 'wav';
         if (f !== 'wav' && f !== 'ogg' && f !== 'midi') return fail('error: a song exports as wav, ogg or midi');
-        return { content: [text(names.map((id) => formatSongExport(exportSong(w, id, { format: f, loop: a.loop, stems: a.stems, loops: a.loops, pattern: a.pattern, out: a.out, quality: a.quality }))).join('\n'))] };
+        return { content: [text(names.map((id) => formatSongExport(exportSong(w, id, { format: f, loop: a.loop, stems: a.stems, loops: a.loops, stemsThroughMaster: a.stemsThroughMaster, pattern: a.pattern, out: a.out, quality: a.quality }))).join('\n'))] };
       }
       if (a.format === 'midi') return fail('error: midi is for songs');
       return { content: [text(formatExportFiles(exportFormat(w, names, a.format ?? 'wav', { out: a.out, set: a.set, all: a.all, pack: a.pack, quality: a.quality })))] };

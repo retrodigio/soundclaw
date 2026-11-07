@@ -34,9 +34,9 @@ import { applyNoteEdit, noteEditText, parseNoteEdit, type NoteEdit } from './son
 import { applyCommand, parse } from './commands.ts';
 import { bibleCommands, projectKey } from './musicstyle.ts';
 import { STINGER_TEMPLATES, stingerCommands } from './stingers.ts';
-import { SONG_KINDS, TAG_RE, type SongKind } from './song.ts';
+import { SEND_KINDS, SONG_KINDS, TAG_RE, type SendKind, type SongKind } from './song.ts';
 import { idClash } from './sound.ts';
-import { newLayeredSound, type LayeredSound } from './layered.ts';
+import { FX_SPECS, defaultsOf, newLayeredSound, type Fx, type LayeredSound } from './layered.ts';
 
 export type InstValue = number | boolean | string | [number, number] | Env | null;
 
@@ -53,7 +53,8 @@ export type MusicCommand =
   | { op: 'pattern-copy' | 'pattern-rename'; song: string; name: string; to: string; text: string }
   | { op: 'song-new'; id: string; values: [string, SongValue][]; fromBible: string | null; template: string | null; text: string }
   | { op: 'song-set'; id: string; values: [string, SongValue][]; text: string }
-  | { op: 'song-channel'; verb: 'add' | 'set'; id: string; name: string; inst: string | null; kit: Record<string, string> | null; gain: number | null; pan: number | null; layer: string | null; harmony: boolean | null; text: string }
+  | { op: 'song-channel'; verb: 'add' | 'set'; id: string; name: string; inst: string | null; kit: Record<string, string> | null; gain: number | null; pan: number | null; layer: string | null; harmony: boolean | null; reverb: number | null; delay: number | null; text: string }
+  | { op: 'song-send'; id: string; kind: SendKind; off: boolean; values: [string, number | string][]; text: string }
   | { op: 'song-channel-remove'; id: string; name: string; text: string }
   | { op: 'song-section'; verb: 'add' | 'set'; id: string; name: string; patterns: string[]; repeat: number; text: string }
   | { op: 'song-section-remove'; id: string; name: string; text: string }
@@ -340,7 +341,7 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
     const name = a[1];
     if (!name || !/^[A-Za-z][A-Za-z0-9_]{0,23}$/.test(name.v)) throw new DiagError(line, (name ?? sub).col, `song channel ${sub.v} ${id}: give the channel's name (letters, digits and _, like lead or bass)`);
     if (sub.v === 'remove') return { op: 'song-channel-remove', id, name: name.v, text: `song channel remove ${id} ${name.v}` };
-    let inst: string | null = null, kit: Record<string, string> | null = null, gain: number | null = null, pan: number | null = null, layer: string | null = null, harmony: boolean | null = null;
+    let inst: string | null = null, kit: Record<string, string> | null = null, gain: number | null = null, pan: number | null = null, layer: string | null = null, harmony: boolean | null = null, reverb: number | null = null, delay: number | null = null;
     for (const p of pairs(a.slice(2), line, `song channel ${sub.v} ${id} ${name.v}`)) {
       try {
         if (p.key === 'inst') { if (!INSTRUMENT_ID_RE.test(p.value)) throw new Error(`'${p.value}' is not an instrument id`); inst = p.value; }
@@ -355,14 +356,16 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
         else if (p.key === 'pan') pan = numIn('pan', p.value, -1, 1);
         else if (p.key === 'layer') { if (!LAYER_NAME_RE.test(p.value)) throw new Error(`layer is a name like base, tension or combat (a-z, 0-9, _ and -), got '${p.value}'`); layer = p.value; }
         else if (p.key === 'harmony') { harmony = yesNo(p.value); if (harmony === null) throw new Error(`harmony is yes or no (a harmony part is what the voice-leading check reads), got '${p.value}'`); }
-        else throw new Error(`song channel: unexpected '${p.key}' (inst=<instrument> or kit=<…>, gain=, pan=, layer=, harmony=)`);
+        else if (p.key === 'reverb') reverb = numIn('reverb', p.value, 0, 1);
+        else if (p.key === 'delay') delay = numIn('delay', p.value, 0, 1);
+        else throw new Error(`song channel: unexpected '${p.key}' (inst=<instrument> or kit=<…>, gain=, pan=, layer=, harmony=, reverb=, delay=)`);
       } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
     }
     if (inst && kit) throw new DiagError(line, name.col, 'song channel: give inst= (a pitched channel) or kit= (a drum channel), not both');
     if (sub.v === 'add' && !inst && !kit) throw new DiagError(line, name.col, `song channel add ${id} ${name.v}: give inst=<instrument> (or kit=default for drums)`);
-    const words = [inst ? `inst=${inst}` : kit ? `kit=${Object.entries(kit).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : ''].filter(Boolean);
-    if (sub.v === 'set' && !words.length) throw new DiagError(line, name.col, `song channel set ${id} ${name.v}: give what changes (inst=, kit=, gain=, pan=, layer=, harmony=)`);
-    return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, inst, kit, gain, pan, layer, harmony, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
+    const words = [inst ? `inst=${inst}` : kit ? `kit=${Object.entries(kit).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : '', reverb !== null ? `reverb=${reverb}` : '', delay !== null ? `delay=${delay}` : ''].filter(Boolean);
+    if (sub.v === 'set' && !words.length) throw new DiagError(line, name.col, `song channel set ${id} ${name.v}: give what changes (inst=, kit=, gain=, pan=, layer=, harmony=, reverb=, delay=)`);
+    return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, inst, kit, gain, pan, layer, harmony, reverb, delay, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
   }
   if (verb.v === 'section') {
     const [sub, ...a] = args;
@@ -403,6 +406,23 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
     const m = /^([A-Za-z][A-Za-z0-9_-]*?)(?:\.\.([A-Za-z][A-Za-z0-9_-]*))?$/.exec(t.v);
     if (!m) throw new DiagError(line, t.col, `'${t.v}' is not <from>..<to>, a section name, auto or off`);
     return { op: 'song-loop', id, loop: { from: m[1]!, to: m[2] ?? m[1]! }, text: `song loop ${id} ${m[1]}..${m[2] ?? m[1]}` };
+  }
+  if (verb.v === 'send') {
+    const id = checkIn(args[0], line, 'song send', SONG_ID_RE, 'song id');
+    const kind = args[1]?.v as SendKind | undefined;
+    if (!kind || !(SEND_KINDS as readonly string[]).includes(kind)) throw new DiagError(line, (args[1] ?? args[0] ?? verb).col, `song send ${id}: the bus is ${SEND_KINDS.join(' or ')} (song send ${id} reverb size=0.6 damp=0.5; song send ${id} reverb off)`);
+    if (args[2]?.v === 'off' && args.length === 3) return { op: 'song-send', id, kind, off: true, values: [], text: `song send ${id} ${kind} off` };
+    const specs = FX_SPECS[kind];
+    const values: [string, number][] = [];
+    for (const p of pairs(args.slice(2), line, `song send ${id} ${kind}`)) {
+      try {
+        const sp = specs.find((x) => x.name === p.key);
+        if (p.key === 'mix') throw new Error('a send bus returns only the effect (its mix is always 1); a channel\'s reverb= or delay= says how much of it goes in');
+        if (!sp) throw new Error(`the ${kind} bus has ${specs.filter((x) => x.name !== 'mix').map((x) => x.name).join(', ')} (got '${p.key}')`);
+        values.push([p.key, numIn(p.key, p.value, sp.min, sp.max, sp.unit)]);
+      } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
+    }
+    return { op: 'song-send', id, kind, off: false, values, text: `song send ${id} ${kind}${values.map(([k, v]) => ` ${k}=${v}`).join('')}` };
   }
   if (verb.v === 'fx') {
     // song fx add <song> <kind> …  is  fx add <song> <kind> … on the master chain
@@ -636,6 +656,8 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (s.channels.length >= MAX_CHANNELS) throw new Error(`a song has at most ${MAX_CHANNELS} channels`);
         const ch: Channel = { name: c.name, inst: c.inst, kit: c.kit, gain: c.gain ?? 1, pan: c.pan ?? 0, layer: c.layer ?? DEFAULT_LAYER };
         if (c.harmony) ch.harmony = true;
+        if (c.reverb) ch.reverb = c.reverb;
+        if (c.delay) ch.delay = c.delay;
         s.channels.push(ch);
       } else {
         if (at < 0) throw new Error(`song ${c.id} has no channel ${c.name} (channels: ${s.channels.map((x) => x.name).join(', ') || 'none'})`);
@@ -647,6 +669,8 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (c.layer) ch.layer = c.layer;
         if (c.harmony === true) ch.harmony = true;
         else if (c.harmony === false) delete ch.harmony;
+        if (c.reverb !== null) { if (c.reverb) ch.reverb = c.reverb; else delete ch.reverb; }
+        if (c.delay !== null) { if (c.delay) ch.delay = c.delay; else delete ch.delay; }
         s.channels[at] = ch;
       }
       lib.songs.set(c.id, s);
@@ -721,6 +745,19 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (b < a) throw new Error(`the loop ${c.loop.from}..${c.loop.to} runs backwards (the body order is ${body.join(', ')})`);
       }
       s.loop = c.loop;
+      lib.songs.set(c.id, s);
+      return undefined;
+    }
+    case 'song-send': {
+      const s = songOf(lib, c.id);
+      if (c.off) {
+        s[c.kind] = null;
+        for (const ch of s.channels) delete ch[c.kind];
+      } else {
+        const fx: Fx = s[c.kind] ?? { kind: c.kind, p: { ...defaultsOf(FX_SPECS[c.kind]), mix: 1 }, envs: {} };
+        for (const [k, v] of c.values) fx.p[k] = v;
+        s[c.kind] = fx;
+      }
       lib.songs.set(c.id, s);
       return undefined;
     }

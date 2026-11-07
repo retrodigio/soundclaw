@@ -150,11 +150,17 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       text; csv: one synth.csv. Without ids (or with --all), every sound; --set exports a set's members.
       --pack: a flat folder where sounds marked classic become rows of one synth.csv instead of
       audio files. --to (or --out) names the folder (default <project>/exports/).
-  soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
+  soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
       A song as one file (intro, body once, ending; --loops repeats the loop region), --loop its loop region
-      (seamless: the tail of the loop wraps into its start), --stems one aligned file per game layer (the
-      stems of the loop when the song loops; before the master chain, so they sum to the mix when it does not
-      turn the mix down), or midi (the song, or --pattern one pattern). A <song>-manifest.json says the loop points.
+      (seamless: the tail of the loop wraps into its start; with --loops <n> the region n times over), --stems one
+      aligned file per game layer (the stems of the loop when the song loops; before the master chain, so they sum
+      to the mix when the chain does not turn the mix down; --loops repeats them too). --stems-through-master runs
+      the master chain's filters over each stem so a tone shaping there reaches the stems; its compressor and
+      limiter cannot be split among stems, so the stems then sum to the mix as the filters leave it, louder than
+      the exported mix and not limited (the command says what was and was not applied). Or midi (the song, or
+      --pattern one pattern). Combinations that mean nothing (--loops with no loop region, --pattern with audio,
+      --quality with wav, --loop or --stems with midi, song flags on a sound) are refused. A <song>-manifest.json
+      says the loop points.
   soundclaw midi import <project> <file.mid> [--id <song>] [--by <author>]
   soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
       Import a Standard MIDI file (type 0 or 1) as a song: one pattern per two bars, a channel per track and MIDI channel,
@@ -276,7 +282,7 @@ export const one = (p: Parsed, k: string): string | undefined => p.flags.get(k)?
 /** The options of the commands that write (valued, bare): the CLI uses them to send a command to a running server. */
 export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
-  export: [['out', 'to', 'format', 'set', 'quality', 'loops', 'pattern'], ['all', 'pack', 'loop', 'stems']],
+  export: [['out', 'to', 'format', 'set', 'quality', 'loops', 'pattern'], ['all', 'pack', 'loop', 'stems', 'stems-through-master']],
   midi: [['id', 'by', 'pattern', 'to', 'out'], []],
   import: [['id', 'by'], ['quiet', 'classic']],
   normalize: [['by'], []],
@@ -638,22 +644,36 @@ function cmdExport(io: Io, p: Parsed): number {
   const [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('export: give a project folder');
   const fmt0 = one(p, 'format') ?? 'wav';
-  if (ids.length && ids.every((x) => wr(io, dir).hasSong(x))) {
+  if (one(p, 'to') && one(p, 'out')) throw new UsageError('export: give --to or --out, not both');
+  const w0 = wr(io, dir);
+  const songIds = ids.filter((x) => w0.hasSong(x));
+  if (songIds.length && songIds.length !== ids.length) throw new UsageError(`export: ${songIds.join(', ')} ${songIds.length === 1 ? 'is a song' : 'are songs'} and ${ids.filter((x) => !w0.hasSong(x)).join(', ')} ${ids.length - songIds.length === 1 ? 'is not' : 'are not'}: export songs and sounds in separate commands`);
+  const songOnly = ['loop', 'stems', 'stems-through-master'].filter((f) => p.flags.has(f)).map((f) => `--${f}`);
+  for (const f of ['loops', 'pattern']) if (one(p, f) !== undefined) songOnly.push(`--${f}`);
+  if (songIds.length) {
+    for (const f of ['all', 'pack']) if (p.flags.has(f)) throw new UsageError(`export: --${f} is for sounds, not songs`);
+    if (one(p, 'set')) throw new UsageError('export: --set is for sounds, not songs');
     if (!['wav', 'ogg', 'midi'].includes(fmt0)) throw new UsageError('export: a song exports as --format wav, ogg or midi');
-    const w0 = wr(io, dir);
     const q0 = one(p, 'quality') === undefined ? undefined : Number(one(p, 'quality'));
     if (q0 !== undefined && !(q0 >= -0.1 && q0 <= 1)) throw new UsageError('export: --quality is a number from -0.1 to 1');
     const loops = one(p, 'loops') === undefined ? undefined : Number(one(p, 'loops'));
     if (loops !== undefined && !(Number.isInteger(loops) && loops >= 1 && loops <= 16)) throw new UsageError('export: --loops is a whole number from 1 to 16');
     const lines: string[] = [];
-    for (const id of ids) lines.push(formatSongExport(exportSong(w0, id, { format: fmt0 as 'wav' | 'ogg' | 'midi', loop: p.flags.has('loop'), stems: p.flags.has('stems'), loops, pattern: one(p, 'pattern'), out: one(p, 'to') ?? one(p, 'out'), quality: q0 })));
+    for (const id of songIds) {
+      try {
+        lines.push(formatSongExport(exportSong(w0, id, { format: fmt0 as 'wav' | 'ogg' | 'midi', loop: p.flags.has('loop'), stems: p.flags.has('stems'), stemsThroughMaster: p.flags.has('stems-through-master'), loops, pattern: one(p, 'pattern'), out: one(p, 'to') ?? one(p, 'out'), quality: q0 })));
+      } catch (e) {
+        if (e instanceof Error && /^export: /.test(e.message)) throw new UsageError(e.message);
+        throw e;
+      }
+    }
     io.out(lines.join('\n') + '\n');
     return 0;
   }
+  if (songOnly.length) throw new UsageError(`export: ${songOnly.join(', ')} ${songOnly.length === 1 ? 'is' : 'are'} for songs (name a song); a sound exports with --format, --to, --quality, --set, --all, --pack`);
   const format = fmt0 as ExportFormat;
   if (!EXPORT_FORMATS.includes(format)) throw new UsageError(`export: --format is ${EXPORT_FORMATS.join(', ')} (not '${format}')`);
   const out = one(p, 'to') ?? one(p, 'out');
-  if (one(p, 'to') && one(p, 'out')) throw new UsageError('export: give --to or --out, not both');
   if (p.flags.has('all') && (ids.length || one(p, 'set'))) throw new UsageError('export: --all is every sound; name sounds or --set, not both');
   const quality = one(p, 'quality') === undefined ? undefined : Number(one(p, 'quality'));
   if (quality !== undefined && !(quality >= -0.1 && quality <= 1)) throw new UsageError('export: --quality is a number from -0.1 to 1');
