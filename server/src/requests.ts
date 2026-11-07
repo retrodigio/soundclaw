@@ -6,9 +6,10 @@
 
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTHOR_RE, SIMILAR_TAG, foldRequests, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, type RequestRecord, type WorkRequest } from '@soundclaw/core';
+import { AUTHOR_RE, SIMILAR_TAG, foldRequests, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, songText, type RequestRecord, type WorkRequest } from '@soundclaw/core';
 import { unseenOpen, type AgentEvent } from './await.ts';
 import { checkLine, failingChecks } from './ears.ts';
+import { songCheckLine, songFailing } from './songs.ts';
 import { REQUESTS_FILE, ProjectError, type Project } from './project.ts';
 import type { PersonRequest } from './protocol.ts';
 import type { Writer } from './writer.ts';
@@ -57,7 +58,7 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   const text = (q.note ?? '').trim();
   const tags = [...new Set(q.tags ?? [])];
   for (const t of tags) if (!isFeedbackTag(t)) throw new ProjectError(`no tag '${t}' (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good)`);
-  w.sound(q.sound); // throws when there is no such sound
+  if (!w.hasSong(q.sound)) w.sound(q.sound); // throws when there is no such sound or song
   if (q.other !== undefined) {
     if (!tags.includes(SIMILAR_TAG)) throw new ProjectError(`other names the sound a '${SIMILAR_TAG}' tag points at`);
     if (!w.has(q.other)) throw new ProjectError(`no sound '${q.other}' to compare with`);
@@ -72,7 +73,7 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   if (problem) throw new ProjectError(problem);
   if (kind === 'feedback') return appendRequest(p, rec);
   const markNote = [tags.length && text ? `[${tags.join(', ')}]` : '', note].filter(Boolean).join(' ');
-  const r = w.hub.withoutMarkEvents(() => w.run({ commands: `sound mark ${q.sound} rejected ${quote(markNote)}`, by }));
+  const r = w.hub.withoutMarkEvents(() => w.run({ commands: `${w.hasSong(q.sound) ? 'song' : 'sound'} mark ${q.sound} rejected ${quote(markNote)}`, by }));
   if (!r.ok) throw new ProjectError(r.errors.map((e) => e.message).join('; '));
   return appendRequest(p, { ...rec, mark: r.added.at(-1)?.seq });
 }
@@ -183,12 +184,12 @@ export function agentWork(w: Writer, agent: string, q: AgentWork, steps: WorkSte
   const id = q.id ?? mine(reqs, agent)?.id;
   if (!id) throw new ProjectError(`no claimed request to post ${q.action} on (give id)`);
   const target = reqs.get(id);
-  if (q.action === 'done' && target && target.state === 'claimed' && target.claimedBy === agent && !w.has(target.sound)) {
+  if (q.action === 'done' && target && target.state === 'claimed' && target.claimedBy === agent && !w.has(target.sound) && !w.hasSong(target.sound)) {
     throw new ProjectError(`${id} is not done: sound '${target.sound}' no longer exists. Make it again, or ${steps.blocked(id)} if you cannot`);
   }
   // done needs the sound's checks to pass: the person is handed something measured, not just claimed
-  if (q.action === 'done' && target && target.kind === 'change' && target.state === 'claimed' && target.claimedBy === agent && w.has(target.sound)) {
-    const failing = failingChecks(w, target.sound);
+  if (q.action === 'done' && target && target.kind === 'change' && target.state === 'claimed' && target.claimedBy === agent && (w.has(target.sound) || w.hasSong(target.sound))) {
+    const failing = w.hasSong(target.sound) ? songFailing(w, target.sound) : failingChecks(w, target.sound);
     if (failing) throw new ProjectError(`${id} is not done: ${target.sound}'s checks fail (${failing}). Fix it (see \`check\`), or ${steps.blocked(id)} if you cannot`);
   }
   const r = appendRequest(p, { type: q.action, id, by: agent, at, text: q.text });
@@ -226,14 +227,16 @@ export function cliSteps(dir: string): WorkSteps {
 /** What a claimed request asks, with the sound as it stands and the next steps. */
 export function requestBrief(w: Writer, q: WorkRequest, steps: WorkSteps = MCP_STEPS): string {
   const out = [requestLine(q)];
-  if (w.has(q.sound)) out.push(`the sound now:\n${serializeSound(w.sound(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
+  if (w.hasSong(q.sound)) out.push(`the song now:\n${songText(w.song(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
+  else if (w.has(q.sound)) out.push(`the sound now:\n${serializeSound(w.sound(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else out.push(`sound '${q.sound}' does not exist any more`);
   if (q.kind === 'feedback') {
     out.push(`This is praise (tag good): nothing needs to change. Close it with ${steps.done(q.id, 'a short acknowledgement')}.`);
     return out.join('\n');
   }
   if (q.other) out.push(`The person finds it too like ${q.other}: \`view ${q.sound} compare ${q.other}\` shows how close they are.`);
-  if (w.has(q.sound)) out.push(`${checkLine(w.measure(q.sound))} (finishing the request needs every check to pass; \`check\` lists what fails and where, \`view\` and \`describe\` let you hear the change)`);
+  if (w.hasSong(q.sound)) out.push(`${songCheckLine(w.measureSong(q.sound).report.checks)} (finishing the request needs every check to pass except the advisory ones (masking); \`check\` lists what fails and where, \`view ${q.sound} notes\` and \`view ${q.sound} mix\` show what the render does)`);
+  else if (w.has(q.sound)) out.push(`${checkLine(w.measure(q.sound))} (finishing the request needs every check to pass; \`check\` lists what fails and where, \`view\` and \`describe\` let you hear the change)`);
   out.push(`Change it as asked with \`sound set ${q.sound} …\` (the request is also a \`sound mark ${q.sound} rejected\` on the history${q.mark ? ` at #${q.mark}` : ''}; the history shows the person's own edits); then ${steps.done(q.id, 'what changed')}.`);
   if (q.events.some((x) => x.type === 'reply')) out.push(`The person answered: "${q.events.filter((x) => x.type === 'reply').at(-1)!.text}"`);
   out.push(`If you cannot go on without the person, ${steps.blocked(q.id)}.`);

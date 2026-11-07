@@ -571,6 +571,120 @@ the bed recipes' wanders do exactly that.
 
 `examples`: `docs/examples/sets-demo.txt` makes a footstep set of six, an impact in three distances and a rain bed, and all of it passes the checks.
 
+### Music: instruments, patterns and songs
+
+A song is built from **instruments** (a voice played at a pitch), **patterns** (a grid of notes per channel) and a **song** (tempo, channels bound to instruments, and the order the patterns play in). All of it is text and commands on the history tape, like a sound.
+
+#### Instruments
+
+An instrument is any voice of the layered sound (classic, osc, fm, ks, sample, several layers, effects) written as it sounds at its `root` note, plus a note envelope. Playing note N moves every pitched layer by N - root semitones: `freq` of osc, fm and ks layers is multiplied, a classic layer's `freq` and `minFreq` are moved by the same ratio, a sample layer's `pitch` is added to. The note envelope (attack, decay to sustain, hold while the note is held, release after it ends) multiplies each layer's amplitude before the layer's effects, so a delay's echoes ring on after the note. A built-in instrument can be played by name in any channel; `instrument new <id> from=<built-in>` makes one to change.
+
+```
+instrument new <id> [from=<instrument or built-in>] [kind=osc|fm|ks|classic|sample] [seed=<n>]
+instrument from-sound <id> <sound> [root=<note>]       the sound's layers; root: the note it sounds at (found from an osc, fm or ks layer's freq when left out, else A4)
+instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none gain=<g> seed=<n>
+                  (also attack= decay= sustain= release=)
+instrument layer|fx|env <the sound commands, with the instrument's id>      instrument layer add bell osc wave=sine freq=880
+instrument copy|rename <id> <new>       instrument remove <id>     (refused while a channel plays it)
+```
+
+| setting | range | meaning |
+|---|---|---|
+| `root` | C-1 to G9 | the note the template sounds at as written |
+| `pitched` | yes / no | no: a drum or sound effect plays as written at every note |
+| `attack` | 0.001 to 4 s | time to full level |
+| `decay` | 0 to 4 s | time down to `sustain` (0: the level goes straight to sustain) |
+| `sustain` | 0 to 1 | level while the note is held |
+| `release` | 0.005 to 8 s | time to silence after the note ends |
+| `velocity` | 0 to 1 | how much velocity changes the level: level = 1 - v + v x velocity / 127 |
+| `range` | two notes | the notes the instrument is meant to play: the `range` check |
+| `pitchenv` | semitones over time | a pitch envelope on every note (a kick's drop: `0:30 0.07:0@exp`) |
+| `gain`, `seed` | | the instrument's level and noise seed |
+
+Pitch effects (a pitch envelope, `~slide`, `~vib`, `~arp`) move osc, fm and sample layers continuously. A pluck (ks) and a classic layer are tuned at the note's start and keep their pitch. A pulse wave off 50 % duty has a DC offset: give it a high-pass filter (`filter=hp cutoff=35`), as `pulse_lead` has.
+
+The built-in instruments (generated from the data; a test keeps this table equal to it):
+
+<!-- builtins:begin -->
+| instrument | voice | pitch | attack / decay / sustain / release (s, s, level, s) | range | velocity sensitivity |
+|---|---|---|---|---|---|
+| `square_lead` | square | root A4 | 0.004 / 0.08 / 0.75 / 0.06 | C3-C7 | 1 |
+| `pulse_lead` | pulse 0.25 | root A4 | 0.003 / 0.1 / 0.65 / 0.08 | C3-C7 | 1 |
+| `triangle_bass` | triangle | root A4 | 0.003 / 0.05 / 0.9 / 0.05 | C1-C4 | 1 |
+| `saw_pad` | saw + saw | root A4 | 0.25 / 0.3 / 0.8 / 0.5 | C2-C6 | 1 |
+| `fm_bell` | fm 2op | root A4 | 0.002 / 1.4 / 0 / 0.3 | C4-C8 | 1 |
+| `fm_bass` | fm 2op | root A4 | 0.002 / 0.2 / 0.65 / 0.05 | C1-G3 | 1 |
+| `pluck` | ks | root A4 | 0.001 / 0 / 1 / 0.2 | C2-E6 | 1 |
+| `kick` | sine + white | unpitched | 0.001 / 0.2 / 0 / 0.02 | none | 0.8 |
+| `snare` | white + triangle | unpitched | 0.001 / 0.14 / 0 / 0.02 | none | 0.8 |
+| `hat` | white | unpitched | 0.001 / 0.045 / 0 / 0.01 | none | 0.8 |
+| `hat_open` | white | unpitched | 0.001 / 0.3 / 0 / 0.05 | none | 0.8 |
+<!-- builtins:end -->
+
+The drum kit a drum channel uses by default maps the hit names `k`/`kick` to `kick`, `s`/`snare` to `snare`, `h`/`hat` to `hat` and `oh`/`hat_open` to `hat_open`.
+
+#### The pattern text
+
+```
+pattern verse1 steps=16 tpb=4 bar=8
+  lead: C5 .   E5 .   G5v80 - - . | A4 . . . G4~slide . E4~vib .
+  bass: C3 .   .  .   C3    . . . | A2 . . . G2       . .   .
+  drum: k  .   h  .   s     . h . | k  k h . s        . h   h
+```
+
+In a script a pattern is a block: the header `pattern <song>.<name> steps=<n> tpb=<n> [bar=<n>]`, then indented rows. On the tape it is `pattern set <song>.<name> "<text with \n for line breaks>"` in its normal form. Patterns belong to a song (`songs/<song>/patterns/<name>.pat`); `pattern remove|copy|rename <song>.<name> [<new name>]` manage them (a pattern a section plays is not removed).
+
+- **Header.** `steps` is the length (1 to 256), `tpb` the steps per beat (the grid's resolution: 4 is sixteenth notes, 2 eighth notes, 3 or 12 triplets), `bar` the steps in a bar (written when rows use `|`). A step lasts 60 / (tempo x tpb) seconds.
+- **Rows.** `<channel>: <step> <step> ...`, exactly `steps` steps. `.` is a rest, `-` holds the note before it one more step (across a `|` too), `|` only splits bars (the groups must all be `bar` steps). A note lasts until the next event or rest, or the end of the pattern; its release rings on after.
+- **Notes.** `C5`, `C#5`, `Db5`, `C-1` (C4 is middle C, 60). `v1`..`v127` is the velocity (default 100, left out of the normal form), `!` marks a note outside the song's key on purpose (`G#5!`), and effects follow: `~slide` glides in from the note before it (over 80 ms, when that note ended at this step), `~vib` or `~vib(<Hz>,<semitones>)` (default 5 Hz, 0.4 semitones, starting after 80 ms), `~arp(0,4,7)` steps through 2 to 8 semitone offsets every 20 ms. A chord joins notes with `+`: `C4+E4+G4`.
+- **Drums.** A lower-case word is a drum hit (`k`, `s`, `hat`, `oh`), with its own velocity (`sv60`). A hit is one step. Which instrument plays a hit comes from the channel's kit.
+- **Note lists.** `lead= 0:C5*2 4:E5v90 6:G5` (step, note, `*` length in steps) is another way to write a row; it prints as the grid.
+- **Normal form.** The grid, aligned in columns, flats written as sharps, comments dropped; format(parse(x)) is stable. Problems are reported with the line and column: `demo.sclaw:4:14: error: 'Q5' is not a note (like C5, C#5, Db3, C5v80, E5~slide, G4!)`.
+
+#### Songs
+
+```
+song new <id> [tempo=120] [swing=0] [time=4/4] [key=A:minor] [class=music|stinger]
+song set <id> tempo= swing= time= key=<tonic:mode>|none class=<name>|none loudness=<LUFS>|auto gain=<g>
+song channel add|set <song> <name> inst=<instrument> | kit=default|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>]
+song channel remove <song> <name>
+song section add|set <song> <name> <pattern>... [x<n>]       song section remove <song> <name>       song order <song> <section>...
+song intro <song> <section>|none      song ending <song> <section>|none      song loop <song> <from>[..<to>]|auto|off
+song fx add|set|remove|move <song> <effect> ...      the master chain (default: a limiter at -1 dB; compress and limit are for this)
+song copy|rename <id> <new>    song remove <id>    song mark <id> approved|rejected|draft
+```
+
+`tempo` is 30 to 300 bpm. `swing` (0 to 0.6) delays the second step of each pair of steps by swing x a step. `key` is `<tonic>:<mode>` with a mode of `major`, `minor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `harmonic-minor`, `melodic-minor`, `pentatonic-major`, `pentatonic-minor`, `blues` or `chromatic`. A channel plays one instrument (a project instrument, else a built-in) or a drum kit; `gain` is 0 to 4, `pan` -1 to 1, and `layer` names the game layer (stem) it belongs to (default `base`; others like `tension` and `combat`).
+
+**Order.** The intro section plays once, first; the other sections are the body, in order; the ending plays once, last. `loop` names a run of body sections that repeats (default: the whole body); `loop off` makes a song that does not loop (a jingle). A section is its patterns in order, repeated `x<n>` times. A new body section goes before the ending. A song is at most 600 s, 16 channels, 64 sections and 64 patterns. A batch that leaves a song unable to play (an instrument that does not exist, a drum hit in a pitched channel, a note in a drum channel, a section naming a pattern the song lacks) is refused with the reason; a pattern row for a channel the song does not have, or a pattern that is not a whole number of bars, is a warning.
+
+**Rendering.** Every channel is rendered on its own (a sum of notes, each note one cached render of its instrument at its pitch and length), panned (constant power) and summed with the song's gain, then sent through the master chain, in 44,100 Hz stereo. A channel is a cached part, keyed by the notes it plays, its instruments, gain and pan: changing one channel renders that channel again and nothing else. The result is the same bytes in Node and in the browser (the golden hashes in `core/test/music-golden.json` pin it).
+
+**Loops.** The loop region is rendered folded onto itself: every note is rendered with its release and effect tail, and what runs past the end is added to the start, which is what a player hears when the region repeats. There is no click and no dip at the seam. The master chain runs over the region twice and the second pass is kept. A loop export is exactly the region's length. **Stems** are the channels of each game layer summed (all the same length, the loop's when the song loops); they are before the master chain, so they sum to the mix whenever the chain does not turn the mix down (the numbers say how far it does).
+
+**Loudness.** A song is held to a class: `music` (-16 LUFS, ±2 LU, the default) or `stinger` (-14 LUFS, ±2), or its own `loudness=`. `normalize <project> <song> [target=<LUFS>]` writes `song set <id> gain=...`; if the master limiter stops it short it says how far.
+
+#### MIDI
+
+`export <project> <song> --format midi [--pattern <name>]` (or `midi export`) writes a type 1 file with the tempo, the time signature, a track per pitched channel and one drum track on channel 10 (General MIDI numbers: kick 36, snare 38, hat 42, open hat 46; other hits get numbers from 60). Swing, effects and instruments are not written. `midi import <project> <file.mid> [--id <song>]` reads type 0 and 1 files: the first tempo and time signature (later tempo changes are ignored and said), a pattern per two bars on the grid (4, 2, 8, 3, 6, 12 or 24 steps per beat, whichever fits the notes best; timings go to the nearest step), a channel per track and MIDI channel (a polyphonic part is split into lines, chords are notes that start and end together), instruments from the General MIDI program (bass, pad, bell, pluck, else `square_lead`), and drums on channel 10 as a kit channel (toms to `k`, cymbals to `oh`).
+
+#### The song's ears
+
+`view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b]`, `render`/`describe` (the numbers: length, loop length, loudness, true peak, loudness and note count of each channel alone, tempo, key, how far the master chain turns the mix down) and `check`:
+
+| check | holds the song to | flags |
+|---|---|---|
+| `clip` | true peak at most -0.1 dBTP and no samples at full scale (the mix, after the master chain) | the places over |
+| `loudness` | the class target ±tolerance | the whole song |
+| `dc` | DC offset at most 0.5 % | the whole song |
+| `key` | every written note in the song's key, or marked `!` (notes made by `~arp` are not checked) | each note, with its channel, pattern and step |
+| `range` | every note inside the range its instrument declares | each note |
+| `render-match` | each channel rendered alone: the onset of each written note within 20 ms (plus half its instrument's attack) and a single note's pitch within 0.6 semitones (chords and `~arp` notes: timing only; notes under 55 Hz are not pitched); a note 40 dB under its channel's loudest counts as not heard | the note, with `wrong octave` and `wrong pitch` told apart (a wrong `root` is what usually does it) |
+| `loop-music` | the loop's seam: no jump from the last sample to the first (more than `clickMax` and 4 times the local step), and no more than 2 x `seamStepMaxDb` (6 dB) between the loudness of the last beat and the first (a gap of silence is a gap, not a step) | the seam |
+| `masking` | in each 46 ms frame, the band with the most energy (sub, low, mid, high, air): the two loudest channels in it must not be within 4 dB of each other for more than 25 % of the time | stretches of 0.5 s or more, with the two channels. **Advisory:** it is a warning and never blocks `work done` |
+
+`work done` on a request about a song needs every check to pass except `masking`. The `notes` view draws, per channel, the written notes (blue bars), the detected pitch (yellow), the detected onsets (green ticks) and the notes that differ in red; `mix` draws each channel's energy in five bands over time with the masked stretches in amber. Both are saved under `<project>/.cache/views/` and printed with the numbers.
+
 ### Loudness classes
 
 One loudness target for every sound is wrong for a game: a UI tick is not as loud as an explosion (a real set spans about −8 to −49 LUFS). The style names **loudness classes**, each with a target and a tolerance, and every sound is held to its class:
@@ -672,12 +786,20 @@ soundclaw render <project> <id>
 soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
 soundclaw view <project> <id> layers [--out <file.png>]
 soundclaw view <project> <id> compare <other> [--out <file.png>]
+soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
+soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
 soundclaw describe <project> <id>
 soundclaw check <project> [<id>...]
 soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
 soundclaw sample import <project> <file.wav | folder> [as=<name>]
 soundclaw sample list <project>
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
+soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems] [--loops <n>] [--pattern <name>] [--to <dir>]
+soundclaw midi import <project> <file.mid> [--id <song>]
+soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
+soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems] [--loops <n>] [--pattern <name>] [--to <dir>]
+soundclaw midi import <project> <file.mid> [--id <song>]
+soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
 soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
 soundclaw reply <project> <request> "<answer>" [--by <author>]
 soundclaw cancel <project> <request> ["<why>"] [--by <author>]

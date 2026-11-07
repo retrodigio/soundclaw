@@ -1,0 +1,72 @@
+# A 16-bar chip exploration loop: bass, lead, arpeggio, pad and drums in two game layers
+# (base: bass, arp, drums, hats; tension: lead, pad). A minor, 108 bpm, four sections of four bars.
+song new explore tempo=108 key=A:minor class=music
+song channel add explore bass inst=triangle_bass gain=0.9 pan=0 layer=base
+song channel add explore arp inst=square_lead gain=0.35 pan=0.3 layer=base
+song channel add explore drums kit=default gain=0.9 layer=base
+song channel add explore hats kit=default gain=0.6 pan=-0.2 layer=base
+song channel add explore lead inst=pulse_lead gain=0.8 pan=-0.15 layer=tension
+song channel add explore pad inst=saw_pad gain=0.7 layer=tension
+
+pattern explore.p1 steps=32 tpb=4 bar=16
+  lead: A4 - - C5 - - E5 - D5 - C5 - A4 - - . | F4 - - A4 - - C5 - A4 - F4 - E4 - - .
+  pad: . . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . . .
+  arp: A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - | F3~arp(0,4,7) - - - F3~arp(0,4,7) - - - F3~arp(0,4,7) - - - F3~arp(0,4,7) - - -
+  bass: A2 . A2 . . . A2 . A2 . A2 . . . A2 . | F2 . F2 . . . F2 . F2 . F2 . . . F2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . . .
+  hats: . . h . . . h . . . h . . . h . | . . h . . . h . . . h . . . h .
+
+pattern explore.p2 steps=32 tpb=4 bar=16
+  lead: E5 - - G5 - - E5 - C5 - D5 - E5 - - . | D5 - - B4 - - G4 - B4 - D5 - - - - .
+  pad: . . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . . .
+  arp: C4~arp(0,4,7) - - - C4~arp(0,4,7) - - - C4~arp(0,4,7) - - - C4~arp(0,4,7) - - - | G3~arp(0,4,7) - - - G3~arp(0,4,7) - - - G3~arp(0,4,7) - - - G3~arp(0,4,7) - - -
+  bass: C3 . C3 . . . C3 . C3 . C3 . . . C3 . | G2 . G2 . . . G2 . G2 . G2 . . . G2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . . .
+  hats: . . h . . . h . . . h . . . h . | . . h . . . h . . . h . . . h .
+
+pattern explore.p3 steps=32 tpb=4 bar=16
+  lead: D5 - F5 - A5 - - - F5 - D5 - - - - . | C5 - E5 - A5 - - - E5 - C5 - A4 - - .
+  pad: D4+F4+A4 - - - - - - - - - - - - - - - | A3+C4+E4 - - - - - - - - - - - - - - -
+  arp: D4~arp(0,3,7) - - - D4~arp(0,3,7) - - - D4~arp(0,3,7) - - - D4~arp(0,3,7) - - - | A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - -
+  bass: D3 . D3 . . . D3 . D3 . D3 . . . D3 . | A2 . A2 . . . A2 . A2 . A2 . . . A2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . . .
+  hats: . . h . . . h . . . h . . . h . | . . h . . . h . . . h . . . h .
+
+pattern explore.p4 steps=32 tpb=4 bar=16
+  lead: B4 - E5 - G#5! - - - E5 - B4 - G#4! - - . | A4 - - - - - - - - - - - - - - .
+  pad: E3+G#3!+B3 - - - - - - - - - - - - - - - | A3+C4+E4 - - - - - - - - - - - - - - -
+  arp: E3~arp(0,4,7) - - - E3~arp(0,4,7) - - - E3~arp(0,4,7) - - - E3~arp(0,4,7) - - - | A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - -
+  bass: E2 . E2 . . . E2 . E2 . E2 . . . E2 . | A2 . A2 . . . A2 . A2 . A2 . . . A2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . s s
+  hats: . . h . . . h . . . h . . . h . | . . h . . . h . . . h . . . h .
+
+pattern explore.p1b steps=32 tpb=4 bar=16
+  lead: A5~vib - - - - - E5 - D5 - C5 - A4 - - . | F5~vib - - - - - C5 - A4 - F4 - E4 - - .
+  pad: . . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . . .
+  arp: A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - | F3~arp(0,4,7) - - - F3~arp(0,4,7) - - - F3~arp(0,4,7) - - - F3~arp(0,4,7) - - -
+  bass: A2 . A2 . . . A2 . A2 . A2 . . . A2 . | F2 . F2 . . . F2 . F2 . F2 . . . F2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . . .
+  hats: h . h . h . h . h . h . h . h . | h . h . h . h . h . h . h . h .
+
+pattern explore.p5 steps=32 tpb=4 bar=16
+  lead: E5 - - G5 - - E5 - C5 - D5 - E5 - - . | D5 - - B4 - - G4 - B4 - D5 - - - - .
+  pad: C4+E4+G4 - - - - - - - - - - - - - - - | G3+B3+D4 - - - - - - - - - - - - - - -
+  arp: C4~arp(0,4,7) - - - C4~arp(0,4,7) - - - C4~arp(0,4,7) - - - C4~arp(0,4,7) - - - | G3~arp(0,4,7) - - - G3~arp(0,4,7) - - - G3~arp(0,4,7) - - - G3~arp(0,4,7) - - -
+  bass: C3 . C3 . . . C3 . C3 . C3 . . . C3 . | G2 . G2 . . . G2 . G2 . G2 . . . G2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . . .
+  hats: h . h . h . h . h . h . h . h . | h . h . h . h . h . h . h . h .
+
+pattern explore.p6 steps=32 tpb=4 bar=16
+  lead: A4 - - C5 - - E5 - D5 - C5 - A4 - - . | F4 - - A4 - - C5 - A4 - F4 - E4 - - .
+  pad: A3+C4+E4 - - - - - - - - - - - - - - - | F3+A3+C4 - - - - - - - - - - - - - - -
+  arp: A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - A3~arp(0,3,7) - - - | F3~arp(0,4,7) - - - F3~arp(0,4,7) - - - F3~arp(0,4,7) - - - F3~arp(0,4,7) - - -
+  bass: A2 . A2 . . . A2 . A2 . A2 . . . A2 . | F2 . F2 . . . F2 . F2 . F2 . . . F2 .
+  drums: k . . . s . . . k . k . s . . . | k . . . s . . . k . k . s . s s
+  hats: h . h . h . h . h . h . h . h . | h . h . h . h . h . h . h . h .
+
+song section add explore A p1 p2
+song section add explore B p3 p4
+song section add explore A2 p1b p2
+song section add explore C p5 p6
+song loop explore A..C
+song set explore gain=0.7127

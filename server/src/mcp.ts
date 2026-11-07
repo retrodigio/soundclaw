@@ -5,7 +5,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { openRequests } from '@soundclaw/core';
+import { builtinInstruments, openRequests } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
@@ -14,6 +14,8 @@ import { ProjectError } from './project.ts';
 import { formatErrors, plural } from './report.ts';
 import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
 import { historyText, soundSummary } from './summary.ts';
+import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, normalizeSong, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
+import { readFileSync } from 'node:fs';
 import type { Writer } from './writer.ts';
 
 /** The author name every MCP batch is written with. */
@@ -50,6 +52,12 @@ Sets, families and loops (game sounds that repeat, or come in several distances,
   undo [group=<g>] [by=<author>]   |   redo [group=<undo group>] [by=<author>]      run alone, as the only command of the batch
 \`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers, description and checks; \`export\` writes wav (16-bit, 44,100 Hz, mono), patch (sfxr text) or csv (synth.csv) files; \`import\` makes classic sounds from an sfxr csv or patch.
 
+Music (instruments, patterns, songs; build a song in passes and run \`check\` after each: structure, harmony, bass, melody, drums, mix):
+  instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= pitched= adsr=a,d,s,r velocity= range=C3-C6 pitchenv= gain=   instrument layer|fx|env …   (built-ins: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open: use them by name)
+  song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song channel add <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=base|tension|combat]   song section add <song> <name> <pattern>… [x2]   song loop <song> <from>..<to>|off   song intro|ending <song> <section>   song fx add <song> compress|limit …
+  pattern <song>.<name> steps=16 tpb=4 bar=8, then indented rows: \`lead: C5 . E5 - | G5v80 . E5~slide .\` (. rest, - hold, | bars, v velocity, ! outside the key on purpose, ~slide ~vib ~arp(0,4,7), chords C4+E4+G4, lower-case words are drum hits)
+  Songs have the views notes (written notes against what the render plays, per channel) and mix (energy by band over time, masking in amber); the checks key, range, render-match, loop-music, masking (advisory) and clip, loudness, dc on the mix. \`normalize\` writes the song's gain; \`export\` writes wav/ogg, --loop (seamless), --stems (one per game layer), midi.
+
 Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-sting\` (or loudness=<LUFS>); the loudness check holds each sound to its class (standard: -16 LUFS ±1) and says which applied. \`normalize\` writes the gain that brings sounds to their class; \`measure\` returns the numbers and checks of many sounds as JSON in one call. Dynamics: \`fx add <id> compress|limit\` (a limiter on the master chain lets a spiky sound be loud without clipping). Many hits in one layer: \`env <id> 1.amp bursts(times=0.1,0.3 ...)\`. \`sound copy|rename|remove <id> ...\` manage sounds.
 
 Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
@@ -70,6 +78,10 @@ export function projectSummary(w: Writer, url: string): string {
   const sounds = w.sounds();
   lines.push('', sounds.length ? `sounds (${sounds.length}):` : 'sounds: none yet. Make one with run: "sound new zap voice=classic preset=laser seed=1".');
   for (const s of sounds) lines.push(`  ${soundSummary(w, s.id)}`);
+  const songs = w.songs();
+  if (songs.length) lines.push('', `songs (${songs.length}):`, ...songs.map((x) => `  ${songSummary(w, x.id)}`));
+  const insts = w.instruments();
+  if (insts.length) lines.push('', `instruments (${insts.length}): ${insts.map((i) => i.id).join(', ')} (and the built-ins: ${Object.keys(builtinInstruments()).join(', ')})`);
   const sets = w.sets();
   if (sets.length) lines.push('', `sets (${sets.length}):`, ...sets.map((x) => `  ${setSummary(w, x.id)}`));
   const open = openRequests(readRequests(p));
@@ -113,9 +125,10 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       const r = w.run({ commands: a.commands, by: AGENT });
       if (!r.ok) return fail(formatErrors('commands', r.errors));
       if (!r.added.length) return { content: [text('no commands')] };
-      const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd}`)];
+      const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd.length > 150 ? `${e.cmd.slice(0, 120).replace(/\\n/g, ' ')}… (${e.cmd.length} characters)` : e.cmd}`)];
       for (const id of r.touched) lines.push(soundSummary(w, id));
       for (const id of r.touchedSets) lines.push(setSummary(w, id));
+      for (const id of r.touchedSongs) lines.push(songSummary(w, id));
       lines.push(r.warnings.length ? `warnings: ${r.warnings.join('; ')}` : 'warnings: none');
       return { content: [text(lines.join('\n'))] };
     } catch (e) {
@@ -166,6 +179,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({ sound: z.string(), json: z.boolean().optional().describe('The result as one JSON object (class, numbers, checks, hash)') }),
   }, (a) => w.enqueue(() => {
     try {
+      if (w.hasSong(a.sound)) return { content: [text(a.json ? JSON.stringify(songJsonObject(w, a.sound), null, 2) : `${songNumbersText(w, a.sound)}\n${songSummary(w, a.sound).split('\n').slice(1).join('\n')}`)] };
       const r = w.render(a.sound); // first, so the summary does not warm the cache
       if (a.json) return { content: [text(describeJson(w, a.sound, { renderKey: r.key, cached: r.cached, samplesHash: w.samplesHashOf(a.sound) }))] };
       const head = soundSummary(w, a.sound).split('\n')[0]!;
@@ -181,11 +195,21 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     annotations: { readOnlyHint: true },
     inputSchema: z.object({
       sound: z.string(),
-      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare']).optional().describe('Default spec'),
+      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare', 'notes', 'mix']).optional().describe('Default spec (a song: notes, mix, wave, spec, loop; default notes)'),
       other: z.string().optional().describe('compare: the second sound'),
+      from: z.number().optional().describe('A song: draw from this second'),
+      to: z.number().optional().describe('A song: draw to this second'),
+      channels: z.array(z.string()).optional().describe('A song: only these channels'),
     }),
   }, (a) => w.enqueue((): CallToolResult => {
     try {
+      if (w.hasSong(a.sound)) {
+        const kind = (a.kind ?? 'notes') as string;
+        if (!(SONG_VIEWS as readonly string[]).includes(kind)) return fail(`error: a song has the views ${SONG_VIEWS.join(', ')}`);
+        const sv = viewSong(w, a.sound, kind as SongViewKind, { from: a.from, to: a.to, channels: a.channels });
+        return { content: [{ type: 'image' as const, data: Buffer.from(sv.png).toString('base64'), mimeType: 'image/png' }, text(sv.text)] };
+      }
+      if (a.kind === 'notes' || a.kind === 'mix') return fail(`error: ${a.kind} is a view of a song (${a.sound} is a sound)`);
       const v = viewSound(w, a.sound, a.kind ?? 'spec', { other: a.other });
       return { content: [{ type: 'image' as const, data: Buffer.from(v.png).toString('base64'), mimeType: 'image/png' }, text(v.text)] };
     } catch (e) {
@@ -200,6 +224,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({ sound: z.string(), json: z.boolean().optional().describe('The result as one JSON object') }),
   }, (a) => w.enqueue(() => {
     try {
+      if (w.hasSong(a.sound)) return { content: [text(a.json ? JSON.stringify(songJsonObject(w, a.sound), null, 2) : songNumbersText(w, a.sound))] };
       return { content: [text(a.json ? describeJson(w, a.sound) : describeText(w, a.sound))] };
     } catch (e) {
       return errorResult(e);
@@ -213,7 +238,16 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names'), json: z.boolean().optional().describe('One JSON document with every number and every check (as measure)') }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(a.json ? measureJson(w, a.sounds ?? []).json : checkText(w, a.sounds ?? []).text)] };
+      const ids = a.sounds ?? [];
+      const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
+      const soundIds = ids.filter((x) => !w.hasSong(x));
+      const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
+      if (a.json) {
+        const doc = JSON.parse(only ? '{}' : measureJson(w, soundIds).json) as Record<string, unknown>;
+        if (songIds.length) doc.songs = songIds.map((x) => songJsonObject(w, x));
+        return { content: [text(JSON.stringify(doc, null, 2))] };
+      }
+      return { content: [text([only ? '' : checkText(w, soundIds).text, ...songIds.map((x) => songChecksText(w, x).text)].filter(Boolean).join('\n\n'))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -227,7 +261,14 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names (default all)'), json: z.boolean().optional().describe('Default true; false gives text') }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(a.json === false ? measureText(w, a.sounds ?? []).text : measureJson(w, a.sounds ?? []).json)] };
+      const ids = a.sounds ?? [];
+      const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
+      const soundIds = ids.filter((x) => !w.hasSong(x));
+      const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
+      if (a.json === false) return { content: [text([only ? '' : measureText(w, soundIds).text, ...songIds.map((x) => `${songNumbersText(w, x)}\n${songChecksText(w, x).text}`)].filter(Boolean).join('\n\n'))] };
+      const doc = JSON.parse(only ? '{}' : measureJson(w, soundIds).json) as Record<string, unknown>;
+      if (songIds.length) doc.songs = songIds.map((x) => songJsonObject(w, x));
+      return { content: [text(JSON.stringify(doc, null, 2))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -240,6 +281,14 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({ sounds: z.array(z.string()).min(1).describe('Sound ids and set names'), to: z.string().optional().describe('A class name, or target=<LUFS>') }),
   }, (a) => w.enqueue(() => {
     try {
+      if (a.sounds.length === 1 && w.hasSong(a.sounds[0]!)) {
+        const t = a.to?.replace(/^target=/, '');
+        const sn = normalizeSong(w, a.sounds[0]!, t === undefined ? undefined : Number(t));
+        if (!sn.command) return { content: [text(`${a.sounds[0]} is already at ${sn.target} LUFS: nothing to write${sn.notes.map((x) => `\nwarning: ${x}`).join('')}`)] };
+        const sr = w.run({ commands: sn.command, by: AGENT });
+        if (!sr.ok) return fail(formatErrors('normalize', sr.errors));
+        return { content: [text([...sn.notes.map((x) => `warning: ${x}`), `normalized ${a.sounds[0]} to ${sn.target} LUFS as group ${sr.group}`, ...sr.added.map((e) => `  #${e.seq} ${e.cmd}`), songSummary(w, a.sounds[0]!)].join('\n'))] };
+      }
       const n = normalizeCommands(w, a.sounds, a.to);
       if (!n.commands) return { content: [text(`${plural(n.ids.length, 'sound')} already at ${n.target}: nothing to write${n.notes.map((x) => `\nwarning: ${x}`).join('')}`)] };
       const r = w.run({ commands: n.commands, by: AGENT });
@@ -305,14 +354,44 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       sounds: z.array(z.string()).optional().describe('The sounds to export (default all)'),
       set: z.string().optional().describe('Export the members of this set'),
       all: z.boolean().optional().describe('Every sound, with a manifest'),
-      format: z.enum(['wav', 'ogg', 'patch', 'csv']).optional().describe('Default wav'),
+      format: z.enum(['wav', 'ogg', 'patch', 'csv', 'midi']).optional().describe('Default wav (a song: wav, ogg or midi)'),
+      loop: z.boolean().optional().describe('A song: its loop region (seamless)'),
+      stems: z.boolean().optional().describe('A song: one aligned file per game layer'),
+      loops: z.number().int().min(1).max(16).optional().describe('A song: the loop region repeated this many times in a full export'),
+      pattern: z.string().optional().describe('A song, midi: one pattern instead of the song'),
       out: z.string().optional().describe('The folder to write into'),
       pack: z.boolean().optional().describe('Pack layout: classic-marked sounds as synth.csv rows, the rest as audio, in one flat folder'),
       quality: z.number().min(-0.1).max(1).optional().describe('OGG quality'),
     }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(formatExportFiles(exportFormat(w, a.sounds ?? [], a.format ?? 'wav', { out: a.out, set: a.set, all: a.all, pack: a.pack, quality: a.quality })))] };
+      const names = a.sounds ?? [];
+      if (names.length && names.every((x) => w.hasSong(x))) {
+        const f = a.format ?? 'wav';
+        if (f !== 'wav' && f !== 'ogg' && f !== 'midi') return fail('error: a song exports as wav, ogg or midi');
+        return { content: [text(names.map((id) => formatSongExport(exportSong(w, id, { format: f, loop: a.loop, stems: a.stems, loops: a.loops, pattern: a.pattern, out: a.out, quality: a.quality }))).join('\n'))] };
+      }
+      if (a.format === 'midi') return fail('error: midi is for songs');
+      return { content: [text(formatExportFiles(exportFormat(w, names, a.format ?? 'wav', { out: a.out, set: a.set, all: a.all, pack: a.pack, quality: a.quality })))] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('midi', {
+    title: 'Import a MIDI file as a song',
+    description: 'Make a song from a Standard MIDI file (type 0 or 1): one pattern per two bars, a channel per track and MIDI channel, drums on channel 10 as a drum channel; timings go to the nearest step (the tempo, time signature and steps per beat are chosen from the file). ' +
+      'path is the .mid file on the machine running the server; id names the song. Export is the export tool with format midi.',
+    inputSchema: z.object({ path: z.string(), id: z.string().optional().describe('The song id (default: the file name)') }),
+  }, (a) => w.enqueue(() => {
+    try {
+      if (!existsSync(a.path)) return fail(`error: no such file ${a.path}`);
+      const base = (a.path.split('/').pop() ?? 'song').replace(/\.(mid|midi)$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]+/, '') || 'song';
+      const id = a.id ?? base.slice(0, 48);
+      const imp = midiImportScript(new Uint8Array(readFileSync(a.path)), id);
+      const r = w.run({ commands: imp.script, by: AGENT });
+      if (!r.ok) return fail(formatErrors('midi import', r.errors));
+      return { content: [text([...imp.notes.map((x) => `warning: ${x}`), `imported ${id}: ${imp.summary}, as group ${r.group}`, songSummary(w, id)].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }

@@ -43,7 +43,7 @@ export const ACTIVE_MS = 5 * 60 * 1000;
 export const UNSEEN_MS = 2 * 60 * 1000;
 const KEEP = 500;
 
-const MARK_RE = /^sound mark (\S+) (approved|rejected)\b\s*(.*)$/;
+const MARK_RE = /^(?:sound|song) mark (\S+) (approved|rejected)\b\s*(.*)$/;
 
 interface Waiter {
   by: string;

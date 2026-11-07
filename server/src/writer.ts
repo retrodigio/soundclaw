@@ -3,12 +3,13 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
-import { AUTHOR_RE, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
 import type { Measured } from './ears.ts';
-import { ProjectError, appendTape, readTape, writeSets, writeSounds, type Project } from './project.ts';
+import { ProjectError, appendTape, readTape, writeInstruments, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
+import { SongBench, type SongMeasured } from './songs.ts';
 import type { ServerMessage, Snapshot } from './protocol.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
 
@@ -19,7 +20,7 @@ export interface RunRequest {
 }
 
 export type RunOutcome =
-  | { ok: true; group: string | null; added: TapeEntry[]; /** Sounds the batch created or changed (or removed, by an undo). */ touched: string[]; /** Sets it created or changed. */ touchedSets: string[]; warnings: string[] }
+  | { ok: true; group: string | null; added: TapeEntry[]; /** Sounds the batch created or changed (or removed, by an undo). */ touched: string[]; /** Sets it created or changed. */ touchedSets: string[]; /** Songs and instruments it created or changed. */ touchedSongs: string[]; touchedInstruments: string[]; warnings: string[] }
   | { ok: false; errors: Diag[] };
 
 export interface HistoryRequest {
@@ -40,13 +41,19 @@ const utcNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The sound a tape command is about (its first argument), if any. */
 function soundOf(cmd: string): string | null {
-  return /^(?:sound (?:new|set|mark|patch|generate|mutate|layer-up|classic|loop|copy|rename|remove)|layer (?:add|set|remove|move|mute|solo)|fx (?:add|set|remove|move)|env|family) (\S+)/.exec(cmd)?.[1] ?? null;
+  const sound = /^(?:sound (?:new|set|mark|patch|generate|mutate|layer-up|classic|loop|copy|rename|remove)|layer (?:add|set|remove|move|mute|solo)|fx (?:add|set|remove|move)|env|family) (\S+)/.exec(cmd)?.[1];
+  if (sound) return sound;
+  // a song's commands name the song (a pattern as <song>.<name>), an instrument's the instrument
+  return /^song (?:new|set|order|intro|ending|loop|copy|rename|remove|mark) (\S+)/.exec(cmd)?.[1] ?? /^song (?:channel|section|fx) (?:add|set|remove|move) (\S+)/.exec(cmd)?.[1] ?? /^pattern (?:set|remove|copy|rename) ([^.\s]+)\./.exec(cmd)?.[1]
+    ?? /^instrument (?:new|from-sound|set|copy|rename|remove) (\S+)/.exec(cmd)?.[1] ?? /^instrument (?:layer|fx|env) (?:(?:add|set|remove|move|mute|solo) )?(\S+)/.exec(cmd)?.[1] ?? null;
 }
 
 export class Writer {
   project: Project;
   readonly hub = new Hub();
   readonly cache: RenderCache;
+  /** Renders and measurements of songs. */
+  readonly bench: SongBench;
   /** The project's imported samples (samples/*.wav). */
   readonly samples: SampleStore;
   /** What the checks are held to: the project's `style`, else the defaults. */
@@ -62,6 +69,7 @@ export class Writer {
     this.project = project;
     this.now = o.now ?? utcNow;
     this.cache = new RenderCache(project.dir);
+    this.bench = new SongBench(this);
     this.samples = new SampleStore(project.dir);
     try {
       this.style = resolveStyle(project.json.style);
@@ -142,6 +150,40 @@ export class Writer {
 
   hasSet(id: string): boolean {
     return this.library.sets.has(id);
+  }
+
+  /** The project's instruments, by id. */
+  instruments(): Instrument[] {
+    return [...this.library.instruments.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  /** An instrument of the project, else a built-in one. */
+  lookupInstrument(id: string): Instrument | undefined {
+    return lookupInstrument(this.library, id);
+  }
+
+  songs(): SongDoc[] {
+    return [...this.library.songs.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  song(id: string): SongDoc {
+    const s = this.library.songs.get(id);
+    if (!s) throw new ProjectError(`no song '${id}'${this.library.songs.size ? ` (songs: ${[...this.library.songs.keys()].sort().join(', ')})` : ': make one with `song new <id>`'}`);
+    return s;
+  }
+
+  hasSong(id: string): boolean {
+    return this.library.songs.has(id);
+  }
+
+  /** What stops a song playing (errors) and what is worth saying (warnings). */
+  songProblems(id: string): { errors: string[]; warnings: string[] } {
+    return songProblems(this.song(id), (i) => !!this.lookupInstrument(i));
+  }
+
+  /** A song's numbers and checks, measured once for each distinct document. */
+  measureSong(id: string): SongMeasured {
+    return this.bench.measure(this.song(id));
   }
 
   /** A class a command names must be in the style (a replay does not ask: a style may change). */
@@ -271,6 +313,8 @@ export class Writer {
       project: { name: this.project.json.name, dir: this.project.dir },
       sounds: this.sounds(),
       sets: this.sets(),
+      songs: this.songs().map(songToJson),
+      instruments: this.instruments(),
       samples: this.samples.list(),
       style: this.style,
       tape: [...this.entries],
@@ -287,7 +331,7 @@ export class Writer {
     if (typeof req.by !== 'string' || !AUTHOR_RE.test(req.by)) throw new ProjectError(`the author is agent:<name> or human:<name> (letters, digits, . _ -), not '${req.by}'`);
     const parsed = parse(req.commands);
     if (parsed.errors.length) return { ok: false, errors: parsed.errors };
-    if (!parsed.commands.length) return { ok: true, group: null, added: [], touched: [], touchedSets: [], warnings: ['no commands'] };
+    if (!parsed.commands.length) return { ok: true, group: null, added: [], touched: [], touchedSets: [], touchedSongs: [], touchedInstruments: [], warnings: ['no commands'] };
     const group = nextGroup(this.entries);
     let seq = this.entries.reduce((n, e) => Math.max(n, e.seq), 0);
     const at = this.stamp();
@@ -353,6 +397,15 @@ export class Writer {
         });
       }
       if (errors.length) return { ok: false, errors };
+      // A song a batch changed must be able to play: its instruments exist and its patterns fit its channels.
+      for (const [id, song] of next.songs) {
+        if (song === this.library.songs.get(id)) continue;
+        const at = parsed.commands.filter((c) => ('id' in c && c.id === id) || ('song' in c && c.song === id)).at(-1);
+        const probs = songProblems(song, (i) => !!lookupInstrument(next, i));
+        for (const m of probs.errors) errors.push({ line: at?.line ?? 1, col: 1, message: `song ${id}: ${m}` });
+        for (const m of probs.warnings) warnings.push(`song ${id}: ${m}`);
+      }
+      if (errors.length) return { ok: false, errors };
     }
 
     // The batch fits: write it. Tape first (the source of truth), then the readable documents.
@@ -362,12 +415,18 @@ export class Writer {
     this.library = next;
     writeSounds(this.project, next, before);
     writeSets(this.project, next, before);
+    writeInstruments(this.project, next, before);
+    writeSongs(this.project, next, before);
     const text = (lib: Library, id: string) => (lib.has(id) ? serializeSound(lib.get(id)!) : null);
     const touched = [...new Set([...before.keys(), ...next.keys()])].filter((id) => text(before, id) !== text(next, id)).sort();
     const setText = (lib: Library, id: string) => (lib.sets.has(id) ? serializeSet(lib.sets.get(id)!) : null);
     const touchedSets = [...new Set([...before.sets.keys(), ...next.sets.keys()])].filter((id) => setText(before, id) !== setText(next, id)).sort();
-    this.emit({ type: 'batch', by: req.by, group, entries: added, sounds: this.sounds(), sets: this.sets() });
+    const songText2 = (lib: Library, id: string) => (lib.songs.has(id) ? songText(lib.songs.get(id)!) : null);
+    const touchedSongs = [...new Set([...before.songs.keys(), ...next.songs.keys()])].filter((id) => songText2(before, id) !== songText2(next, id)).sort();
+    const instText = (lib: Library, id: string) => (lib.instruments.has(id) ? JSON.stringify(lib.instruments.get(id)) : null);
+    const touchedInstruments = [...new Set([...before.instruments.keys(), ...next.instruments.keys()])].filter((id) => instText(before, id) !== instText(next, id)).sort();
+    this.emit({ type: 'batch', by: req.by, group, entries: added, sounds: this.sounds(), sets: this.sets(), songs: this.songs().map(songToJson), instruments: this.instruments() });
     this.hub.marks(req.by, added, at);
-    return { ok: true, group, added, touched, touchedSets, warnings };
+    return { ok: true, group, added, touched, touchedSets, touchedSongs, touchedInstruments, warnings };
   }
 }

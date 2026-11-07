@@ -3,7 +3,7 @@
 
 import type { Presence } from './await.ts';
 import type { SampleInfo } from './samples.ts';
-import type { Diag, SetDoc, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
+import type { Diag, Instrument, SetDoc, SongJson, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
 
 export type { Presence, SampleInfo };
 export { HUMAN_RE } from '@soundclaw/core';
@@ -15,6 +15,9 @@ export interface Snapshot {
   sounds: Sound[];
   /** The sets: named groups of sounds with a loudness target (their members are sounds above). */
   sets: SetDoc[];
+  /** The songs (patterns as a list) and the project's instruments; the page renders songs with the same core, the built-in instruments included. */
+  songs: SongJson[];
+  instruments: Instrument[];
   /** The project's imported samples (a sample layer names one; the page fetches the bytes to render it). */
   samples: SampleInfo[];
   /** What the checks are held to (the card's badge uses the same numbers the CLI does). */
@@ -34,7 +37,7 @@ export type PersonRequest =
 export type ServerMessage =
   | { type: 'hello'; snapshot: Snapshot }
   /** One applied batch (one undo group): its tape entries, and the sounds as they now stand. */
-  | { type: 'batch'; by: string; group: string; entries: TapeEntry[]; sounds: Sound[]; sets: SetDoc[] }
+  | { type: 'batch'; by: string; group: string; entries: TapeEntry[]; sounds: Sound[]; sets: SetDoc[]; songs: SongJson[]; instruments: Instrument[] }
   /** The answer to one page's `run` (only to that page; the batch itself goes to every page). */
   | { type: 'result'; id: number; ok: true; group: string | null; seq: number | null }
   | { type: 'result'; id: number; ok: false; errors: Diag[] }

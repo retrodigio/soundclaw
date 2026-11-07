@@ -9,7 +9,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { TAPE_FORMAT, parseTape, serializeSet, serializeSound, tapeHeader, tapeToJsonl, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
+import { TAPE_FORMAT, formatPattern, parseTape, serializeInstrument, serializeSet, serializeSong, serializeSound, tapeHeader, tapeToJsonl, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
 
 export const PROJECT_FORMAT = 'soundclaw-project';
 export const HISTORY_FILE = 'history.jsonl';
@@ -111,6 +111,45 @@ export function writeSets(p: Project, lib: Library, before: Library): void {
     const prev = before.sets.get(id);
     if (prev && serializeSet(prev) === text && existsSync(setFile(p, id))) continue;
     writeFileSync(setFile(p, id), text);
+  }
+}
+
+export const instrumentFile = (p: Project, id: string): string => join(p.dir, 'instruments', `${id}.inst`);
+
+/** Make instruments/ match the library's instruments (the built-in ones have no files). */
+export function writeInstruments(p: Project, lib: Library, before: Library): void {
+  mkdirSync(join(p.dir, 'instruments'), { recursive: true });
+  for (const id of before.instruments.keys()) if (!lib.instruments.has(id)) rmSync(instrumentFile(p, id), { force: true });
+  for (const [id, i] of lib.instruments) {
+    const text = serializeInstrument(i);
+    const prev = before.instruments.get(id);
+    if (prev && serializeInstrument(prev) === text && existsSync(instrumentFile(p, id))) continue;
+    writeFileSync(instrumentFile(p, id), text);
+  }
+}
+
+export const songFile = (p: Project, id: string): string => join(p.dir, 'songs', `${id}.song`);
+export const patternDir = (p: Project, id: string): string => join(p.dir, 'songs', id, 'patterns');
+
+/** Make songs/ match the library's songs: songs/<id>.song, and songs/<id>/patterns/<name>.pat for each pattern. */
+export function writeSongs(p: Project, lib: Library, before: Library): void {
+  mkdirSync(join(p.dir, 'songs'), { recursive: true });
+  for (const id of before.songs.keys()) {
+    if (!lib.songs.has(id)) { rmSync(songFile(p, id), { force: true }); rmSync(join(p.dir, 'songs', id), { recursive: true, force: true }); }
+  }
+  for (const [id, s] of lib.songs) {
+    const text = serializeSong(s);
+    const prev = before.songs.get(id);
+    if (!prev || serializeSong(prev) !== text || !existsSync(songFile(p, id))) writeFileSync(songFile(p, id), text);
+    const dir = patternDir(p, id);
+    mkdirSync(dir, { recursive: true });
+    for (const name of prev?.patterns.keys() ?? []) if (!s.patterns.has(name)) rmSync(join(dir, `${name}.pat`), { force: true });
+    for (const [name, pat] of s.patterns) {
+      const ptext = formatPattern(pat);
+      const old = prev?.patterns.get(name);
+      if (old && formatPattern(old) === ptext && existsSync(join(dir, `${name}.pat`))) continue;
+      writeFileSync(join(dir, `${name}.pat`), ptext);
+    }
   }
 }
 

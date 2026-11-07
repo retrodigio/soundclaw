@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, openRequests, type ViewKind } from '@soundclaw/core';
+import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, normalizeSong, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
   EXPORT_FORMATS, sampleLine, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizeCommands, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
@@ -67,6 +68,11 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit [<param>=<value> ...] [at=<k>]
         fx set|remove|move <id> [layer=<n>] <k> ...
         undo [group=<g>] [by=<author>]    redo [group=<undo group>] [by=<author>]   (each alone in its batch)
+        instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= adsr=a,d,s,r range= ...
+        instrument layer|fx|env <as the sound commands> ...   (built-ins to play as they are: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open)
+        song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song set <id> ...   song channel add|set <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=]
+        pattern <song>.<name> steps=16 tpb=4 [bar=8], then indented rows:  lead: C5 . E5 - | G5v80 . E5~slide .      pattern set|remove|copy|rename <song>.<name> ...
+        song section add|set|remove <song> <name> <pattern>... [x<n>]   song order|intro|ending|loop|fx|copy|rename|remove|mark <song> ...   (music: docs/commands.md)
       '-' reads the commands from standard input. --by is the author written on the history:
       agent:<name> or human:<name> (default agent:claude; a bare name means agent:<name>).
       The result lists the commands as written and each changed sound's numbers and checks.
@@ -90,6 +96,11 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       the two overlapped, the joined spectrogram, and the level across four repeats), set (a set's members side
       by side with loudness bars, and the pairwise distance matrix), compare (two spectrograms and their difference, with
       distance numbers).
+  soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
+      A song's ears: notes (each channel rendered alone: the written notes, the detected onsets and pitch,
+      differences in red), mix (each channel's energy by band over time, overlaps in amber), wave and spec
+      of the mix, loop (the loop's seam). Printed with the song's numbers: length, loop length, loudness,
+      true peak, per-channel loudness, tempo; and the notes that differ, with times.
   soundclaw describe <project> <id> [--json]
       A plain-words summary built only from the measured numbers, then the numbers (--json: as a JSON object).
   soundclaw measure <project> [<id|set>...] [--json]
@@ -97,7 +108,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       sound its class and target, every number describe prints and every check's result. --json prints one JSON
       document for scripts ({format, pass, sounds: [{id, class, numbers, checks, binding}], sets}); exit 1 when any
       check fails. A sound's loudness class: sound set <id> class=<name> (or loudness=<LUFS> for that sound alone).
-  soundclaw normalize <project> <id|set>... [<class> | target=<LUFS>] [--by <author>]
+  soundclaw normalize <project> <id|set>... [<class> | target=<LUFS>] [--by <author>]   (a song: normalize <project> <song> [target=<LUFS>] writes song set gain=)
       Write the gain (a layered sound's gain, a classic sound's volume) that brings sounds, or a set's members,
       to a loudness: each one's own class target (no argument), a class's target (the sounds join that class) or
       target=<LUFS> (the sounds are held to it). One undo group, the commands printed; a shortfall is a warning.
@@ -133,6 +144,15 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       text; csv: one synth.csv. Without ids (or with --all), every sound; --set exports a set's members.
       --pack: a flat folder where sounds marked classic become rows of one synth.csv instead of
       audio files. --to (or --out) names the folder (default <project>/exports/).
+  soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
+      A song as one file (intro, body once, ending; --loops repeats the loop region), --loop its loop region
+      (seamless: the tail of the loop wraps into its start), --stems one aligned file per game layer (the
+      stems of the loop when the song loops; before the master chain, so they sum to the mix when it does not
+      turn the mix down), or midi (the song, or --pattern one pattern). A <song>-manifest.json says the loop points.
+  soundclaw midi import <project> <file.mid> [--id <song>] [--by <author>]
+  soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
+      Import a Standard MIDI file (type 0 or 1) as a song: one pattern per two bars, a channel per track and MIDI channel,
+      drums on channel 10 as a drum channel; timings go to the nearest step. Export: the song or one pattern as type 1.
   soundclaw changes <project> [--since <command number | time>] [--by human|agent|<author>] [--as <agent>] [--peek]
       What other hands changed since this agent last looked (a cursor kept per agent in the
       project): each history group with the parameters before and after, the numbers before and
@@ -241,7 +261,8 @@ export const one = (p: Parsed, k: string): string | undefined => p.flags.get(k)?
 /** The options of the commands that write (valued, bare): the CLI uses them to send a command to a running server. */
 export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
-  export: [['out', 'to', 'format', 'set', 'quality'], ['all', 'pack']],
+  export: [['out', 'to', 'format', 'set', 'quality', 'loops', 'pattern'], ['all', 'pack', 'loop', 'stems']],
+  midi: [['id', 'by', 'pattern', 'to', 'out'], []],
   import: [['id', 'by'], ['quiet', 'classic']],
   normalize: [['by'], []],
   sample: [['as', 'by'], []],
@@ -312,7 +333,7 @@ function cmdRun(io: Io, p: Parsed): number {
     io.err(formatErrors(source, r.errors) + '\n');
     return 1;
   }
-  io.out(formatRun(r, (id) => soundSummary(w, id), (id) => setSummary(w, id)) + '\n');
+  io.out(formatRun(r, (id) => soundSummary(w, id), (id) => setSummary(w, id), (id) => songSummary(w, id)) + '\n');
   return 0;
 }
 
@@ -322,7 +343,10 @@ function cmdList(io: Io, p: Parsed): number {
   const w = wr(io, dir);
   const sounds = w.sounds();
   const sets = w.sets();
-  io.out((sounds.length ? `${plural(sounds.length, 'sound')}:\n${sounds.map((s) => `  ${soundSummary(w, s.id)}\n`).join('')}` : 'no sounds yet\n') + (sets.length ? `${plural(sets.length, 'set')}:\n${sets.map((x) => `  ${setSummary(w, x.id)}\n`).join('')}` : ''));
+  const songs = w.songs();
+  const insts = w.instruments();
+  const musicText = (songs.length ? `${plural(songs.length, 'song')}:\n${songs.map((x) => `  ${songSummary(w, x.id)}\n`).join('')}` : '') + (insts.length ? `${plural(insts.length, 'instrument')}: ${insts.map((i) => i.id).join(', ')}\n` : '');
+  io.out(musicText + (sounds.length ? `${plural(sounds.length, 'sound')}:\n${sounds.map((s) => `  ${soundSummary(w, s.id)}\n`).join('')}` : 'no sounds yet\n') + (sets.length ? `${plural(sets.length, 'set')}:\n${sets.map((x) => `  ${setSummary(w, x.id)}\n`).join('')}` : ''));
   return 0;
 }
 
@@ -341,6 +365,10 @@ function cmdRender(io: Io, p: Parsed): number {
   const [dir, id, ...extra] = p.pos;
   if (!dir || !id || extra.length) throw new UsageError('render: give a project folder and a sound id');
   const w = wr(io, dir);
+  if (w.hasSong(id)) {
+    io.out((p.flags.has('json') ? JSON.stringify(songJsonObject(w, id, { hashes: true }), null, 2) : `${songNumbersText(w, id)}\n${songSummary(w, id).split('\n').slice(1).join('\n')}`) + '\n');
+    return 0;
+  }
   const r = w.render(id); // first, so the line below does not warm the cache
   if (p.flags.has('json')) {
     io.out(describeJson(w, id, { renderKey: r.key, cached: r.cached, samplesHash: w.samplesHashOf(id) }) + '\n');
@@ -354,6 +382,14 @@ function cmdRender(io: Io, p: Parsed): number {
 function cmdView(io: Io, p: Parsed): number {
   const [dir, id, kind, other, ...extra] = p.pos;
   if (!dir || !id || !kind) throw new UsageError('view: give a project folder, a sound id and wave, spec, pitch or compare <other>');
+  if (wr(io, dir).hasSong(id)) {
+    if (!(SONG_VIEWS as readonly string[]).includes(kind)) throw new UsageError(`view: a song has the views ${SONG_VIEWS.join(', ')} (not '${kind}')`);
+    if (other !== undefined || extra.length) throw new UsageError(`view ${kind}: unexpected '${other}'`);
+    const num = (k: string): number | undefined => { const v = one(p, k); if (v === undefined) return undefined; const n = Number(v); if (!(n >= 0)) throw new UsageError(`--${k} is a time in seconds`); return n; };
+    const v = viewSong(wr(io, dir), id, kind as SongViewKind, { from: num('from'), to: num('to'), channels: one(p, 'channels')?.split(',').filter(Boolean), out: one(p, 'out') });
+    io.out(v.text + '\n');
+    return 0;
+  }
   if (!['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, loop, set, compare)`);
   if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound' : `view ${kind}: unexpected '${other}'`);
   const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers' | 'loop' | 'set', { other, out: one(p, 'out') });
@@ -396,6 +432,7 @@ function cmdDescribe(io: Io, p: Parsed): number {
   const [dir, id, ...extra] = p.pos;
   if (!dir || !id || extra.length) throw new UsageError('describe: give a project folder and a sound id');
   const w = wr(io, dir);
+  if (w.hasSong(id)) { io.out((p.flags.has('json') ? JSON.stringify(songJsonObject(w, id), null, 2) : songNumbersText(w, id)) + '\n'); return 0; }
   io.out((p.flags.has('json') ? describeJson(w, id) : describeText(w, id)) + '\n');
   return 0;
 }
@@ -405,14 +442,21 @@ function cmdMeasure(io: Io, p: Parsed): number {
   const [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('measure: give a project folder');
   const w = wr(io, dir);
+  const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
+  const soundIds = ids.filter((x) => !w.hasSong(x));
+  const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
   if (p.flags.has('json')) {
-    const r = measureJson(w, ids);
-    io.out(r.json + '\n');
-    return r.pass ? 0 : 1;
+    const r = only ? { json: '{}', pass: true } : measureJson(w, soundIds);
+    const doc = JSON.parse(r.json) as Record<string, unknown>;
+    const objs = songIds.map((x) => songJsonObject(w, x) as { pass?: boolean });
+    if (songIds.length) doc.songs = objs;
+    io.out(JSON.stringify(doc, null, 2) + '\n');
+    return r.pass && objs.every((o) => o.pass !== false) ? 0 : 1;
   }
-  const r = measureText(w, ids);
-  io.out(r.text + '\n');
-  return r.pass ? 0 : 1;
+  const r = only ? { text: '', pass: true } : measureText(w, soundIds);
+  const songTexts = songIds.map((x) => `${songNumbersText(w, x)}\n${songChecksText(w, x).text}`);
+  io.out([r.text, ...songTexts].filter(Boolean).join('\n\n') + '\n');
+  return r.pass && songIds.every((x) => songChecksText(w, x).pass) ? 0 : 1;
 }
 
 /** `normalize`: the gain commands that bring sounds to a loudness, run as one undo group. */
@@ -421,6 +465,18 @@ function cmdNormalize(io: Io, p: Parsed): number {
   if (!dir || !rest.length) throw new UsageError('normalize: soundclaw normalize <project> <id|set>... [<class> | target=<LUFS>]');
   assertNoServer(dir, io);
   const w = wr(io, dir);
+  if (rest.length >= 1 && w.hasSong(rest[0]!)) {
+    const sid = rest[0]!;
+    const t = rest[1]?.replace(/^target=/, '');
+    const target = t === undefined ? undefined : Number(t.replace(/lufs$/i, ''));
+    if (target !== undefined && !(target >= -60 && target <= 0)) throw new UsageError('normalize: a song takes target=<LUFS> (or nothing: its class target)');
+    const n = normalizeSong(w, sid, target);
+    if (!n.command) { io.out(`${sid} is already at ${n.target} LUFS: nothing to write\n${n.notes.map((x) => `warning: ${x}\n`).join('')}`); return 0; }
+    const r = w.run({ commands: n.command, by: author(p, 'agent:claude', (x) => `agent:${x}`) });
+    if (!r.ok) { io.err(formatErrors('normalize', r.errors) + '\n'); return 1; }
+    io.out(`${n.notes.map((x) => `warning: ${x}\n`).join('')}normalized ${sid} to ${n.target} LUFS as group ${r.group}\n${r.added.map((e) => `  #${e.seq} ${e.cmd}\n`).join('')}${songSummary(w, sid)}\n`);
+    return 0;
+  }
   const last = rest[rest.length - 1]!;
   const isName = (x: string): boolean => w.has(x) || w.hasSet(x);
   const spec = rest.length > 1 && !isName(last) ? rest.pop() : undefined;
@@ -442,14 +498,21 @@ function cmdCheck(io: Io, p: Parsed): number {
   const [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('check: give a project folder');
   const w = wr(io, dir);
+  const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
+  const soundIds = ids.filter((x) => !w.hasSong(x));
+  const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
   if (p.flags.has('json')) {
-    const j = measureJson(w, ids);
-    io.out(j.json + '\n');
-    return j.pass ? 0 : 1;
+    const j = only ? { json: '{}', pass: true } : measureJson(w, soundIds);
+    const doc = JSON.parse(j.json) as Record<string, unknown>;
+    const objs = songIds.map((x) => songJsonObject(w, x) as { pass?: boolean });
+    if (songIds.length) doc.songs = objs;
+    io.out(JSON.stringify(doc, null, 2) + '\n');
+    return j.pass && objs.every((o) => o.pass !== false) ? 0 : 1;
   }
-  const r = checkText(w, ids);
-  io.out(r.text + '\n');
-  return r.pass ? 0 : 1;
+  const r = only ? { text: '', pass: true } : checkText(w, soundIds);
+  const results = songIds.map((x) => songChecksText(w, x));
+  io.out([r.text, ...results.map((x) => x.text)].filter(Boolean).join('\n\n') + '\n');
+  return r.pass && results.every((x) => x.pass) ? 0 : 1;
 }
 
 function cmdImport(io: Io, p: Parsed): number {
@@ -491,7 +554,20 @@ function cmdChanges(io: Io, p: Parsed): number {
 function cmdExport(io: Io, p: Parsed): number {
   const [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('export: give a project folder');
-  const format = (one(p, 'format') ?? 'wav') as ExportFormat;
+  const fmt0 = one(p, 'format') ?? 'wav';
+  if (ids.length && ids.every((x) => wr(io, dir).hasSong(x))) {
+    if (!['wav', 'ogg', 'midi'].includes(fmt0)) throw new UsageError('export: a song exports as --format wav, ogg or midi');
+    const w0 = wr(io, dir);
+    const q0 = one(p, 'quality') === undefined ? undefined : Number(one(p, 'quality'));
+    if (q0 !== undefined && !(q0 >= -0.1 && q0 <= 1)) throw new UsageError('export: --quality is a number from -0.1 to 1');
+    const loops = one(p, 'loops') === undefined ? undefined : Number(one(p, 'loops'));
+    if (loops !== undefined && !(Number.isInteger(loops) && loops >= 1 && loops <= 16)) throw new UsageError('export: --loops is a whole number from 1 to 16');
+    const lines: string[] = [];
+    for (const id of ids) lines.push(formatSongExport(exportSong(w0, id, { format: fmt0 as 'wav' | 'ogg' | 'midi', loop: p.flags.has('loop'), stems: p.flags.has('stems'), loops, pattern: one(p, 'pattern'), out: one(p, 'to') ?? one(p, 'out'), quality: q0 })));
+    io.out(lines.join('\n') + '\n');
+    return 0;
+  }
+  const format = fmt0 as ExportFormat;
   if (!EXPORT_FORMATS.includes(format)) throw new UsageError(`export: --format is ${EXPORT_FORMATS.join(', ')} (not '${format}')`);
   const out = one(p, 'to') ?? one(p, 'out');
   if (one(p, 'to') && one(p, 'out')) throw new UsageError('export: give --to or --out, not both');
@@ -499,6 +575,28 @@ function cmdExport(io: Io, p: Parsed): number {
   const quality = one(p, 'quality') === undefined ? undefined : Number(one(p, 'quality'));
   if (quality !== undefined && !(quality >= -0.1 && quality <= 1)) throw new UsageError('export: --quality is a number from -0.1 to 1');
   io.out(formatExportFiles(exportFormat(wr(io, dir), ids, format, { out, set: one(p, 'set'), all: p.flags.has('all'), pack: p.flags.has('pack'), quality })) + '\n');
+  return 0;
+}
+
+/** `midi import <project> <file.mid> [--id <song>]` and `midi export <project> <song> [--pattern <p>] [--to <dir>]`. */
+function cmdMidi(io: Io, p: Parsed): number {
+  const [what, dir, file, ...extra] = p.pos;
+  if (!what || !dir || !file || extra.length || !['import', 'export'].includes(what)) throw new UsageError('midi: soundclaw midi import <project> <file.mid> [--id <song>] | midi export <project> <song> [--pattern <p>] [--to <dir>]');
+  if (what === 'export') {
+    const w = wr(io, dir);
+    if (!w.hasSong(file)) throw new UsageError(`midi export: no song '${file}'`);
+    io.out(formatSongExport(exportSong(w, file, { format: 'midi', pattern: one(p, 'pattern'), out: one(p, 'to') ?? one(p, 'out') })) + '\n');
+    return 0;
+  }
+  assertNoServer(dir, io);
+  if (!existsSync(file)) throw new UsageError(`midi import: no such file ${file}`);
+  const base = (file.split('/').pop() ?? 'song').replace(/\.(mid|midi)$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]+/, '') || 'song';
+  const id = one(p, 'id') ?? base.slice(0, 48);
+  const imp = midiImportScript(new Uint8Array(readFileSync(file)), id);
+  const w = wr(io, dir);
+  const r = w.run({ commands: imp.script, by: author(p, 'agent:claude', (n) => `agent:${n}`) });
+  if (!r.ok) { io.err(formatErrors('midi import', r.errors) + '\n'); return 1; }
+  io.out([...imp.notes.map((x) => `warning: ${x}`), `imported ${id} from ${file}: ${imp.summary}, as group ${r.group}`, songSummary(w, id)].join('\n') + '\n');
   return 0;
 }
 
@@ -611,7 +709,8 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'list': return cmdList(io, parseArgs(rest, [], []));
       case 'history': return cmdHistory(io, parseArgs(rest, ['sound', 'by', 'limit'], []));
       case 'render': return cmdRender(io, parseArgs(rest, [], ['json']));
-      case 'view': return cmdView(io, parseArgs(rest, ['out'], []));
+      case 'view': return cmdView(io, parseArgs(rest, ['out', 'from', 'to', 'channels'], []));
+      case 'midi': return cmdMidi(io, parseArgs(rest, ...WRITE_OPTS.midi!));
       case 'describe': return cmdDescribe(io, parseArgs(rest, [], ['json']));
       case 'measure': return cmdMeasure(io, parseArgs(rest, [], ['json']));
       case 'normalize': return cmdNormalize(io, parseArgs(rest, ...WRITE_OPTS.normalize!));

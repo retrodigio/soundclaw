@@ -10,6 +10,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
 import { HUMAN_RE, floatBytes, joinChannels, renderExact } from '@soundclaw/core';
+import { songJsonObject } from './songs.ts';
 import { ProjectError } from './project.ts';
 import type { ClientMessage, PersonRequest, ServerMessage } from './protocol.ts';
 import { awaitRequests, personRequest } from './requests.ts';
@@ -129,7 +130,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   const host = o.host ?? '127.0.0.1';
@@ -241,6 +242,16 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
     if (url.pathname === '/api/state') {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       json(res, 200, o.writer.snapshot());
+      return;
+    }
+    const sm0 = /^\/api\/song\/([A-Za-z][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);
+    if (sm0) {
+      // A song's numbers and checks (measured on the server, once for each distinct document): the card's badge.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      o.writer.enqueue(() => {
+        if (!o.writer.hasSong(sm0[1]!)) { json(res, 404, { error: `no song '${sm0[1]}'` }); return; }
+        json(res, 200, songJsonObject(o.writer, sm0[1]!));
+      }).catch((e: unknown) => json(res, 500, { error: (e as Error).message }));
       return;
     }
     if (url.pathname === '/api/samples') {
