@@ -235,6 +235,12 @@ export function applyLayerCommand(lib: Map<string, Sound>, c: Command): string |
 
 /** Fill a layered sound from a recipe. */
 export function applyRecipe(s: LayeredSound, name: RecipeName, seed: number): LayeredSound {
-  return { ...s, seed, duration: null, gain: 1, ...recipeBody(name, seed) };
+  const body = recipeBody(name, seed);
+  const out: LayeredSound = { ...s, seed, duration: null, gain: 1, ...body };
+  if (body.gain === undefined) out.gain = 1;
+  // A recipe replaces the whole sound: a bed brings its loop, anything else has none, and a family mark no longer applies.
+  if (!body.loop) delete out.loop;
+  delete out.family;
+  return out;
 }
 

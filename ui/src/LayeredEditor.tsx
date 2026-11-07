@@ -5,6 +5,7 @@
 // command when the control is released (or has rested for a moment), exactly as in the classic
 // editor.
 
+import { LoopPanel } from './LoopPanel.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FX_KINDS, FX_SPECS, KeyedCoalescer, LAYER_SPECS, MAX_FX, MAX_LAYERS, RECIPE_NAMES, SOURCE_KINDS, addPoint, envAt, envCommand, flatEnv, fxSetCommand, isLogScale, isStereo, layerLabel, layerSetCommand, layerSpecs,
@@ -453,6 +454,8 @@ export function LayeredEditor({ store, id }: { store: Store; id: string }) {
                 <input type="number" min={0} step={1} data-testid="sound-seed" defaultValue={sound.seed} key={sound.seed} onBlur={(e) => { const v = Math.floor(Number(e.target.value)); if (v >= 0 && v !== sound.seed) void now(`sound set ${id} seed=${v}`); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></label>
             </div>
           </section>
+
+          <LoopPanel store={store} sound={sound} />
 
           <section className="panel" data-testid="generators" aria-label="Generators">
             <h3>Start from</h3>

@@ -26,6 +26,10 @@ machine, and can be edited and checked by a person and an agent alike.
   samples), breakpoint envelopes on any parameter, filters and effects per layer and on a master chain, stereo, a
   limiter on export, recipes for footsteps, UI clicks, doors and magic, and an editor with a layer list, an envelope
   graph and effect chains. The same deterministic renderer runs in Node and the browser.
+- **Sets, families and loops.** `set new footsteps from=step count=6 target=-20 spread="1.freq±12%"` makes six seeded variants of
+  a sound, each a real sound, matched to a loudness target; `family` makes a sound near, far or muffled; `sound loop` makes a seamless
+  bed (wind, rain, fire and crowd recipes). A `set` view and a `set-spread` check keep a set alike but never identical. Export to WAV
+  or OGG Vorbis with a manifest; import sfxr, jsfxr and Bfxr patch strings; an audition page to go through every sound with the keyboard.
 - **Ears for an agent that cannot listen.** Every result carries numbers (loudness in LUFS, true
   peak, attack, tail, brightness, pitch, onsets) and a check summary; `view` draws the waveform, a
   mel spectrogram, the pitch track, or two sounds compared; `describe` says it in words; `check`
@@ -96,4 +100,4 @@ pnpm typecheck
 
 ## Licence
 
-[MIT](LICENSE).
+[MIT](LICENSE). OGG export uses `libvorbis.js` (MIT: libvorbis and libogg compiled to JavaScript, under Xiph.org's BSD licences), a dependency of the package.

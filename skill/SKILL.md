@@ -114,9 +114,43 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
 - A person edits layers, envelopes and effects in the dashboard as `human:<name>` (`layer set`, `env`, `fx …`): read
   `changes` before editing a sound they touched, as with classic sounds.
 
+## Sets, families and beds
+
+Use these instead of making sounds one at a time whenever a game plays the same kind of sound again and again.
+
+- **A sound that repeats (footsteps, UI clicks, impacts, voice barks): make a set.** One good source, then
+  `set new footsteps from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%"`: six seeded variants that are
+  each a real sound (`footsteps_1` …), matched to the target loudness by gain (the result is on the history as `sound set … gain=`
+  commands). Name the parameters in `spread` as `sound set` / `layer set` do: a classic sound `freq±0.04 decay±0.1`; a layered
+  sound `N.<param>`, `*.<param>`, `N.amp`, `N.fxK.<param>`, `gain`; `%` is relative. A pitch driven by an envelope moves as a whole.
+  `view <set> set` shows the members and the distance matrix; `check <set>` runs **set-spread**: members must be neither too
+  alike (under 1 dB apart; widen the spread) nor too different (over 20 dB; narrow it), and within ±1 LU of the target. Fix a
+  member with ordinary commands; `set regen <set> seed=<n>` throws the generated members away and makes them again from the source
+  as it is now (so edit the source first); `set add` / `set remove` / `set retarget` change the membership and the target.
+  A classic member is quieted by its `volume`; if the target needs more than volume 1 allows, the run says how many LU it falls
+  short and `sound layer-up <id>` makes it layered (same samples) so its gain can go to 4.
+- **The same sound at several distances: `family <sound> near|far|muffled`.** A copy by documented rules (far is 9 LU quieter,
+  darker and wetter; muffled is low-passed behind a wall; near is a little drier and louder). It is matched to the source's
+  loudness plus the rule's offset, and `check` holds it to the style target plus that offset, so a far sound is not "too quiet".
+  It is a copy: change the source and the variant does not follow; make it again under another name.
+- **Ambience that runs for ever: a bed.** `sound new rain voice=layered preset=rain` (also `wind`, `fire`, `crowd`) is a looping
+  layered sound that lands near −16 LUFS; or loop any layered sound with `sound loop <id> <seconds> [fade=<s>]`. The seam is made
+  when it renders (the end is crossfaded over the start), so give every layer a `dur` of at least length + fade. `view <id> loop`
+  shows the seam, and the click check judges the seam (a jump, or a step in level) instead of the first and last sample. For a
+  loop that must be exact, export WAV; OGG is lossy at the seam. A tonal loop should hold a whole number of cycles; noise needs nothing.
+- **Handing over to a game:** `export <project> --all --format ogg --to <dir>` (or `--set <set>`) writes the files and a
+  `manifest.json` (id, file, duration, loudness, channels, loop points, set); `--pack` keeps one flat folder and puts the sounds
+  marked classic in a single `synth.csv`.
+- **Bringing sounds from other tools:** `import <project> jsfxr "<base58 or sfxr.me URL or JSON>" --id zap`, `import <project> bfxr
+  "<settings string>" --id zap`; several in a file, one `<id> <string>` per line. Every row is reported **exact** or **approximated**
+  with the loss named (Bfxr's compression and harmonics, its extra waves): read it and tell the person what changed.
+- **Listening in a batch:** the dashboard's **Audition** page (`#/audition`, or `#/audition/<set>`) shows every sound as a compact
+  card with the check badge; the person goes through them with the keyboard (arrows, space, `a` approves, `r` asks for changes) and
+  their approvals and requests reach you through `await` as ever. A set has its own page (`#/set/<id>`).
+
 ## Listening with numbers and pictures
 
-- Start with `check` (CLI: `soundclaw check <project> <sound>`): six checks (with `harsh`): clip, loudness (target from the
+- Start with `check` (CLI: `soundclaw check <project> <sound-or-set>`): six checks (with `harsh`) per sound, `set-spread` per set: clip, loudness (target from the
   project style, default -16 LUFS ±1, so `volume` is usually the fix), dc, click (a jump at the first
   or last sample: use `attack` > 0 and let `decay` reach zero), tail (silence padding, or a sound cut
   off while still loud: a `minFreq` cut or a short decay), harsh (sustained 2–5 kHz energy). It lists the exact time ranges.

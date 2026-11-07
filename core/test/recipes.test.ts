@@ -14,8 +14,8 @@ const make = (name: string, seed: number): LayeredSound => {
 };
 
 describe('layered recipes', () => {
-  it('are footstep, ui-click, door and magic, each with its ranges written as data', () => {
-    expect(RECIPE_NAMES).toEqual(['footstep', 'ui-click', 'door', 'magic']);
+  it('are footstep, ui-click, door and magic, and the beds wind, rain, fire and crowd, each with its ranges written as data', () => {
+    expect(RECIPE_NAMES).toEqual(['footstep', 'ui-click', 'door', 'magic', 'wind', 'rain', 'fire', 'crowd']);
     for (const n of RECIPE_NAMES) expect(RECIPES[n].help.length).toBeGreaterThan(5);
     const t = recipesTable();
     for (const n of RECIPE_NAMES) expect(t).toContain(`\`${n}\``);
@@ -51,12 +51,12 @@ describe('layered recipes', () => {
 
   it('render finite samples, in a sensible length, with the checks running', () => {
     for (const n of RECIPE_NAMES) {
-      for (const seed of [1, 2, 3]) {
+      for (const seed of make(n, 1).loop ? [1] : [1, 2, 3]) { // (a bed is seconds long and its analysis takes a while)
         const ch = renderChannels(make(n, seed));
         for (const c of ch) expect(c.every((v) => Number.isFinite(v))).toBe(true);
         const secs = ch[0]!.length / 44100;
         expect(secs, `${n} ${seed}`).toBeGreaterThan(0.05);
-        expect(secs).toBeLessThan(3.5);
+        expect(secs).toBeLessThan(make(n, seed).loop ? 8.5 : 3.5);
         expect(runChecks(ch, analyze(ch))).toHaveLength(6);
       }
     }

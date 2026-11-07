@@ -1,0 +1,28 @@
+# Sets, families and a bed, in one script:  soundclaw run <project> docs/examples/sets-demo.txt
+# (a footstep set of six, an impact heard near, far and through a wall, and a rain bed)
+
+# --- a footstep set: one source, six seeded variants matched to -20 LUFS --------------------------------
+# The recipe makes a thud and a scuff; shorten the layers' sources to the sound, so no silence trails it.
+sound new step voice=layered preset=footstep seed=11
+layer set step 1 dur=0.14
+layer set step 2 dur=0.12
+set new footsteps from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%" seed=2
+
+# --- an impact in three distances: the variants are held to -16 plus -9 (far) and -6 (muffled) LUFS ----
+sound new impact voice=layered seed=4
+layer add impact osc wave=sine freq=140 dur=0.5 gain=0.9
+env impact 1.freq "0:140 0.25:42@exp"
+env impact 1.amp adsr(0.002,0.28,0,0)
+layer add impact osc wave=brown dur=0.2 filter=lp cutoff=2500 gain=0.8
+env impact 2.cutoff "0:5000 0.15:300@exp"
+env impact 2.amp "0:0 0.002:1 0.18:0@exp"
+layer add impact osc wave=square freq=3200 dur=0.012 gain=0.3
+env impact 3.amp "0:0 0.001:1 0.01:0@exp"
+fx add impact distort shape=soft drive=5 mix=0.7
+fx add impact reverb size=0.25 mix=0.12
+sound set impact gain=1.4
+family impact far
+family impact muffled as=impact_muffled
+
+# --- a bed: rain, a seamless loop of about five seconds ------------------------------------------------
+sound new rain voice=layered preset=rain seed=4

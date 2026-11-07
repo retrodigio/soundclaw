@@ -3,8 +3,8 @@
 // The sounds are the tape replayed. Undo and redo are commands on the tape too, so nothing is ever
 // deleted: an undone group is simply no longer in effect.
 
-import { AUTHOR_RE, GROUP_RE, applyCommand, parse, type Command, type Library } from './commands.ts';
-import { cloneSound } from './sound.ts';
+import { AUTHOR_RE, GROUP_RE, applyCommand, parse, type Command } from './commands.ts';
+import { Library } from './sets.ts';
 
 export interface TapeEntry {
   seq: number;
@@ -95,7 +95,7 @@ export interface ReplayResult {
 
 /** Replay the tape: the effective content commands, applied in order. */
 export function replay(entries: readonly TapeEntry[]): ReplayResult {
-  const library: Library = new Map();
+  const library = new Library();
   const problems: ReplayResult['problems'] = [];
   for (const e of effectiveEntries(entries)) {
     const p = parse(e.cmd);
@@ -110,10 +110,6 @@ export function replay(entries: readonly TapeEntry[]): ReplayResult {
     }
   }
   return { library, problems };
-}
-
-export function cloneLibrary(lib: Library): Library {
-  return new Map([...lib].map(([k, v]) => [k, cloneSound(v)]));
 }
 
 /** The group an `undo` or `redo` would act on, or why there is none. */

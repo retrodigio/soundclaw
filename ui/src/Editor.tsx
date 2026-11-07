@@ -13,6 +13,7 @@ import { Spectrogram } from './Spectrogram.tsx';
 import type { Store } from './store.ts';
 import { download } from './download.ts';
 import { LayeredEditor } from './LayeredEditor.tsx';
+import { LoopPanel } from './LoopPanel.tsx';
 import { Waveform } from './Waveform.tsx';
 
 const sched: Scheduler = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
@@ -249,6 +250,8 @@ function ClassicEditor({ store, id }: { store: Store; id: string }) {
           </section>
 
           <AB store={store} sound={sound} />
+
+          <LoopPanel store={store} sound={sound} />
 
           <section className="panel" data-testid="export" aria-label="Export">
             <h3>Export</h3>

@@ -559,7 +559,30 @@ function place(b: Built, n: number, stereo: boolean): Float64Array[] {
 }
 
 /** The sound's channels: one when no layer is panned, else two (left, right). Float32. */
+/**
+ * A looping sound is rendered `fade` seconds past its length and folded: the part past the end is
+ * crossfaded (equal power, so uncorrelated noise keeps its level) over the first `fade` seconds. The
+ * last sample then runs straight into the first (sample L of the long render is the natural next
+ * sample after L-1), with no click and no dip in level. The fold uses the render's own continuation
+ * and not a copy of the start, so reverb and delay tails wrap around too.
+ */
+function renderLoop(s: LayeredSound, bank: SampleBank | undefined): Float32Array[] {
+  const L = Math.round(s.loop!.length * SR);
+  const T = Math.min(L, Math.round(s.loop!.fade * SR));
+  const raw = renderLayered({ ...s, loop: undefined, duration: (L + T) / SR }, bank);
+  return raw.map((ch) => {
+    const out = new Float32Array(L);
+    for (let i = 0; i < L; i++) {
+      if (i >= T) { out[i] = ch[i] ?? 0; continue; }
+      const u = i / T;
+      out[i] = (ch[i] ?? 0) * sineCycles(u / 4) + (ch[L + i] ?? 0) * sineCycles(u / 4 + 0.25);
+    }
+    return out;
+  });
+}
+
 export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[] {
+  if (s.loop) return renderLoop(s, bank);
   const built = buildAll(s, bank);
   const stereo = isStereo(s);
   const n = totalLength(s, built);

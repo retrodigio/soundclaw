@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { DEFAULT_STYLE, HUMAN_RE, activeGroups, analyze, cloneSound, joinChannels, measureSet, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot } from '@soundclaw/server/protocol';
 
 export interface Measured {
@@ -21,6 +21,8 @@ export interface Played {
   id: string;
   /** Which side of an A/B comparison was played (absent: the sound itself). */
   slot?: 'A' | 'B';
+  /** Played as a loop (repeating until stopped). */
+  loop?: boolean;
   /** Hash of the samples played; the CLI and MCP print its first 12 digits. */
   hash: string;
   samples: number;
@@ -33,6 +35,19 @@ export type Pin = { kind: 'snapshot'; sound: Sound; label: string } | { kind: 's
 /** The sound the page's route names (#/sound/<id>), or null for the list of cards. */
 export function routeSound(hash: string): string | null {
   return /^#\/sound\/([a-z][a-z0-9_-]*)$/.exec(hash)?.[1] ?? null;
+}
+
+/** Where the address points: the cards, a sound's editor, a set's page, or the audition page (all sounds, or one set's). */
+export type Route = { kind: 'cards' } | { kind: 'sound'; id: string } | { kind: 'set'; id: string } | { kind: 'audition'; set: string | null };
+
+export function parseRoute(hash: string): Route {
+  let m = /^#\/sound\/([a-z][a-z0-9_-]*)$/.exec(hash);
+  if (m) return { kind: 'sound', id: m[1]! };
+  m = /^#\/set\/([a-z][a-z0-9_-]*)$/.exec(hash);
+  if (m) return { kind: 'set', id: m[1]! };
+  m = /^#\/audition(?:\/([a-z][a-z0-9_-]*))?$/.exec(hash);
+  if (m) return { kind: 'audition', set: m[1] ?? null };
+  return { kind: 'cards' };
 }
 
 /** The author name this page writes as: ?name=…, else the last one used here, else human:owner. */
@@ -53,6 +68,7 @@ export class Store {
   status: Status = 'connecting';
   project: Snapshot['project'] | null = null;
   sounds: Sound[] = [];
+  sets: SetDoc[] = [];
   style: Style = DEFAULT_STYLE;
   tape: TapeEntry[] = [];
   requests: WorkRequest[] = [];
@@ -63,6 +79,12 @@ export class Store {
   playing: string | null = null;
   /** The sound whose editor is open, from the address (#/sound/<id>). */
   editing: string | null = routeSound(location.hash);
+  /** The page the address names. */
+  route: Route = parseRoute(location.hash);
+  /** A play-through of several sounds (the set page, the audition page): which one is sounding. */
+  sequence: { ids: string[]; index: number } | null = null;
+  private seqToken = 0;
+  private idleWaiters: (() => void)[] = [];
   /** Replay a sound each time it changes in the editor. */
   playOnChange = true;
   /** The A side of each sound's A/B comparison. */
@@ -97,7 +119,7 @@ export class Store {
 
   connect(token: string): void {
     this.token = token;
-    window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.changed(); });
+    window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.route = parseRoute(location.hash); this.changed(); });
     const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     this.ws = ws;
@@ -120,6 +142,7 @@ export class Store {
       case 'hello':
         this.project = m.snapshot.project;
         this.sounds = m.snapshot.sounds;
+        this.sets = m.snapshot.sets ?? [];
         this.samples = m.snapshot.samples ?? [];
         this.loadSamples();
         this.style = m.snapshot.style ?? DEFAULT_STYLE;
@@ -129,6 +152,7 @@ export class Store {
         break;
       case 'batch':
         this.sounds = m.sounds;
+        this.sets = m.sets ?? this.sets;
         this.tape = [...this.tape, ...m.entries];
         break;
       case 'requests':
@@ -316,18 +340,36 @@ export class Store {
 
   /** The sound's numbers, checks and a spectrogram, measured here with core (the same code the CLI uses), kept by the document's content key. */
   measure(s: Sound): Measured {
-    const key = `${this.keyOf(s)}|${JSON.stringify(this.style)}`;
+    // a set's target (or a family's offset) changes what the loudness check is held to, and a loop is checked at its seam
+    const style = soundStyle(s, this.sets, this.style);
+    const loop = s.voice === 'layered' && !!s.loop;
+    const key = `${this.keyOf(s)}|${JSON.stringify(style)}|${loop ? 'loop' : ''}`;
     let m = this.measures.get(key);
     if (!m) {
       const ch = this.channels(s);
       const x = mixdown(ch);
       const analysis = analyze(ch);
       const hop = Math.max(256, Math.ceil(x.length / 240));
-      m = { analysis, checks: runChecks(ch, analysis, this.style), spec: melSpectrogram(x, { bands: 48, hop }) };
+      m = { analysis, checks: runChecks(ch, analysis, style, { loop }), spec: melSpectrogram(x, { bands: 48, hop }) };
       if (this.ready(s)) {
         this.measures.set(key, m);
         if (this.measures.size > 64) this.measures.delete(this.measures.keys().next().value!);
       }
+    }
+    return m;
+  }
+
+  private setMeasures = new Map<string, SetMeasure>();
+
+  /** A set's distance matrix, member loudness and set-spread check, measured here with core (the numbers `check` prints). */
+  measureSet(set: SetDoc): SetMeasure {
+    const members = set.members.map((id) => this.sounds.find((x) => x.id === id)).filter((x): x is Sound => !!x);
+    const key = `${set.target}|${JSON.stringify(this.style)}|${members.map((m) => this.keyOf(m)).join(',')}`;
+    let m = this.setMeasures.get(key);
+    if (!m) {
+      m = measureSet(members.map((x) => ({ id: x.id, channels: this.channels(x), lufs: this.measure(x).analysis.lufs })), set.target, this.style);
+      this.setMeasures.set(key, m);
+      if (this.setMeasures.size > 32) this.setMeasures.delete(this.setMeasures.keys().next().value!);
     }
     return m;
   }
@@ -347,6 +389,47 @@ export class Store {
       this.playing = null;
       this.changed();
     }
+    this.wake();
+  }
+
+  private wake(): void {
+    const w = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const f of w) f();
+  }
+
+  /** Resolves when nothing is playing. */
+  idle(): Promise<void> {
+    return this.playing === null ? Promise.resolve() : new Promise((r) => this.idleWaiters.push(r));
+  }
+
+  /** Play sounds one after the other with a gap between them (ms); stopSequence ends it. */
+  async playSequence(ids: string[], gapMs: number): Promise<void> {
+    const token = ++this.seqToken;
+    this.stop();
+    for (let i = 0; i < ids.length; i++) {
+      if (token !== this.seqToken) return;
+      this.sequence = { ids, index: i };
+      this.changed();
+      await this.play(ids[i]!);
+      await this.idle();
+      if (token !== this.seqToken) return;
+      if (i < ids.length - 1) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    if (token === this.seqToken) { this.sequence = null; this.changed(); }
+  }
+
+  stopSequence(): void {
+    this.seqToken++;
+    this.sequence = null;
+    this.stop();
+    this.changed();
+  }
+
+  /** Play a looping sound repeating (its seam is what you listen for) until stopped. */
+  async playLoop(id: string): Promise<void> {
+    const s = this.sounds.find((x) => x.id === id);
+    if (s) await this.playDoc(`${id}#loop`, s, id, undefined, false, true);
   }
 
   /** Play a sound: rendered here with core, handed to Web Audio at the renderer's own rate. */
@@ -362,12 +445,12 @@ export class Store {
   }
 
   /** Play a sound document under a playing key (a toggle: playing it again stops it). */
-  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false): Promise<void> {
+  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false, loop = false): Promise<void> {
     if (this.playing === key && !restart) { this.stop(); return; }
     this.stop();
     const chans = this.channels(s);
     const samples = chans[0]!;
-    this.played.push({ id, ...(slot ? { slot } : {}), hash: samplesHash(joinChannels(chans)), samples: samples.length, key: this.keyOf(s) });
+    this.played.push({ id, ...(slot ? { slot } : {}), ...(loop ? { loop: true } : {}), hash: samplesHash(joinChannels(chans)), samples: samples.length, key: this.keyOf(s) });
     this.playing = key;
     this.changed();
     try {
@@ -377,12 +460,14 @@ export class Store {
       chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
+      src.loop = loop;
       src.connect(this.ctx.destination);
       src.onended = () => {
         if (this.source === src) {
           this.source = null;
           this.playing = null;
           this.changed();
+          this.wake();
         }
       };
       this.source = src;
@@ -391,6 +476,7 @@ export class Store {
       this.playing = null;
       this.error = `could not play: ${(e as Error).message}`;
       this.changed();
+      this.wake();
     }
   }
 }

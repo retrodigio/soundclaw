@@ -3,12 +3,12 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
-import { AUTHOR_RE, analyze, applyCommand, historyTarget, joinChannels, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSound, soundExport, type Diag, type Library, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, serializeSet, serializeSound, soundExport, soundStyle, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
 import type { Measured } from './ears.ts';
-import { ProjectError, appendTape, readTape, writeSounds, type Project } from './project.ts';
+import { ProjectError, appendTape, readTape, writeSets, writeSounds, type Project } from './project.ts';
 import type { ServerMessage, Snapshot } from './protocol.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
 
@@ -19,7 +19,7 @@ export interface RunRequest {
 }
 
 export type RunOutcome =
-  | { ok: true; group: string | null; added: TapeEntry[]; /** Sounds the batch created or changed (or removed, by an undo). */ touched: string[]; warnings: string[] }
+  | { ok: true; group: string | null; added: TapeEntry[]; /** Sounds the batch created or changed (or removed, by an undo). */ touched: string[]; /** Sets it created or changed. */ touchedSets: string[]; warnings: string[] }
   | { ok: false; errors: Diag[] };
 
 export interface HistoryRequest {
@@ -40,7 +40,7 @@ const utcNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The sound a tape command is about (its first argument), if any. */
 function soundOf(cmd: string): string | null {
-  return /^(?:sound (?:new|set|mark|patch|generate|mutate|layer-up|classic)|layer (?:add|set|remove|move|mute|solo)|fx (?:add|set|remove|move)|env) (\S+)/.exec(cmd)?.[1] ?? null;
+  return /^(?:sound (?:new|set|mark|patch|generate|mutate|layer-up|classic|loop)|layer (?:add|set|remove|move|mute|solo)|fx (?:add|set|remove|move)|env|family) (\S+)/.exec(cmd)?.[1] ?? null;
 }
 
 export class Writer {
@@ -129,6 +129,62 @@ export class Writer {
     return this.library.has(id);
   }
 
+  /** The sets, by name. */
+  sets(): SetDoc[] {
+    return [...this.library.sets.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  set(id: string): SetDoc {
+    const s = this.library.sets.get(id);
+    if (!s) throw new ProjectError(`no set '${id}'${this.library.sets.size ? ` (sets: ${[...this.library.sets.keys()].sort().join(', ')})` : ': make one with `set new <set> from=<sound> count=<n>`'}`);
+    return s;
+  }
+
+  hasSet(id: string): boolean {
+    return this.library.sets.has(id);
+  }
+
+  /** The commands (and notes) that match the loudness of the sounds a set or family command made or changed, by gain. */
+  private matchAfter(lib: Library, c: Command): { commands: string[]; notes: string[] } {
+    const out = { commands: [] as string[], notes: [] as string[] };
+    let target: number | null = null;
+    let ids: string[] = [];
+    if (c.op === 'set-new' || c.op === 'set-retarget' || c.op === 'set-regen' || c.op === 'set-add') {
+      const set = lib.sets.get(c.id)!;
+      target = set.target;
+      ids = c.op === 'set-add' ? c.sounds : c.op === 'set-regen' ? set.generated : set.members;
+    } else if (c.op === 'family') {
+      const lufs = loudnessOf(lib.get(c.id)!, this.samples);
+      // the variant is held to the source's loudness plus the family's offset
+      target = Number.isFinite(lufs) ? lufs + FAMILIES[c.kind].gainDb : null;
+      const as = c.as ?? `${c.id}_${c.kind}`;
+      ids = [as];
+    }
+    if (target === null) return out;
+    for (const id of ids) {
+      const m = matchGain(lib.get(id)!, target, this.samples);
+      if (m.command) out.commands.push(m.command);
+      if (m.note) out.notes.push(m.note);
+    }
+    return out;
+  }
+
+  private readonly setMeasures = new Map<string, SetMeasure>();
+
+  /** A set's distance matrix, loudness of its members and set-spread check, measured once for each distinct set of renders. */
+  measureSetDoc(id: string): SetMeasure {
+    const set = this.set(id);
+    const members = set.members.map((m) => ({ id: m, r: this.render(m), lufs: this.measure(m).analysis.lufs }));
+    const key = `${set.target}|${JSON.stringify(this.style)}|${members.map((m) => m.r.key).join(',')}`;
+    let m = this.setMeasures.get(key);
+    if (!m) {
+      m = measureSet(members.map((x) => ({ id: x.id, channels: x.r.channels, lufs: x.lufs })), set.target, this.style);
+      this.setMeasures.set(key, m);
+      if (this.setMeasures.size > 32) this.setMeasures.delete(this.setMeasures.keys().next().value!);
+    }
+    return m;
+  }
+
   /** The tape as it stands (undone groups included). */
   tape(): readonly TapeEntry[] {
     return this.entries;
@@ -146,11 +202,14 @@ export class Writer {
 
   /** The numbers and checks of any sound document (a past state, say), kept by the render's key. */
   measureSound(s: Sound, r: Rendered = this.cache.render(s, this.samples)): Measured {
-    let m = this.measured.get(r.key);
+    const style = soundStyle(s, this.library.sets.values(), this.style);
+    const loop = s.voice === 'layered' && !!s.loop;
+    const key = `${r.key}|${style.loudnessTarget}|${loop ? 'loop' : ''}`;
+    let m = this.measured.get(key);
     if (!m) {
       const analysis = analyze(r.channels);
-      m = { analysis, checks: runChecks(r.channels, analysis, this.style) };
-      this.measured.set(r.key, m);
+      m = { analysis, checks: runChecks(r.channels, analysis, style, { loop }) };
+      this.measured.set(key, m);
       if (this.measured.size > 128) this.measured.delete(this.measured.keys().next().value!);
     }
     return m;
@@ -187,6 +246,7 @@ export class Writer {
     return {
       project: { name: this.project.json.name, dir: this.project.dir },
       sounds: this.sounds(),
+      sets: this.sets(),
       samples: this.samples.list(),
       style: this.style,
       tape: [...this.entries],
@@ -203,7 +263,7 @@ export class Writer {
     if (typeof req.by !== 'string' || !AUTHOR_RE.test(req.by)) throw new ProjectError(`the author is agent:<name> or human:<name> (letters, digits, . _ -), not '${req.by}'`);
     const parsed = parse(req.commands);
     if (parsed.errors.length) return { ok: false, errors: parsed.errors };
-    if (!parsed.commands.length) return { ok: true, group: null, added: [], touched: [], warnings: ['no commands'] };
+    if (!parsed.commands.length) return { ok: true, group: null, added: [], touched: [], touchedSets: [], warnings: ['no commands'] };
     const group = nextGroup(this.entries);
     let seq = this.entries.reduce((n, e) => Math.max(n, e.seq), 0);
     const at = this.stamp();
@@ -226,13 +286,20 @@ export class Writer {
       }
       next = trial.library;
     } else {
-      next = new Map(this.library);
+      next = copyLibrary(this.library);
       for (const c of parsed.commands) {
         try {
           const before = c.op === 'set' ? next.get(c.id) : undefined;
           const normal = applyCommand(next, c);
           if (c.op === 'set' && before && serializeSound(before) === serializeSound(next.get(c.id)!)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
           added.push({ seq: ++seq, by: req.by, at, group, cmd: normal ?? c.text });
+          // Loudness matching measures a render; the result goes on the tape as plain `sound set … gain=` commands, so a replay never measures.
+          const match = this.matchAfter(next, c);
+          for (const text of match.commands) {
+            applyCommand(next, parse(text).commands[0]!);
+            added.push({ seq: ++seq, by: req.by, at, group, cmd: text });
+          }
+          warnings.push(...match.notes);
         } catch (e) {
           errors.push({ line: c.line, col: 1, message: (e as Error).message });
         }
@@ -258,10 +325,13 @@ export class Writer {
     this.entries = [...this.entries, ...added];
     this.library = next;
     writeSounds(this.project, next, before);
+    writeSets(this.project, next, before);
     const text = (lib: Library, id: string) => (lib.has(id) ? serializeSound(lib.get(id)!) : null);
     const touched = [...new Set([...before.keys(), ...next.keys()])].filter((id) => text(before, id) !== text(next, id)).sort();
-    this.emit({ type: 'batch', by: req.by, group, entries: added, sounds: this.sounds() });
+    const setText = (lib: Library, id: string) => (lib.sets.has(id) ? serializeSet(lib.sets.get(id)!) : null);
+    const touchedSets = [...new Set([...before.sets.keys(), ...next.sets.keys()])].filter((id) => setText(before, id) !== setText(next, id)).sort();
+    this.emit({ type: 'batch', by: req.by, group, entries: added, sounds: this.sounds(), sets: this.sets() });
     this.hub.marks(req.by, added, at);
-    return { ok: true, group, added, touched, warnings };
+    return { ok: true, group, added, touched, touchedSets, warnings };
   }
 }

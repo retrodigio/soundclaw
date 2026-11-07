@@ -31,6 +31,10 @@ importers:
         version: 4.1.12(@types/node@22.20.5)(vite@7.3.7(@types/node@22.20.5))
 
   cli:
+    dependencies:
+      libvorbis.js:
+        specifier: ^1.1.2
+        version: 1.1.2
     devDependencies:
       '@soundclaw/core':
         specifier: workspace:*
@@ -49,6 +53,9 @@ importers:
       '@soundclaw/core':
         specifier: workspace:*
         version: link:../core
+      libvorbis.js:
+        specifier: ^1.1.2
+        version: 1.1.2
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -621,6 +628,9 @@ packages:
 
   jose@6.2.15:
     resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
+
+  libvorbis.js@1.1.2:
+    resolution: {integrity: sha512-WgfDHXx0NvfFeX3We0lzs37L+Ittr5wzAJgV/xKiCZZi20cBzefzLJjtemcoPxBNhMGqvlKYLfc7cQo/EFimgg==}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -1195,6 +1205,8 @@ snapshots:
   isexe@2.0.0: {}
 
   jose@6.2.15: {}
+
+  libvorbis.js@1.1.2: {}
 
   magic-string@0.30.21:
     dependencies:

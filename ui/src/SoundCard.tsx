@@ -12,7 +12,7 @@ import { Waveform } from './Waveform.tsx';
 
 const fmt = (n: number) => String(n);
 
-function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
+export function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
   const [text, setText] = useState('');
   const now = useNow();
   const seen = q.seen ?? [];
@@ -45,7 +45,7 @@ function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
 const slug = (t: string): string => t.replace(/[^a-z]+/g, '-');
 
 /** Listening feedback: click quick tags, add a few words, send. It reaches the agent as a request with the tags. */
-function Feedback({ store, sound }: { store: Store; sound: Sound }) {
+export function Feedback({ store, sound }: { store: Store; sound: Sound }) {
   const [tags, setTags] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [other, setOther] = useState('');

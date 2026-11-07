@@ -26,6 +26,8 @@ const result = await build({
   legalComments: 'none',
   minify: true,
   logLevel: 'warning',
+  // libvorbis.js is a sloppy-mode script that cannot live inside an ES module: the package depends on it instead.
+  external: ['libvorbis.js'],
   // `soundclaw --version`.
   define: { __SOUNDCLAW_VERSION__: JSON.stringify((JSON.parse(readFileSync(join(REPO, 'cli', 'package.json'), 'utf8')) as { version: string }).version) },
   // CommonJS dependencies inside an ES module bundle need a require.

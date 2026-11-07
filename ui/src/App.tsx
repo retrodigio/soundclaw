@@ -1,7 +1,9 @@
 import { useState, useSyncExternalStore } from 'react';
 import { activeGroups, type TapeEntry } from '@soundclaw/core';
+import { AuditionPage } from './AuditionPage.tsx';
 import { Editor } from './Editor.tsx';
 import { ListenerChip } from './Listening.tsx';
+import { SetPage } from './SetPage.tsx';
 import { SoundCard } from './SoundCard.tsx';
 import type { Store } from './store.ts';
 
@@ -34,6 +36,10 @@ export function App({ store }: { store: Store }) {
     <div className="app">
       <header className="top">
         <h1>SoundClaw <span className="dim" data-testid="project-name">{store.project?.name ?? ''}</span></h1>
+        <nav className="nav">
+          <a href="#/" data-testid="nav-sounds" aria-current={store.route.kind === 'cards'}>Sounds</a>
+          <a href="#/audition" data-testid="nav-audition" aria-current={store.route.kind === 'audition'}>Audition</a>
+        </nav>
         <ListenerChip store={store} />
         <span className="dim" data-testid="requests-count">{open.length} request{open.length === 1 ? '' : 's'} for the agent</span>
         <span className="spacer" />
@@ -46,14 +52,35 @@ export function App({ store }: { store: Store }) {
       </header>
       {store.error && <div className="error banner" data-testid="error" role="alert">{store.error} <button className="link" onClick={() => { store.error = null; store.changed(); }}>dismiss</button></div>}
       <main>
-        {store.editing ? <Editor key={store.editing} store={store} id={store.editing} /> : (
-          <section className="sounds" data-testid="sounds" aria-label="Sounds">
-            {store.sounds.length === 0 && store.status === 'open' && (
-              <p className="empty" data-testid="empty">No sounds yet. Ask the agent to make one, or run <code>soundclaw run &lt;project&gt; -e "sound new beep"</code>.</p>
-            )}
-            {store.sounds.map((s) => <SoundCard key={s.id} store={store} sound={s} />)}
-          </section>
-        )}
+        {store.route.kind === 'sound' ? <Editor key={store.route.id} store={store} id={store.route.id} />
+          : store.route.kind === 'audition' ? <AuditionPage key={store.route.set ?? 'all'} store={store} setId={store.route.set} />
+          : store.route.kind === 'set' ? (() => {
+            const set = store.sets.find((x) => x.id === (store.route as { id: string }).id);
+            return set ? <SetPage key={set.id} store={store} set={set} /> : <p className="dim" data-testid="no-set">{store.status === 'open' ? 'No such set.' : 'Connecting…'} <a href="#/">← all sounds</a></p>;
+          })() : (
+            <div className="home">
+              {store.sets.length > 0 && (
+                <section className="sets" data-testid="sets" aria-label="Sets">
+                  <h2>Sets</h2>
+                  <div className="set-tiles">
+                    {store.sets.map((x) => (
+                      <article key={x.id} className="card set-tile" data-testid={`set-tile-${x.id}`}>
+                        <h3><a href={`#/set/${x.id}`} data-testid={`set-open-${x.id}`}>{x.id}</a></h3>
+                        <div className="dim">{x.members.length} members{x.target !== null ? ` · ${x.target} LUFS` : ''}</div>
+                        <div className="card-actions"><a className="button" href={`#/set/${x.id}`}>Open</a><a className="button" href={`#/audition/${x.id}`} data-testid={`set-audition-${x.id}`}>Audition</a></div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
+              <section className="sounds" data-testid="sounds" aria-label="Sounds">
+                {store.sounds.length === 0 && store.status === 'open' && (
+                  <p className="empty" data-testid="empty">No sounds yet. Ask the agent to make one, or run <code>soundclaw run &lt;project&gt; -e "sound new beep"</code>.</p>
+                )}
+                {store.sounds.map((s) => <SoundCard key={s.id} store={store} sound={s} />)}
+              </section>
+            </div>
+          )}
         <History tape={store.tape} />
       </main>
     </div>

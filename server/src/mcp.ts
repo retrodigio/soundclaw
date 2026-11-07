@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { openRequests } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
-import { checkText, describeText, exportFormat, formatExportFiles, importCommands, renderText, viewSound } from './ears.ts';
+import { checkText, describeText, exportFormat, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { ProjectError } from './project.ts';
 import { formatErrors, plural } from './report.ts';
 import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
@@ -38,6 +38,12 @@ Layered sounds (several voices summed; use them when one sfxr voice is not enoug
   env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | clear   an envelope replaces a fixed value; targets 1.freq 1.amp 1.cutoff 2.pan 1.fx1.mix master.fx1.mix
   fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb [<param>=<value> ...] [at=<k>]  |  fx set|remove|move <id> [layer=<n>] <k> ...   (no layer= : the master chain)
   sound layer-up <id>   a classic sound becomes layered, same samples   |   sound classic <id> on|off   keep it one classic voice (exports as a synth.csv row)
+Sets, families and loops (game sounds that repeat, or come in several distances, or run for ever):
+  set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="1.freq±10% 2.cutoff±15% gain±10%"] [seed=<n>]   count seeded variants (<set>_1 ...) of a classic or layered sound, each a real sound; spread: classic parameter ±amount, or for a layered sound N.<param>, *.<param>, N.amp, N.fxK.<param>, master.fxK.<param>, gain; % is relative. Members are matched to the target LUFS by gain (a classic member's gain is its volume, at most 1: the note says when it falls short). \`view\` set and \`check\` the set (set-spread: not too alike, not too different, loudness within ±1 LU)
+  set add|remove <set> <sound>...   |   set retarget <set> <LUFS>|none   |   set regen <set> [seed=<n>] [spread="..."]   (regen makes the generated members again from the source's current state)
+  family <sound> near|far|muffled [as=<id>]   a copy as heard near (drier), far away (quieter, darker, more reverb) or behind a wall (low-passed); its loudness is held to the source's plus the rule's offset
+  sound loop <id> <seconds>|off [fade=<s>]   a bed: the sound is that long and its end runs into its start without a seam (the render goes fade seconds past the end and crossfades it over the start); \`view\` loop shows the seam; the click check looks at it. Beds come as recipes: sound new <id> voice=layered preset=wind|rain|fire|crowd
+  Export: wav, ogg (Vorbis) with a manifest.json; pack layout for the engine's synth.csv. Import: sfxr, jsfxr and bfxr strings, each row reported as exact or approximated.
   Order: source -> filter -> amp envelope -> effects -> gain -> pan, then the sum -> master gain -> master effects; export adds a limiter. Layered sounds export as WAV only. A layer with pan off centre makes the sound stereo. The \`layers\` view shows each layer; the \`harsh\` check flags sustained 2-5 kHz energy. \`sample\` imports a WAV for sample layers.
   undo [group=<g>] [by=<author>]   |   redo [group=<undo group>] [by=<author>]      run alone, as the only command of the batch
 \`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers, description and checks; \`export\` writes wav (16-bit, 44,100 Hz, mono), patch (sfxr text) or csv (synth.csv) files; \`import\` makes classic sounds from an sfxr csv or patch.
@@ -60,6 +66,8 @@ export function projectSummary(w: Writer, url: string): string {
   const sounds = w.sounds();
   lines.push('', sounds.length ? `sounds (${sounds.length}):` : 'sounds: none yet. Make one with run: "sound new zap voice=classic preset=laser seed=1".');
   for (const s of sounds) lines.push(`  ${soundSummary(w, s.id)}`);
+  const sets = w.sets();
+  if (sets.length) lines.push('', `sets (${sets.length}):`, ...sets.map((x) => `  ${setSummary(w, x.id)}`));
   const open = openRequests(readRequests(p));
   if (open.length) lines.push('', `requests from people (${open.length}):`, ...open.map((q) => `  ${requestLine(q)}`));
   const note = listenerNote(w);
@@ -103,6 +111,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       if (!r.added.length) return { content: [text('no commands')] };
       const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group}`, ...r.added.map((e) => `  #${e.seq} ${e.cmd}`)];
       for (const id of r.touched) lines.push(soundSummary(w, id));
+      for (const id of r.touchedSets) lines.push(setSummary(w, id));
       lines.push(r.warnings.length ? `warnings: ${r.warnings.join('; ')}` : 'warnings: none');
       return { content: [text(lines.join('\n'))] };
     } catch (e) {
@@ -163,11 +172,11 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('view', {
     title: 'View a sound',
-    description: 'Your ears as a picture (PNG) with the numbers: wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers), pitch (YIN track over a note grid), layers (the layers of a layered sound stacked: waveform and spectrogram of each, with offsets), compare (this sound and `other` stacked with a difference spectrogram, and distance numbers). The image is also saved under <project>/.cache/views.',
+    description: 'Your ears as a picture (PNG) with the numbers: wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers), pitch (YIN track over a note grid), layers (the layers of a layered sound stacked: waveform and spectrogram of each, with offsets), loop (a looping sound: its end joined to its start, overlapped, the joined spectrogram and the level across four repeats), set (`sound` names a set: members side by side with loudness bars and the pairwise distance matrix), compare (this sound and `other` stacked with a difference spectrogram, and distance numbers). The image is also saved under <project>/.cache/views.',
     annotations: { readOnlyHint: true },
     inputSchema: z.object({
       sound: z.string(),
-      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'compare']).optional().describe('Default spec'),
+      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare']).optional().describe('Default spec'),
       other: z.string().optional().describe('compare: the second sound'),
     }),
   }, (a) => w.enqueue((): CallToolResult => {
@@ -194,9 +203,9 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('check', {
     title: 'Check sounds',
-    description: 'Run the checks (clip, loudness, dc, click, tail) on sounds (all when none are named): pass or fail with a score, the threshold from the project style, and the exact time ranges flagged. `work` done is refused while a sound fails.',
+    description: 'Run the checks (clip, loudness, dc, click, tail, harsh) on sounds, and set-spread on sets (members not too alike, not too different, loudness within ±1 LU); all sounds and sets when none are named: pass or fail with a score, the threshold from the project style, and the exact time ranges flagged. A looping sound\'s click check looks at its seam. `work` done is refused while a sound fails.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sounds: z.array(z.string()).optional() }),
+    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names') }),
   }, (a) => w.enqueue(() => {
     try {
       return { content: [text(checkText(w, a.sounds ?? []).text)] };
@@ -206,18 +215,19 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
   }));
 
   server.registerTool('import', {
-    title: 'Import sfxr patches',
-    description: 'Make classic sounds from an sfxr synth.csv (one sound per row, the key column is the id), a single-patch text, or a path to either. NA and missing cells take the defaults. One undo group; any error applies nothing.',
+    title: 'Import sfxr, jsfxr and bfxr patches',
+    description: 'Make classic sounds from patches. kind sfxr (default): the engine\'s synth.csv (one sound per row, the key column is the id) or a single-patch text, or a path to either; kind jsfxr: jsfxr\'s base58 / sfxr.me URL-hash form or its JSON form; kind bfxr: Bfxr\'s comma-separated settings string. Several strings: one per line, "<id> <string>". NA and missing cells take the defaults. Each row is reported as exact or approximated, with what the classic voice could not keep. One undo group; any error applies nothing.',
     inputSchema: z.object({
-      source: z.string().describe('The csv or patch text, or a path to a file holding it'),
+      source: z.string().describe('The csv, patch or string(s), or a path to a file holding them'),
+      kind: z.enum(['sfxr', 'jsfxr', 'bfxr']).optional().describe('Default sfxr (which also recognises a jsfxr string)'),
       id: z.string().optional().describe('The sound id for a single patch'),
     }),
   }, (a) => w.enqueue(() => {
     try {
-      const { commands, ids, warnings } = importCommands(a.source, a.id ?? null);
+      const { commands, ids, warnings, report } = importCommands(a.source, a.id ?? null, a.kind ?? 'sfxr');
       const r = w.run({ commands, by: AGENT });
       if (!r.ok) return fail(formatErrors('import', r.errors));
-      return { content: [text([`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}`, ...warnings.map((x) => `warning: ${x}`), ...r.touched.map((id) => soundSummary(w, id))].join('\n'))] };
+      return { content: [text([`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}`, formatImportReport(report), ...warnings.map((x) => `warning: ${x}`), ...r.touched.map((id) => soundSummary(w, id))].join('\n'))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -248,15 +258,19 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('export', {
     title: 'Export sounds',
-    description: 'Write sounds to a folder (default <project>/exports, which git ignores). format wav (default): 16-bit PCM, 44,100 Hz; classic sounds as the engine\'s pre-rendered WAVs (trunc(s x 32000), mono); layered sounds through a limiter at the style\'s true-peak ceiling (mono, or stereo when a layer is panned), as WAV only. patch: a single-patch text per classic sound. csv: one synth.csv for the classic sounds. Without sounds, all of them.',
+    description: 'Write sounds to a folder (default <project>/exports, which git ignores). format wav (default): 16-bit PCM, 44,100 Hz; classic sounds as the engine\'s pre-rendered WAVs (trunc(s x 32000), mono); layered sounds through a limiter at the style\'s true-peak ceiling (mono, or stereo when a layer is panned). ogg: Vorbis, variable bitrate (quality -0.1 to 1, default 0.4). With all, a set, pack or ogg, manifest.json is written beside the files (id, file, duration, loudness, channels, loop points, set). patch: a single-patch text per classic sound. csv: one synth.csv for the classic sounds. Without sounds, all of them; `set` exports a set\'s members; `pack` makes a flat folder where sounds marked classic become rows of synth.csv.',
     inputSchema: z.object({
       sounds: z.array(z.string()).optional().describe('The sounds to export (default all)'),
-      format: z.enum(['wav', 'patch', 'csv']).optional().describe('Default wav'),
+      set: z.string().optional().describe('Export the members of this set'),
+      all: z.boolean().optional().describe('Every sound, with a manifest'),
+      format: z.enum(['wav', 'ogg', 'patch', 'csv']).optional().describe('Default wav'),
       out: z.string().optional().describe('The folder to write into'),
+      pack: z.boolean().optional().describe('Pack layout: classic-marked sounds as synth.csv rows, the rest as audio, in one flat folder'),
+      quality: z.number().min(-0.1).max(1).optional().describe('OGG quality'),
     }),
   }, (a) => w.enqueue(() => {
     try {
-      return { content: [text(formatExportFiles(exportFormat(w, a.sounds ?? [], a.format ?? 'wav', a.out)))] };
+      return { content: [text(formatExportFiles(exportFormat(w, a.sounds ?? [], a.format ?? 'wav', { out: a.out, set: a.set, all: a.all, pack: a.pack, quality: a.quality })))] };
     } catch (e) {
       return errorResult(e);
     }

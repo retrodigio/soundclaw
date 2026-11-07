@@ -311,6 +311,18 @@
   "hash": "fc788c3e22c2d2c0575dd7b2fe82db0bdce1d16dd1b3a45cc95475489d63cd5d",
   "renderVersion": 1
  },
+ "loop-white-fold": {
+  "channels": 1,
+  "samples": 22050,
+  "hash": "a3fb35af0a2497e279281285466c94d62bf3651771d28734485ba02c37f0f81b",
+  "renderVersion": 1
+ },
+ "loop-sine-fold-stereo": {
+  "channels": 2,
+  "samples": 22050,
+  "hash": "496e16c1ccc05e0b77a304e8c2ab3383035cc401d5efeb018c8b9e7dd353d63b",
+  "renderVersion": 1
+ },
  "recipe-footstep-1": {
   "channels": 1,
   "samples": 7850,
@@ -381,6 +393,78 @@
   "channels": 2,
   "samples": 76178,
   "hash": "af8d4fc5f9b4ba5fb05b2bacdc1918cb03a01f1440698164c95ad0851c589349",
+  "renderVersion": 1
+ },
+ "recipe-wind-1": {
+  "channels": 1,
+  "samples": 275801,
+  "hash": "8547dbacfde9cd5c35ff7b23b651e9e18784e7a819b40e2c95efcf4049562de7",
+  "renderVersion": 1
+ },
+ "recipe-wind-2": {
+  "channels": 1,
+  "samples": 285283,
+  "hash": "ea639219d47b30263df01586464fa1331ccc442e634cfb33b2ca250a18ef8972",
+  "renderVersion": 1
+ },
+ "recipe-wind-3": {
+  "channels": 1,
+  "samples": 284004,
+  "hash": "28c762c9e3a9156358c26510a48b70f1980fc4787960184af07c59d6f9b0b88b",
+  "renderVersion": 1
+ },
+ "recipe-rain-1": {
+  "channels": 1,
+  "samples": 231701,
+  "hash": "43da267fb258bdb322aeda3994b2c2ab8ebdb48d39286901ee809182fb3e6d7d",
+  "renderVersion": 1
+ },
+ "recipe-rain-2": {
+  "channels": 1,
+  "samples": 241183,
+  "hash": "d730ca256d860f1c9f85652f53ed716064e4422fcd7d5ade0470ba28520b0613",
+  "renderVersion": 1
+ },
+ "recipe-rain-3": {
+  "channels": 1,
+  "samples": 239904,
+  "hash": "534678d8a3439b8b40e908ee0ebb9eede97f072221f419b8ff17f079881b3c56",
+  "renderVersion": 1
+ },
+ "recipe-fire-1": {
+  "channels": 1,
+  "samples": 231701,
+  "hash": "2d71130ec99b7280a84797889ba3478edf5d9285e5b37d69137475c14faf037a",
+  "renderVersion": 1
+ },
+ "recipe-fire-2": {
+  "channels": 1,
+  "samples": 241183,
+  "hash": "d83ca47776ef34f66b0c53927c09357c69f26345ce5ec969627b3411318aba87",
+  "renderVersion": 1
+ },
+ "recipe-fire-3": {
+  "channels": 1,
+  "samples": 239904,
+  "hash": "9e3ba51b4eb77398f20ae310881bfc429243f6d0f02f3e237e62ad6f7aeb88d2",
+  "renderVersion": 1
+ },
+ "recipe-crowd-1": {
+  "channels": 1,
+  "samples": 319901,
+  "hash": "a770ed4311ee71816b0ed02eaf0a4c9bdfc0cdee34c13439b319376021d5edc6",
+  "renderVersion": 1
+ },
+ "recipe-crowd-2": {
+  "channels": 1,
+  "samples": 329383,
+  "hash": "01d25be8077a2fa1ea3c88941afaff39a8c51812fcba2ad4fad3b8d995933daf",
+  "renderVersion": 1
+ },
+ "recipe-crowd-3": {
+  "channels": 1,
+  "samples": 328104,
+  "hash": "b4d0e352ad85ca623be71898dde4152adf0d6393fc74ab7161b8b35cb8019212",
   "renderVersion": 1
  }
 }

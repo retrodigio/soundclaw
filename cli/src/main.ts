@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, openRequests, type ViewKind } from '@soundclaw/core';
 import {
   EXPORT_FORMATS, changesText, ProjectError, Writer, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
-  importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type Project,
+  IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
 
@@ -49,10 +49,16 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change (also: mutate <id> ...)
         sound mark <id> approved|rejected|draft ["note"]
         sound new <id> voice=layered [preset=<recipe>] [seed=<n>]   up to 8 layers (see docs/commands.md); recipes:
-                                                            footstep ui-click door magic (or a classic category)
+                                                            footstep ui-click door magic, beds wind rain fire crowd (or a classic category)
         sound layer-up <id>                                 a classic sound becomes layered (same samples)
         sound classic <id> on|off                           keep a sound one classic voice (exports as a synth.csv row)
         sound set <id> duration=<s|auto> gain=<g> seed=<n>  (layered sounds)
+        sound loop <id> <seconds>|off [fade=<s>]            a looping bed: the seam is made seamless (layered sounds)
+        set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="<param>±<amount> ..."] [seed=<n>]
+                                                            count seeded variants of a sound, each a real sound
+                                                            (<set>_1 ...), matched to the loudness target by gain
+        set add|remove <set> <sound>...   set retarget <set> <LUFS>|none   set regen <set> [seed=<n>] [spread="..."]
+        family <sound> near|far|muffled [as=<id>]           the sound heard near, far away or through a wall
         layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]
         layer set <id> <n> <param>=<value> ...   layer remove|move|mute|solo <id> <n> [to=<m> | on|off]
         env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | clear
@@ -72,31 +78,43 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       summary on the last line.
   soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
   soundclaw view <project> <id> layers [--out <file.png>]
+  soundclaw view <project> <id> loop [--out <file.png>]
+  soundclaw view <project> <set> set [--out <file.png>]
   soundclaw view <project> <id> compare <other> [--out <file.png>]
       The agent's ears as a PNG (saved under <project>/.cache/views, or --out) and the numbers:
       wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers),
       pitch (YIN track over a note grid), layers (a layered sound's layers stacked: waveform and
-      spectrogram of each, with their start offsets), compare (two spectrograms and their difference, with
+      spectrogram of each, with their start offsets), loop (a looping sound's end joined to its start,
+      the two overlapped, the joined spectrogram, and the level across four repeats), set (a set's members side
+      by side with loudness bars, and the pairwise distance matrix), compare (two spectrograms and their difference, with
       distance numbers).
   soundclaw describe <project> <id>
       A plain-words summary built only from the measured numbers, then the numbers.
-  soundclaw check <project> [<id>...]
-      The checks (clip, loudness, dc, click, tail, harsh) with scores, thresholds and the exact time
-      ranges flagged. Exit 1 when any fails. Targets come from project.json "style" (default
+  soundclaw check <project> [<id|set>...]
+      The checks (clip, loudness, dc, click, tail, harsh; for a set, set-spread: members not too alike
+      and not too different, loudness within +-1 LU) with scores, thresholds and the exact time
+      ranges flagged. A looping sound's click check looks at its seam. Exit 1 when any fails. Targets come from project.json "style" (default
       -16 LUFS +-1, true peak at most -0.1 dBTP).
-  soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
-      Make classic sounds from an sfxr synth.csv (one per row; the key column is the id), or from
-      one single-patch text (a file or the text itself; --id names it). One undo group.
+  soundclaw import <project> sfxr|jsfxr|bfxr <file | "patch text"> [--id <id>] [--by <author>]
+      Make classic sounds from patches. sfxr: the engine's synth.csv (one per row; the key column is
+      the id) or one single-patch text (a file or the text itself; --id names it); a jsfxr string is
+      recognised here too. jsfxr: its base58 / sfxr.me URL-hash form or its JSON form. bfxr: Bfxr's
+      comma-separated settings string. Several strings in one file: one per line, "<id> <string>".
+      Each row is reported: exact, or approximated with what the classic voice could not keep
+      (Bfxr's compression, harmonics, bit crush, its extra waves). One undo group.
   soundclaw sample import <project> <file.wav> [as=<name>]
   soundclaw sample list <project>
       Copy a WAV (PCM 8/16/24/32-bit or float, any rate, mixed down to mono, at most 60 s) into
       <project>/samples/ so a sample layer can name it (layer add <id> sample sample=<name>).
       The name defaults to the file's name. A name that exists with other content is refused.
-  soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
+  soundclaw export <project> [<id>...] [--all | --set <set>] [--format wav|ogg|patch|csv] [--to <dir>] [--pack] [--quality <q>]
       Default wav: 16-bit PCM, 44,100 Hz (classic sounds as pre-rendered WAVs, trunc(s*32000), mono;
-      layered sounds through a limiter at the style's true-peak ceiling, mono or stereo, WAV only).
-      patch: <id>.sfxr single-patch text; csv: one synth.csv. Without ids, all sounds. Default
-      folder: <project>/exports/.
+      layered sounds through a limiter at the style's true-peak ceiling, mono or stereo). ogg: Vorbis,
+      variable bitrate (--quality -0.1 to 1, default 0.4). With --all, --set, --pack or ogg, manifest.json
+      is written beside the files: id, file, duration, loudness, channels, loop points, set. patch: <id>.sfxr single-patch
+      text; csv: one synth.csv. Without ids (or with --all), every sound; --set exports a set's members.
+      --pack: a flat folder where sounds marked classic become rows of one synth.csv instead of
+      audio files. --to (or --out) names the folder (default <project>/exports/).
   soundclaw changes <project> [--since <command number | time>] [--by human|agent|<author>] [--as <agent>] [--peek]
       What other hands changed since this agent last looked (a cursor kept per agent in the
       project): each history group with the parameters before and after, the numbers before and
@@ -205,7 +223,7 @@ export const one = (p: Parsed, k: string): string | undefined => p.flags.get(k)?
 /** The options of the commands that write (valued, bare): the CLI uses them to send a command to a running server. */
 export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
-  export: [['out', 'format'], []],
+  export: [['out', 'to', 'format', 'set', 'quality'], ['all', 'pack']],
   import: [['id', 'by'], []],
   sample: [['as', 'by'], []],
   request: [['note', 'by', 'tag', 'like'], []],
@@ -275,7 +293,7 @@ function cmdRun(io: Io, p: Parsed): number {
     io.err(formatErrors(source, r.errors) + '\n');
     return 1;
   }
-  io.out(formatRun(r, (id) => soundSummary(w, id)) + '\n');
+  io.out(formatRun(r, (id) => soundSummary(w, id), (id) => setSummary(w, id)) + '\n');
   return 0;
 }
 
@@ -284,7 +302,8 @@ function cmdList(io: Io, p: Parsed): number {
   if (!dir || extra.length) throw new UsageError('list: give a project folder');
   const w = wr(io, dir);
   const sounds = w.sounds();
-  io.out(sounds.length ? `${plural(sounds.length, 'sound')}:\n${sounds.map((s) => `  ${soundSummary(w, s.id)}\n`).join('')}` : 'no sounds yet\n');
+  const sets = w.sets();
+  io.out((sounds.length ? `${plural(sounds.length, 'sound')}:\n${sounds.map((s) => `  ${soundSummary(w, s.id)}\n`).join('')}` : 'no sounds yet\n') + (sets.length ? `${plural(sets.length, 'set')}:\n${sets.map((x) => `  ${setSummary(w, x.id)}\n`).join('')}` : ''));
   return 0;
 }
 
@@ -312,9 +331,9 @@ function cmdRender(io: Io, p: Parsed): number {
 function cmdView(io: Io, p: Parsed): number {
   const [dir, id, kind, other, ...extra] = p.pos;
   if (!dir || !id || !kind) throw new UsageError('view: give a project folder, a sound id and wave, spec, pitch or compare <other>');
-  if (!['wave', 'spec', 'pitch', 'layers', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, compare)`);
+  if (!['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, loop, set, compare)`);
   if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound' : `view ${kind}: unexpected '${other}'`);
-  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers', { other, out: one(p, 'out') });
+  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers' | 'loop' | 'set', { other, out: one(p, 'out') });
   io.out(v.text + '\n');
   return 0;
 }
@@ -360,17 +379,17 @@ function cmdCheck(io: Io, p: Parsed): number {
 
 function cmdImport(io: Io, p: Parsed): number {
   const [dir, what, source, ...extra] = p.pos;
-  if (!dir || what !== 'sfxr' || !source) throw new UsageError('import: soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>]');
+  if (!dir || !what || !(IMPORT_KINDS as readonly string[]).includes(what) || !source) throw new UsageError(`import: soundclaw import <project> ${IMPORT_KINDS.join('|')} <file | "patch text"> [--id <id>]`);
   if (extra.length) throw new UsageError(`import: put the patch text in quotes (unexpected '${extra[0]}')`);
   assertNoServer(dir, io);
   const w = wr(io, dir);
-  const { commands, ids, warnings } = importCommands(source, one(p, 'id') ?? null);
+  const { commands, ids, warnings, report } = importCommands(source, one(p, 'id') ?? null, what as ImportKind);
   const r = w.run({ commands, by: author(p, 'agent:claude', (n) => `agent:${n}`) });
   if (!r.ok) {
     io.err(formatErrors('import', r.errors) + '\n');
     return 1;
   }
-  io.out(`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}\n${warnings.map((x) => `warning: ${x}\n`).join('')}${r.touched.map((id) => soundSummary(w, id)).join('\n')}\n`);
+  io.out(`imported ${plural(ids.length, 'sound')} (${ids.join(', ')}) as group ${r.group}\n${formatImportReport(report)}\n${warnings.map((x) => `warning: ${x}\n`).join('')}${r.touched.map((id) => soundSummary(w, id)).join('\n')}\n`);
   return 0;
 }
 
@@ -388,7 +407,12 @@ function cmdExport(io: Io, p: Parsed): number {
   if (!dir) throw new UsageError('export: give a project folder');
   const format = (one(p, 'format') ?? 'wav') as ExportFormat;
   if (!EXPORT_FORMATS.includes(format)) throw new UsageError(`export: --format is ${EXPORT_FORMATS.join(', ')} (not '${format}')`);
-  io.out(formatExportFiles(exportFormat(wr(io, dir), ids, format, one(p, 'out'))) + '\n');
+  const out = one(p, 'to') ?? one(p, 'out');
+  if (one(p, 'to') && one(p, 'out')) throw new UsageError('export: give --to or --out, not both');
+  if (p.flags.has('all') && (ids.length || one(p, 'set'))) throw new UsageError('export: --all is every sound; name sounds or --set, not both');
+  const quality = one(p, 'quality') === undefined ? undefined : Number(one(p, 'quality'));
+  if (quality !== undefined && !(quality >= -0.1 && quality <= 1)) throw new UsageError('export: --quality is a number from -0.1 to 1');
+  io.out(formatExportFiles(exportFormat(wr(io, dir), ids, format, { out, set: one(p, 'set'), all: p.flags.has('all'), pack: p.flags.has('pack'), quality })) + '\n');
   return 0;
 }
 

@@ -31,6 +31,9 @@
     "dist/LICENSE",
     "dist/THIRD_PARTY_LICENSES.txt"
   ],
+  "dependencies": {
+    "libvorbis.js": "^1.1.2"
+  },
   "scripts": {
     "prepack": "node -e \"require('node:fs').accessSync('dist/soundclaw.js')\" || (echo 'run pnpm build at the repo root first' && exit 1)"
   },

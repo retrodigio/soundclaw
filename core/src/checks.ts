@@ -24,6 +24,12 @@ export interface Style {
   harshLimitDb: number;
   /** ...when it lasts at least this long (ms). */
   harshMinMs: number;
+  /** Set-spread: members of a set must be at least this far apart (mean absolute difference of their mel spectrograms, dB)... */
+  setSpreadMin: number;
+  /** ...and at most this far apart. */
+  setSpreadMax: number;
+  /** A loop's seam: the level of the last 50 ms may differ from the first 50 ms by at most this much (dB). */
+  seamStepMaxDb: number;
 }
 
 export const DEFAULT_STYLE: Style = {
@@ -36,6 +42,9 @@ export const DEFAULT_STYLE: Style = {
   tailFloorDb: -60,
   harshLimitDb: -20,
   harshMinMs: 80,
+  setSpreadMin: 1,
+  setSpreadMax: 20,
+  seamStepMaxDb: 3,
 };
 
 /** The style keys and what they mean (for docs and errors). */
@@ -54,7 +63,8 @@ export function resolveStyle(given: unknown): Style {
   return style;
 }
 
-export type CheckName = 'clip' | 'loudness' | 'dc' | 'click' | 'tail' | 'harsh';
+export type CheckName = 'clip' | 'loudness' | 'dc' | 'click' | 'tail' | 'harsh' | 'set-spread';
+/** The checks of one sound (set-spread is the checks of a set of sounds). */
 export const CHECK_NAMES: readonly CheckName[] = ['clip', 'loudness', 'dc', 'click', 'tail', 'harsh'];
 
 export interface CheckRange {
@@ -118,7 +128,38 @@ export function harshBand(x: Samples): { times: Float64Array; db: Float64Array }
   return { times: s.times, db };
 }
 
-export function runChecks(input: Samples | readonly Samples[], a: Analysis, style: Style = DEFAULT_STYLE): CheckResult[] {
+/** What a loop's seam looks like: the jump between the last and the first sample, the local step it is compared with, and the level step over 50 ms. */
+export function seamNumbers(x: Samples): { jump: number; local: number; stepDb: number } {
+  const n = x.length;
+  if (n < 4) return { jump: 0, local: 0, stepDb: 0 };
+  const jump = Math.abs(x[0]! - x[n - 1]!);
+  const w = Math.min(Math.floor(n / 2) - 1, 220);
+  let sq = 0, cnt = 0;
+  for (let i = 0; i < w; i++) {
+    const d1 = x[i + 1]! - x[i]!;
+    const d2 = x[n - 1 - i]! - x[n - 2 - i]!;
+    sq += d1 * d1 + d2 * d2;
+    cnt += 2;
+  }
+  const win = Math.min(Math.floor(n / 2), Math.round(0.05 * SAMPLE_RATE));
+  let a = 0, b = 0;
+  for (let i = 0; i < win; i++) { a += x[i]! * x[i]!; b += x[n - 1 - i]! * x[n - 1 - i]!; }
+  const stepDb = a > 1e-12 && b > 1e-12 ? 10 * Math.log10(a / b) : a > 1e-12 || b > 1e-12 ? 60 : 0;
+  return { jump, local: Math.sqrt(sq / Math.max(1, cnt)), stepDb };
+}
+
+/** A level step in dB for printing: one decimal, never "-0.0". */
+export const fmtStep = (v: number): string => (Number(v.toFixed(1)) + 0).toFixed(1);
+
+/** How much louder than a plain click a seam jump has to be to count: it must exceed this many times the local sample-to-sample step. */
+export const SEAM_STEP_FACTOR = 4;
+
+export interface CheckOptions {
+  /** The sound is a loop: the click check looks at the seam, and the tail check does not ask for a fade-out. */
+  loop?: boolean;
+}
+
+export function runChecks(input: Samples | readonly Samples[], a: Analysis, style: Style = DEFAULT_STYLE, o: CheckOptions = {}): CheckResult[] {
   const chs = Array.isArray(input) ? (input as readonly Samples[]) : [input as Samples];
   let x: Samples = chs[0]!;
   let mix: Samples = chs[0]!;
@@ -176,8 +217,22 @@ export function runChecks(input: Samples | readonly Samples[], a: Analysis, styl
     });
   }
 
-  // click: a jump at the very start or end
-  {
+  // click: a jump at the very start or end (a loop: at the seam, where its end runs into its start)
+  if (o.loop && !a.silent) {
+    const per = chs.map((c) => seamNumbers(c));
+    const worst = per.reduce((m, p) => (p.jump - SEAM_STEP_FACTOR * p.local > m.jump - SEAM_STEP_FACTOR * m.local ? p : m), per[0]!);
+    const step = per.reduce((m, p) => Math.max(m, Math.abs(p.stepDb)), 0);
+    const ranges: CheckRange[] = [];
+    const jumpBad = worst.jump > style.clickMax && worst.jump > SEAM_STEP_FACTOR * worst.local;
+    if (jumpBad) ranges.push({ from: Math.round(Math.max(0, d - 0.001) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `the seam jumps by ${worst.jump.toFixed(3)} (the local step is ${worst.local.toFixed(3)})` });
+    if (step > style.seamStepMaxDb) ranges.push({ from: Math.round(Math.max(0, d - 0.05) * 10000) / 10000, to: Math.round(d * 10000) / 10000, note: `the level steps by ${step.toFixed(1)} dB between the last and the first 50 ms` });
+    out.push({
+      name: 'click', pass: !ranges.length,
+      score: clamp01(1 - Math.max(jumpBad ? Math.min(1, worst.jump / Math.max(1e-9, SEAM_STEP_FACTOR * worst.local)) / 2 : 0, Math.max(0, step - style.seamStepMaxDb) / 12)),
+      value: `loop seam: jump ${worst.jump.toFixed(3)} (local step ${worst.local.toFixed(3)}), level step ${step.toFixed(1)} dB`,
+      threshold: `seam jump at most ${style.clickMax} or ${SEAM_STEP_FACTOR}× the local step; level step at most ${style.seamStepMaxDb} dB`, ranges,
+    });
+  } else {
     const start = x.length ? Math.abs(x[0]!) : 0;
     const end = x.length ? Math.abs(x[x.length - 1]!) : 0;
     // (for two channels x holds the larger of the two at each sample, so these are the larger channel's levels)
@@ -191,8 +246,13 @@ export function runChecks(input: Samples | readonly Samples[], a: Analysis, styl
     });
   }
 
-  // tail: silence padding, and a tail cut before it died away
-  {
+  // tail: silence padding, and a tail cut before it died away (a loop has no tail: it runs on into its start)
+  if (o.loop) {
+    out.push({
+      name: 'tail', pass: !a.silent, score: a.silent ? 0 : 1,
+      value: a.silent ? 'silent' : 'a loop: it runs on into its start', threshold: 'a loop needs no fade-out', ranges: a.silent ? [{ from: 0, to: Math.round(d * 10000) / 10000, note: 'the loop is silent' }] : [],
+    });
+  } else {
     const ranges: CheckRange[] = [];
     let penalty = 0;
     if (!a.silent) {

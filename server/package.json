@@ -10,8 +10,9 @@
     "./protocol": "./src/protocol.ts"
   },
   "dependencies": {
-    "@soundclaw/core": "workspace:*",
     "@modelcontextprotocol/server": "^2.4.0",
+    "@soundclaw/core": "workspace:*",
+    "libvorbis.js": "^1.1.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {

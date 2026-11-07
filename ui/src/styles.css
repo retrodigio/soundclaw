@@ -120,3 +120,30 @@ fieldset.fx { margin-bottom: 6px; }
 .params.layered { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
 .params.layered .dim { opacity: 0.5; }
 .layer-ctls { grid-row: 2; grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 6.5em; gap: 10px; }
+
+/* navigation, sets, the set page, the audition page */
+.nav { display: flex; gap: 10px; }
+.nav a { color: var(--dim); text-decoration: none; padding: 2px 8px; border-radius: 6px; }
+.nav a[aria-current=true] { color: var(--text); background: #2a2d36; }
+.home { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sets h2 { font-size: 15px; margin: 0 0 8px; }
+.set-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.set-tile h3 { margin: 0; font-size: 15px; }
+.set-tile a { color: var(--accent); }
+.setpage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.members { display: flex; flex-wrap: wrap; gap: 10px; }
+.member { flex: 1 1 150px; min-width: 150px; max-width: 230px; }
+.member.current, .aud.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.matrix { border-collapse: collapse; font: 12px ui-monospace, Menlo, monospace; }
+.matrix th { font-weight: 600; color: var(--dim); padding: 2px 8px; text-align: right; }
+.matrix td { padding: 2px 8px; text-align: right; background: #1a2230; }
+.matrix td.diag { background: #23262e; color: var(--dim); }
+.matrix td.bad { color: var(--bad); outline: 1px solid var(--bad); }
+.audition { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.filters label { font-size: 12px; color: var(--dim); display: flex; gap: 4px; align-items: center; }
+.filters select { background: #121316; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
+.aud-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.card.aud { padding: 8px; gap: 6px; cursor: pointer; }
+.card.aud h2 { font-size: 14px; }
+.card.aud.selected { outline: 2px solid var(--warn); }
+.card.aud .card-actions button { padding: 3px 8px; font-size: 12px; }

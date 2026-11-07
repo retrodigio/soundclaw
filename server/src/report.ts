@@ -6,12 +6,13 @@ import type { RunOutcome } from './writer.ts';
 export const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 /** A run's outcome: the commands as written to the tape, then the sounds they touched. */
-export function formatRun(r: Extract<RunOutcome, { ok: true }>, summary: (id: string) => string): string {
+export function formatRun(r: Extract<RunOutcome, { ok: true }>, summary: (id: string) => string, setSummary: (id: string) => string = () => ''): string {
   if (!r.added.length) return 'no commands';
   const first = r.added[0]!;
   const lines = [`applied ${plural(r.added.length, 'command')} as group ${r.group} by ${first.by}`];
   lines.push(...r.added.map((e) => `  #${e.seq} ${e.cmd}`));
   for (const id of r.touched) lines.push(summary(id));
+  for (const id of r.touchedSets ?? []) lines.push(setSummary(id));
   lines.push(r.warnings.length ? `warnings: ${r.warnings.join('; ')}` : 'warnings: none');
   return lines.join('\n');
 }

@@ -233,6 +233,23 @@ export interface Layer {
   fx: Fx[];
 }
 
+/** A loop: the sound is `length` seconds and repeats without a seam (see renderLayered: the part rendered past the end is crossfaded over the start, `fade` seconds). */
+export interface LoopSpec {
+  length: number;
+  fade: number;
+}
+export const LOOP_LENGTH = { min: 0.5, max: 8 } as const;
+export const LOOP_FADE = { min: 0.02, max: 2, default: 0.5 } as const;
+
+export type FamilyKind = 'near' | 'far' | 'muffled';
+
+/** Where a family variant came from: a copy of `of` made by the rules of `kind`; `offsetDb` is how much quieter (or louder) than the sound it is held to be. */
+export interface FamilyMark {
+  of: string;
+  kind: FamilyKind;
+  offsetDb: number;
+}
+
 export interface LayeredSound {
   id: string;
   voice: 'layered';
@@ -240,6 +257,10 @@ export interface LayeredSound {
   duration: number | null;
   gain: number;
   seed: number;
+  /** A looping bed: the sound is loop.length seconds long and its seam is made seamless. */
+  loop?: LoopSpec;
+  /** Set by `family`: the variant's loudness is held to the style's target plus offsetDb. */
+  family?: FamilyMark;
   /** The next layer's salt. */
   nextSalt: number;
   layers: Layer[];
@@ -269,6 +290,8 @@ export function cloneLayered(s: LayeredSound): LayeredSound {
   const fx = (f: Fx): Fx => ({ kind: f.kind, p: { ...f.p }, envs: Object.fromEntries(Object.entries(f.envs).map(([k, e]) => [k, e.map((p) => ({ ...p }))])) });
   return {
     ...s,
+    ...(s.loop ? { loop: { ...s.loop } } : {}),
+    ...(s.family ? { family: { ...s.family } } : {}),
     layers: s.layers.map((l) => ({ ...l, p: { ...l.p }, amp: l.amp ? l.amp.map((p) => ({ ...p })) : null, envs: Object.fromEntries(Object.entries(l.envs).map(([k, e]) => [k, e.map((p) => ({ ...p }))])), fx: l.fx.map(fx) })),
     master: s.master.map(fx),
   };
@@ -371,6 +394,8 @@ export const fmtValue = (v: Value): string => (typeof v === 'number' ? String(v)
 /** The text of a layered sound's file: every value, one layer per block. */
 export function serializeLayered(s: LayeredSound): string[] {
   const lines = [`seed ${s.seed}`, `duration ${s.duration === null ? 'auto' : fmtNum(s.duration)}`, `gain ${fmtNum(s.gain)}`];
+  if (s.loop) lines.push(`loop ${fmtNum(s.loop.length)} fade ${fmtNum(s.loop.fade)}`);
+  if (s.family) lines.push(`family ${s.family.kind} of ${s.family.of} offset ${fmtNum(s.family.offsetDb)}`);
   const fxLines = (fx: Fx[], indent: string, prefix: string): void => {
     fx.forEach((f, i) => {
       lines.push(`${indent}fx ${i + 1} ${f.kind} ${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(' ')}`);
@@ -393,6 +418,7 @@ export function serializeLayered(s: LayeredSound): string[] {
 export function layeredBody(s: LayeredSound, sampleHash: (name: string) => string): string {
   const fx = (f: Fx): string => `${f.kind}(${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(',')};${Object.keys(f.envs).sort().map((k) => `${k}=${formatEnv(f.envs[k]!)}`).join(',')})`;
   const parts = [`dur=${s.duration ?? 'auto'}`, `gain=${s.gain}`, `seed=${s.seed}`];
+  if (s.loop) parts.push(`loop=${s.loop.length}/${s.loop.fade}`);
   s.layers.forEach((l) => {
     if (l.mute) { parts.push(`L${l.salt}:muted`); return; }
     const specs = layerSpecs(l.kind);

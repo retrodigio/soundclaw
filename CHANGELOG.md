@@ -6,6 +6,27 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Sets, loops, families, OGG and imports
+- **Sets**: `set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="freq±0.04 1.cutoff±15%"]` makes seeded variants of a
+  classic or layered sound (each a real sound, `<set>_1` …), `set add|remove|retarget|regen`. The variants cover the stated range
+  (stratified positions), a parameter driven by an envelope moves as a whole, and members are matched to the loudness target by
+  gain: written on the history as `sound set … gain=` commands (a classic sound's gain is its `volume`, at most 1, and a shortfall is
+  reported). The `set` view (members side by side with loudness bars, and the distance matrix) and the `set-spread` check (members
+  not too alike and not too different, both limits in the style, loudness within ±1 LU).
+- **Families**: `family <sound> near|far|muffled [as=<id>]` makes a copy by documented rules (far: quieter, darker, more reverb;
+  muffled: low-passed behind a wall); its loudness is the source's plus the rule's offset and the loudness check is held to that.
+- **Loops**: `sound loop <id> <seconds> [fade=<s>]` makes a layered sound a seamless loop (rendered past its end and crossfaded over
+  its start), the `loop` view, the click check at the seam (jump against the local step, and the level step over 50 ms), and the
+  ambience recipes `wind`, `rain`, `fire`, `crowd`.
+- **Export**: OGG Vorbis (`libvorbis.js`, MIT, with Xiph.org's BSD licences; a dependency of the package, deterministic bytes);
+  `export --all|--set <set> [--format wav|ogg] [--to <dir>]` with `manifest.json` (id, file, duration, loudness, channels, loop points,
+  set), and `--pack` (a flat folder, sounds marked classic as rows of one `synth.csv`).
+- **Import**: `import <project> jsfxr|bfxr <string | file>`: jsfxr's base58 / `sfxr.me` URL and JSON forms and Bfxr's settings
+  string, each row reported as exact or approximated with what was lost.
+- **Dashboard**: the audition page (`#/audition`, or `#/audition/<set>`): every sound as a compact card with play, check badge and
+  feedback, play-all with gaps, filters (set, status, checks, tag), and the keyboard (arrows, space, `a`, `r`); a set's page
+  (`#/set/<id>`): members in a row, play each or in sequence, regen with a new seed, the spread numbers; loop controls on a sound.
+
 ### The layered voice
 - `voice=layered`: a sound of up to 8 layers, each with a start offset, gain, pan, its own state-variable
   filter, an amplitude envelope, effects and one source: the classic voice (sample for sample),

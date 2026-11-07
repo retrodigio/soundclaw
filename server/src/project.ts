@@ -9,7 +9,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { TAPE_FORMAT, parseTape, serializeSound, tapeHeader, tapeToJsonl, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
+import { TAPE_FORMAT, parseTape, serializeSet, serializeSound, tapeHeader, tapeToJsonl, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
 
 export const PROJECT_FORMAT = 'soundclaw-project';
 export const HISTORY_FILE = 'history.jsonl';
@@ -96,6 +96,20 @@ export function writeSounds(p: Project, lib: Library, before: Library): void {
     writeFileSync(soundFile(p, id), text);
   }
   for (const id of before.keys()) if (!lib.has(id)) rmSync(soundFile(p, id), { force: true });
+}
+
+export const setFile = (p: Project, id: string): string => join(p.dir, 'sets', `${id}.set`);
+
+/** Make sets/ match the library's sets, the same way. */
+export function writeSets(p: Project, lib: Library, before: Library): void {
+  mkdirSync(join(p.dir, 'sets'), { recursive: true });
+  for (const [id, s] of lib.sets) {
+    const text = serializeSet(s);
+    const prev = before.sets.get(id);
+    if (prev && serializeSet(prev) === text && existsSync(setFile(p, id))) continue;
+    writeFileSync(setFile(p, id), text);
+  }
+  for (const id of before.sets.keys()) if (!lib.sets.has(id)) rmSync(setFile(p, id), { force: true });
 }
 
 export function listSoundFiles(p: Project): string[] {

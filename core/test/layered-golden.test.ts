@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RECIPE_NAMES, RENDER_VERSION, applyCommand, joinChannels, parse, renderChannels, samplesHash, type Library, type LayeredSound } from '../src/index.ts';
+import { RECIPE_NAMES, RENDER_VERSION, Library, applyCommand, joinChannels, parse, renderChannels, samplesHash, type LayeredSound } from '../src/index.ts';
 import { BANK } from './layered-helpers.ts';
 
 const GOLDEN = join(import.meta.dirname, 'layered-golden.json');
@@ -51,10 +51,12 @@ TABLE['fx-chorus'] = one('osc wave=saw freq=220 dur=0.3', 'fx add s layer=1 chor
 TABLE['fx-delay'] = one('osc wave=square freq=330 dur=0.05', 'fx add s layer=1 delay time=0.08 feedback=0.5 mix=0.5\n');
 TABLE['fx-reverb'] = one('osc wave=white dur=0.05 seed=2', 'fx add s layer=1 reverb size=0.7 damp=0.3 mix=0.4\n');
 TABLE['fx-envelope-mix'] = one('osc wave=saw freq=220 dur=0.3', 'fx add s layer=1 distort shape=fold drive=6\nenv s 1.fx1.mix "0:0 0.3:1"\n');
+TABLE['loop-white-fold'] = one('osc wave=white dur=1 seed=3 gain=0.4', 'sound loop s 0.5 fade=0.1\n');
+TABLE['loop-sine-fold-stereo'] = one('osc wave=sine freq=441.7 dur=1 pan=0.4', 'sound loop s 0.5 fade=0.05\n');
 for (const r of RECIPE_NAMES) for (const seed of [1, 2, 3]) TABLE[`recipe-${r}-${seed}`] = `sound new s voice=layered preset=${r} seed=${seed}\n`;
 
 function build(script: string): LayeredSound {
-  const lib: Library = new Map();
+  const lib = new Library();
   const p = parse(script);
   if (p.errors.length) throw new Error(`${p.errors[0]!.message}`);
   for (const c of p.commands) applyCommand(lib, c);

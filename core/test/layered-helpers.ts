@@ -1,7 +1,7 @@
-import { applyCommand, parse, renderChannels, type Library, type LayeredSound, type SampleBank } from '../src/index.ts';
+import { Library, applyCommand, parse, renderChannels, type LayeredSound, type SampleBank } from '../src/index.ts';
 
 /** Run command text against a fresh library; throws the first problem. */
-export function build(script: string, lib: Library = new Map()): Library {
+export function build(script: string, lib: Library = new Library()): Library {
   const p = parse(script);
   if (p.errors.length) throw new Error(`${p.errors[0]!.line}:${p.errors[0]!.col} ${p.errors[0]!.message}`);
   for (const c of p.commands) applyCommand(lib, c);

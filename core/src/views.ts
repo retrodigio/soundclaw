@@ -2,6 +2,7 @@
 // `wave`, `spec` (mel spectrogram with note and Hz rulers), `pitch` (YIN track over a note grid)
 // and `compare` (two sounds and the difference between them, with distance numbers).
 
+import { fmtStep } from './checks.ts';
 import { analyze, hzToMel, hzToMidi, melSpectrogram, melToHz, midiName, midiToHz, noteName, rmsEnvelope, type Analysis, type MelSpec, type Samples } from './analysis.ts';
 import { Canvas, type Rgb } from './png.ts';
 import { SAMPLE_RATE } from './sound.ts';
@@ -246,7 +247,8 @@ function pearson(a: number[], b: number[]): number {
   return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
 }
 
-export function distance(xa: Samples, xb: Samples, aa: Analysis, ab: Analysis, sa: MelSpec, sb: MelSpec): Distance {
+/** The spectral distances of two mel spectrograms: the mean |difference| over time and band (time axes as they are), and on the time-averaged spectra, dB. */
+export function melDistance(sa: MelSpec, sb: MelSpec): { spectralDb: number; averageSpectrumDb: number } {
   const ref = Math.max(specMax(sa), specMax(sb));
   const floor = ref - SPEC_RANGE_DB;
   const frames = Math.max(sa.db.length, sb.db.length);
@@ -259,9 +261,14 @@ export function distance(xa: Samples, xb: Samples, aa: Analysis, ab: Analysis, s
   for (let f = 0; f < sb.db.length; f++) for (let b = 0; b < bands; b++) avgB[b] = avgB[b]! + level(sb, f, b) / sb.db.length;
   let avgSum = 0;
   for (let b = 0; b < bands; b++) avgSum += Math.abs(avgA[b]! - avgB[b]!);
+  return { spectralDb: sum / (frames * bands), averageSpectrumDb: avgSum / bands };
+}
+
+export function distance(xa: Samples, xb: Samples, aa: Analysis, ab: Analysis, sa: MelSpec, sb: MelSpec): Distance {
+  const md = melDistance(sa, sb);
   const st = (u: number | null, v: number | null): number | null => (u !== null && v !== null ? 12 * Math.log2(v / u) : null);
   return {
-    spectralDb: sum / (frames * bands), averageSpectrumDb: avgSum / bands,
+    spectralDb: md.spectralDb, averageSpectrumDb: md.averageSpectrumDb,
     durationDiffS: ab.duration - aa.duration, loudnessDiffLu: ab.lufs - aa.lufs, truePeakDiffDb: ab.truePeakDb - aa.truePeakDb,
     centroidDiffHz: ab.centroid.mean - aa.centroid.mean,
     pitchStartDiffSt: st(aa.pitch.start, ab.pitch.start), pitchEndDiffSt: st(aa.pitch.end, ab.pitch.end),
@@ -362,5 +369,179 @@ export function layersView(rows: readonly LayerRow[], duration: number, title = 
     c.vline(ox, y0 + 10, y0 + rowH - gap, AMBER, 3);
   });
   timeRuler(c, px, pw, TOP + Math.max(1, rows.length) * rowH - gap + 2, duration);
+  return { png: c.png(), width: W, height: H };
+}
+
+
+// ---- loop ----------------------------------------------------------------------------------------
+
+/** Short-term level, dB, of `x` in windows of `win` samples every `hop`. */
+function levelDb(x: Samples, win: number, hop: number): number[] {
+  const out: number[] = [];
+  for (let s = 0; s + win <= x.length; s += hop) {
+    let e = 0;
+    for (let i = s; i < s + win; i++) e += x[i]! * x[i]!;
+    e /= win;
+    out.push(e > 1e-12 ? (10 * Math.log(e)) / Math.LN10 : -120);
+  }
+  return out;
+}
+
+/** Waveform columns (min/max per column) of `x` into the rectangle. */
+function paintWave(c: Canvas, x: Samples, px: number, py: number, pw: number, ph: number, color: Rgb, scale = 1): void {
+  const mid = py + ph / 2;
+  c.hline(px, px + pw - 1, Math.round(mid), GRID);
+  for (let col = 0; col < pw; col++) {
+    const from = Math.floor((col * x.length) / pw);
+    const to = Math.max(from + 1, Math.floor(((col + 1) * x.length) / pw));
+    let lo = 0, hi = 0;
+    for (let i = from; i < to && i < x.length; i++) { const v = x[i]!; if (v < lo) lo = v; if (v > hi) hi = v; }
+    const yTop = Math.round(mid - Math.min(1, hi * scale) * (ph / 2 - 1));
+    c.vline(px + col, yTop, Math.max(yTop, Math.round(mid - Math.max(-1, lo * scale) * (ph / 2 - 1))), color);
+  }
+}
+
+/**
+ * The loop view: the last 50 ms joined to the first 50 ms (the seam marked), the two drawn over each
+ * other, the joined spectrogram, and the level (50 ms windows) across four repeats with the seams marked.
+ */
+export function loopView(x: Samples, a: Analysis, seam: { jump: number; local: number; stepDb: number }, title = ''): Image {
+  const H = 640;
+  const c = new Canvas(W, H, BG);
+  const px = LEFT, pw = W - LEFT - RIGHT;
+  const n = x.length;
+  const win = Math.min(Math.floor(n / 2), Math.round(0.05 * SAMPLE_RATE));
+  header(c, `LOOP ${title}`, `${a.duration.toFixed(3)} S LOOP  SEAM JUMP ${seam.jump.toFixed(3)}  LEVEL STEP ${fmtStep(seam.stepDb)} DB`);
+  const joined = new Float32Array(2 * win);
+  for (let i = 0; i < win; i++) { joined[i] = x[n - win + i]!; joined[win + i] = x[i]!; }
+  // 1 joined
+  let y = TOP;
+  const ph = 120;
+  c.text('END + START JOINED  (SEAM AT THE CENTRE)', px, y, TEXT);
+  y += 11;
+  paintWave(c, joined, px, y, pw, ph, TEAL);
+  c.vline(px + Math.floor(pw / 2), y, y + ph, AMBER, 3);
+  y += ph + 14;
+  // 2 overlapped
+  c.text('LAST 50 MS (TEAL) OVER FIRST 50 MS (AMBER)', px, y, TEXT);
+  y += 11;
+  paintWave(c, joined.subarray(0, win), px, y, pw, ph, TEAL_DIM);
+  const mid = y + ph / 2;
+  for (let col = 0; col < pw; col++) {
+    const i = Math.min(win - 1, Math.floor((col * win) / pw));
+    c.set(px + col, Math.round(mid - Math.max(-1, Math.min(1, x[i]!)) * (ph / 2 - 1)), AMBER);
+    c.set(px + col, Math.round(mid - Math.max(-1, Math.min(1, x[n - win + i]!)) * (ph / 2 - 1)), TEAL);
+  }
+  y += ph + 14;
+  // 3 spectrogram
+  c.text('SPECTROGRAM OF THE JOINED 100 MS', px, y, TEXT);
+  y += 11;
+  const spec = melSpectrogram(joined, { hop: 64 });
+  const top = specMax(spec);
+  if (Number.isFinite(top)) {
+    paintSpec(c, spec, px, y, pw, 110, spec.duration, (frame, b, frac) => {
+      const row = spec.db[Math.min(spec.db.length - 1, frame)]!;
+      const v = row[b]! * (1 - frac) + row[Math.min(row.length - 1, b + 1)]! * frac;
+      return ramp(INFERNO, (v - (top - SPEC_RANGE_DB)) / SPEC_RANGE_DB);
+    });
+  }
+  c.vline(px + Math.floor(pw / 2), y, y + 110, [255, 255, 255], 3);
+  y += 110 + 14;
+  // 4 level across four repeats
+  c.text('LEVEL ACROSS 4 REPEATS (50 MS WINDOWS, DB)', px, y, TEXT);
+  y += 11;
+  const rep = new Float32Array(n * 4);
+  for (let r = 0; r < 4; r++) rep.set(x, r * n);
+  const wl = Math.max(1, Math.min(n, win));
+  const lv = levelDb(rep, wl, Math.max(1, Math.round(wl / 2)));
+  const hi = Math.max(...lv, -120), lo = Math.max(hi - 24, Math.min(...lv));
+  const lh = 120;
+  for (let g = 0; g <= 24; g += 6) c.hline(px, px + pw - 1, y + Math.round((g / 24) * (lh - 1)), GRID);
+  c.text(`${hi.toFixed(0)}`, px - 5, y - 3, DIM, { align: 'right' });
+  c.text(`${(hi - 24).toFixed(0)}`, px - 5, y + lh - 5, DIM, { align: 'right' });
+  let prev: { x: number; y: number } | null = null;
+  lv.forEach((v, i) => {
+    const pt = { x: px + (i / Math.max(1, lv.length - 1)) * (pw - 1), y: y + (1 - (Math.max(lo, v) - (hi - 24)) / 24) * (lh - 1) };
+    if (prev) c.line(prev.x, prev.y, pt.x, pt.y, TEAL);
+    prev = pt;
+  });
+  for (let r = 1; r < 4; r++) c.vline(px + Math.round((r / 4) * (pw - 1)), y, y + lh, AMBER, 3);
+  const spread = lv.length ? Math.max(...lv) - Math.min(...lv) : 0;
+  c.text(`RANGE ${spread.toFixed(1)} DB OVER THE REPEATS`, px + pw, y + lh + 4, DIM, { align: 'right' });
+  return { png: c.png(), width: W, height: H };
+}
+
+// ---- set -----------------------------------------------------------------------------------------
+
+export interface SetRow {
+  id: string;
+  samples: Samples;
+  lufs: number;
+}
+
+/** A colour for a distance in dB between members: dark when alike, bright when far (full colour at `max`). */
+function distColor(d: number, max: number): Rgb {
+  return ramp([[28, 34, 46], [60, 120, 150], [240, 190, 70]], d / max);
+}
+
+/**
+ * The set view: each member's waveform, spectrogram and loudness bar on one time scale, side by
+ * side in a grid, then the pairwise distance matrix (mean |difference| of the mel spectrograms, dB).
+ */
+export function setView(rows: readonly SetRow[], matrix: readonly (readonly number[])[], limits: { min: number; max: number; target: number | null }, title = ''): Image {
+  const cols = rows.length <= 3 ? Math.max(1, rows.length) : rows.length <= 8 ? Math.ceil(rows.length / 2) : 4;
+  const gridRows = Math.max(1, Math.ceil(rows.length / cols));
+  const gap = 10;
+  const cw = Math.floor((W - 2 * 20 - (cols - 1) * gap) / cols);
+  const waveH = 52, specH = 60, barH = 8, cellH = 12 + waveH + specH + barH + 20;
+  const mCell = Math.min(46, Math.floor(540 / Math.max(1, rows.length)));
+  const matH = rows.length * mCell + 40;
+  const H = TOP + gridRows * (cellH + gap) + 18 + matH + 12;
+  const c = new Canvas(W, H, BG);
+  const duration = Math.max(0.001, ...rows.map((r) => r.samples.length / SAMPLE_RATE));
+  header(c, `SET ${title}`, `${rows.length} MEMBERS  ${duration.toFixed(3)} S${limits.target !== null ? `  TARGET ${limits.target} LUFS` : ''}`);
+  const specs = rows.map((r) => melSpectrogram(r.samples, { hop: 256, bands: 48 }));
+  const top = Math.max(...specs.map(specMax));
+  const lufsAll = rows.map((r) => r.lufs).filter(Number.isFinite);
+  const lMin = Math.min(...lufsAll, limits.target ?? 0) - 3, lMax = Math.max(...lufsAll, limits.target ?? -60) + 3;
+  rows.forEach((r, i) => {
+    const gx = 20 + (i % cols) * (cw + gap);
+    const gy = TOP + Math.floor(i / cols) * (cellH + gap);
+    c.text(r.id, gx, gy, TEXT);
+    c.text(`${Number.isFinite(r.lufs) ? r.lufs.toFixed(1) : '-INF'} LUFS`, gx + cw, gy, DIM, { align: 'right' });
+    const wy = gy + 12;
+    const len = Math.max(1, Math.round((r.samples.length / SAMPLE_RATE / duration) * cw));
+    paintWave(c, r.samples, gx, wy, len, waveH, TEAL);
+    const s = specs[i]!;
+    if (Number.isFinite(top)) {
+      paintSpec(c, s, gx, wy + waveH + 2, len, specH, r.samples.length / SAMPLE_RATE, (frame, b, frac) => {
+        const row = s.db[Math.min(s.db.length - 1, frame)]!;
+        const v = row[b]! * (1 - frac) + row[Math.min(row.length - 1, b + 1)]! * frac;
+        return ramp(INFERNO, (v - (top - SPEC_RANGE_DB)) / SPEC_RANGE_DB);
+      });
+    }
+    // loudness bar on a common scale, the target marked
+    const by = wy + waveH + specH + 8;
+    c.rect(gx, by, cw, barH, GRID);
+    if (Number.isFinite(r.lufs)) c.rect(gx, by, Math.max(1, ((r.lufs - lMin) / (lMax - lMin)) * cw), barH, TEAL);
+    if (limits.target !== null) c.vline(Math.round(gx + ((limits.target - lMin) / (lMax - lMin)) * cw), by - 2, by + barH + 1, AMBER);
+  });
+  // distance matrix
+  let y = TOP + gridRows * (cellH + gap) + 6;
+  c.text(`DISTANCE BETWEEN MEMBERS (DB, MEAN OF THE MEL SPECTROGRAM DIFFERENCE).  TOO ALIKE BELOW ${limits.min}, TOO DIFFERENT ABOVE ${limits.max}`, 20, y, TEXT);
+  y += 14;
+  const mx = 20 + 70;
+  rows.forEach((r, j) => c.text(String(j + 1), mx + j * mCell + mCell / 2, y, DIM, { align: 'center' }));
+  y += 10;
+  rows.forEach((r, i) => {
+    c.text(`${i + 1} ${r.id}`.slice(0, 11), 20, y + i * mCell + mCell / 2 - 3, DIM);
+    rows.forEach((_, j) => {
+      const d = matrix[i]![j]!;
+      const bad = i !== j && (d < limits.min || d > limits.max);
+      c.rect(mx + j * mCell, y + i * mCell, mCell - 2, mCell - 2, i === j ? GRID : distColor(d, limits.max));
+      if (i !== j) c.text(d.toFixed(1), mx + j * mCell + (mCell - 2) / 2, y + i * mCell + mCell / 2 - 4, bad ? RED : [255, 255, 255], { align: 'center' });
+      if (bad) { c.hline(mx + j * mCell, mx + j * mCell + mCell - 3, y + i * mCell, RED); c.hline(mx + j * mCell, mx + j * mCell + mCell - 3, y + i * mCell + mCell - 3, RED); }
+    });
+  });
   return { png: c.png(), width: W, height: H };
 }

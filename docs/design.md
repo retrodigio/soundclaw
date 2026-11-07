@@ -215,6 +215,30 @@ cursor is the highest command number read, per agent, in `.cache/changes-seen.js
 requests machinery: state, `seen`, `await`, the card. The tag `good` alone is a `feedback`
 request: no mark, no checks to pass before the agent closes it.
 
+## Sets, families, loops and the audition page
+
+**Sets are documents; their members are sounds.** `sets/<id>.set` names the source, the seed, the loudness target, the spread rules and the members;
+the sounds themselves are in `sounds/` like any other and every edit to them is an ordinary command. A set command is a command on the tape
+(`set new … seed=5`), replayed like the rest.
+
+**Measuring never happens while a tape replays.** Loudness matching needs a render and a measurement, and a measurement (`Math.log` in the BS.1770 maths) may
+differ in its last digit between machines; if it fed a replay, a document would no longer render to the same bytes everywhere. So the *writer*
+measures when a command is run and appends plain `sound set <member> gain=<g>` commands to the same undo group; a replay applies those numbers and measures nothing.
+`core` supplies the maths (`matchGain`), the writer decides when to call it.
+
+**A loop is a render, not an edit.** The seam is made when the sound is rendered (`renderLoop` in `core/src/synth.ts`): the long render is folded with an
+equal-power crossfade over the start. Nothing is done to the samples afterwards, so Node and the browser agree bit for bit (the crossfade weights use the same
+polynomial sine as the tone), and the `loop` view and the click check at the seam read the samples as they are.
+
+**OGG is a dependency, not a part of the bundle.** `libvorbis.js` is a sloppy-mode script (it reads `this` at its top level) that cannot live inside an ES module bundle,
+so the package depends on it and loads it when the first OGG is made. Its stream serial number is replaced by a fixed one (checksums rewritten) so the same sound gives the
+same bytes. There is no permissively licensed Vorbis decoder to hold the encoder against, so the tests read the container and the headers themselves (every page's checksum,
+the three headers, sample counts) and, where `ffmpeg` is installed, decode the file and correlate it with the source.
+
+**The audition page and the set page are the same cards on other pages.** They render and measure in the browser with `core` (the numbers the CLI prints), keep their
+state (selection, filters) in the page, and write only commands: Approve is `sound mark`, Ask for changes and feedback are requests, regen is `set regen … seed=<n>` with a seed
+the page chooses, loop controls are `sound loop`.
+
 ## Not yet
 
 Instruments, songs, sets and variants, loops and families for ambience, the batch audition page, bfxr/jsfxr import, OGG export, a time range on feedback ("0.4–0.7 s too harsh"), and a headless worker

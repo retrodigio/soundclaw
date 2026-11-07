@@ -31,6 +31,12 @@ editor writes `sound set` with the parameters in the table's order and the wave 
 | `sound mark <id> approved\|rejected\|draft ["note"]` | Set the sound's status. People use the dashboard's Approve and Ask for changes buttons, which write this. |
 | `sound new <id> voice=layered [preset=<recipe>] [seed=<n>]` | Make a layered sound: up to 8 layers, envelopes, effects (below). `preset=` takes a layered recipe (`footstep`, `ui-click`, `door`, `magic`) or a classic category (one classic layer). The seed (the sound's noise seed; the recipe's seed too) is written into the normal form. |
 | `sound set <id> duration=<s\|auto> gain=<g> seed=<n>` | On a layered sound: its length (`auto` follows the layers), master level and noise seed. |
+| `sound loop <id> <seconds>\|off [fade=<s>]` | Make a layered sound a looping bed, `<seconds>` long (0.5 to 8), its seam made seamless by a crossfade of `fade` seconds (0.02 to 2, at most half the length, default 0.5); `off` ends it. See "Loops". |
+| `set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="<param>±<amount> ..."] [seed=<n>]` | Make a set of `count` (1 to 32) seeded variants of a classic or layered sound, each a real sound named `<set>_1` … `<set>_<n>`, matched to the loudness target by gain. See "Sets". |
+| `set add <set> <sound>...`, `set remove <set> <sound>...` | Put existing sounds into a set (they are matched to its target), or take them out (they stay as sounds). |
+| `set retarget <set> <LUFS>\|none` | Change the loudness the members are held to and matched to (`-20` or `-20LUFS`), or stop matching. |
+| `set regen <set> [seed=<n>] [spread="..."]` | Make the generated members again from the source as it is now, with a new seed (and, if given, new rules). |
+| `family <sound> near\|far\|muffled [as=<id>]` | A copy of the sound as heard near, far away or through a wall (default id `<sound>_<kind>`). See "Families". |
 | `sound layer-up <id>` | A classic sound becomes layered: the classic voice is layer 1, the very same samples. Refused on a sound marked classic. |
 | `sound classic <id> on\|off` | Mark a classic sound as classic: it must stay one classic voice, so it refuses `sound layer-up` (and the layer and effect commands refuse it as ever), and it exports as a `synth.csv` row. |
 | `layer add <id> classic\|osc\|fm\|ks\|sample [<param>=<value> ...] [at=<n>]` | Add a layer with a source (below). A classic layer also takes `preset=<category>` (`presetseed=<n>`) or `patch="<single-patch text>"`. |
@@ -327,12 +333,113 @@ classic category on a layered sound, which gives it one classic layer). Like the
 |  | osc | 1 | osc wave white; dur 0.4..0.7; filter hp; cutoff 6000..8000; gain 0.08..0.14 | amp 0:0 0.1:1 0.35..0.39:0@exp | - |
 |  | master | 1 | - | - | delay time 0.11..0.19 feedback 0.3..0.45 mix 0.2..0.3 |
 |  | master | 1 | - | - | reverb size 0.5..0.8 damp 0.4 mix 0.2..0.3 |
+| `wind` a bed: moving air, a low rush that swells and fades, a thin whistle on top (loops, 5..7 s, fade 0.6 s) | osc | 1 | osc wave brown; dur loop; filter bp; q 0.8..1.4; gain 1 | cutoff wanders (5..8 points in 220..700, back to its start at the loop end); gain wanders (4..7 points in 0.45..1, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave pink; dur loop; filter bp; q 2..4; gain 0.2 | cutoff wanders (4..7 points in 700..1800, back to its start at the loop end); gain wanders (4..7 points in 0.04..0.35, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave white; dur loop; filter hp; cutoff 5000; gain 0.05 | gain wanders (4..6 points in 0.2..1, back to its start at the loop end) | - |
+|  | master | 1 | - | - | reverb size 0.4..0.6 damp 0.5 mix 0.12 |
+| `rain` a bed: a steady patter, a soft body underneath and scattered drops (loops, 4..6 s, fade 0.5 s) | osc | 1 | osc wave white; dur loop; filter bp; cutoff 4200..5200; q 0.5; gain 0.5 | - | - |
+|  | osc | 1 | osc wave pink; dur loop; filter bp; cutoff 1100..1500; q 0.4; gain 0.4 | gain wanders (3..5 points in 0.2..0.55, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave white; dur loop; filter bp; cutoff 3500..6000; q 1.2..2; gain 1 | amp bursts (6..8 of 0.01..0.035 s, level 0.5..1) | - |
+|  | osc | 1 | osc wave white; dur loop; filter bp; cutoff 6000..9000; q 1.2..2; gain 0.7 | amp bursts (6..8 of 0.008..0.03 s, level 0.4..0.9) | - |
+|  | master | 1 | - | - | reverb size 0.25..0.4 damp 0.5 mix 0.12 |
+| `fire` a bed: a low roar that flickers, a hiss, and crackles (loops, 4..6 s, fade 0.5 s) | osc | 1 | osc wave brown; dur loop; filter bp; cutoff 160..240; q 0.4 | gain wanders (6..10 points in 0.45..1, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave pink; dur loop; filter bp; cutoff 2500..3500; q 0.8 | gain wanders (6..10 points in 0.1..0.45, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave white; dur loop; filter hp; cutoff 1800..2600; gain 0.3 | amp bursts (6..9 of 0.004..0.02 s, level 0.4..0.8) | - |
+|  | osc | 1 | osc wave white; dur loop; filter bp; cutoff 700..1400; q 1.5; gain 0.2 | amp bursts (3..5 of 0.02..0.06 s, level 0.3..0.7) | - |
+|  | master | 1 | - | - | distort shape soft drive 1 mix 1 |
+| `crowd` a bed: many voices far enough that none is a word (murmur): three speech-band hums that rise and fall independently (loops, 6..8 s, fade 0.8 s) | osc | 1 | osc wave pink; dur loop; filter bp; cutoff 380..520; q 3..5; gain 1 | gain wanders (12..18 points in 0.1..0.8, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave pink; dur loop; filter bp; cutoff 800..1000; q 3..5; gain 0.8 | gain wanders (12..18 points in 0.1..0.8, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave pink; dur loop; filter bp; cutoff 1500..1900; q 3..5; gain 0.5 | gain wanders (12..18 points in 0.1..0.8, back to its start at the loop end) | - |
+|  | osc | 1 | osc wave brown; dur loop; filter bp; cutoff 180; q 0.5; gain 0.5 | - | - |
+|  | master | 1 | - | - | reverb size 0.45..0.65 damp 0.5 mix 0.25 |
 
 `examples`: `docs/examples/layered-demo.txt` builds an impact, a magic sparkle and a door creak (all three pass the checks).
 
+### Sets, families and loops
+
+**Sets.** A set is a named group of sounds that belong together (the footsteps on grass, the clicks of a
+menu) with a loudness target and a variation rule. It is a document in `sets/<id>.set`; its members are
+ordinary sounds in `sounds/`, so a set never hides a sound inside itself.
+
+```
+set new footsteps from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20% *.gain±20%"
+```
+
+- `count` variants of `from` (a classic or layered sound) are made, `footsteps_1` … `footsteps_6`. They are seeded:
+  the same set command always makes the same sounds (`seed=<n>` is written into the normal form).
+- **spread** is a list of `<parameter>±<amount>` rules (`+-` and `+/-` also read). The amount is in the parameter's own
+  unit, or a percentage of the source's value with `%`. For a classic sound the parameter is a classic parameter by the
+  name `sound set` uses (`freq±0.04 decay±0.1`; `wave` is a choice and cannot vary). For a layered sound it is named as
+  `layer set`, `env` and `fx set` name things: `2.cutoff±20%` (layer 2's cutoff), `*.gain±20%` (every layer that has it, moved
+  by the same amount), `1.amp±10%` (the amplitude envelope), `1.fx2.mix±0.1` (an effect), `master.fx1.mix±0.1`, or `gain±10%`
+  (the sound's gain). **A parameter that an envelope drives moves as a whole**: every breakpoint is shifted (absolute) or scaled
+  (relative), so `1.freq±12%` of a footstep whose pitch falls from 160 to 55 Hz gives a thud that falls from 141 to 48 or from 179 to 62.
+- The positions are **stratified**, not independent: for each rule the `count` members are given `count` stripes of the range
+  `-amount … +amount` in a shuffled order, each member's place jittered inside its own stripe. Six members therefore cover the
+  range instead of bunching, and two neighbours are always at least a tenth of the amount apart.
+- Each member also gets its own noise seed (a classic sound's `seed`, a layered sound's `seed`), so noise differs even where no rule moves a parameter.
+- **Loudness matching.** After `set new`, `set add` (the added sounds), `set retarget` (every member) and `set regen`
+  (the generated members), the members are brought to the target LUFS **by gain**, and the result is written on the history as
+  plain `sound set <member> gain=<g>` commands in the same undo group. (A measurement may differ in its last digit between
+  machines, so it is never repeated while a history replays: the numbers are on the tape.) A layered sound's gain is its `gain` (0 to 4).
+  **A classic sound has no separate gain: its gain is its `volume` parameter** (0 to 1, linear in amplitude), so a classic member
+  can be made quieter or as loud as volume 1 allows; when the target needs more, `volume` is left at 1 and a warning says by how many LU it
+  falls short (`sound layer-up` makes the sound layered, sample for sample, and then gain goes to 4). The match is repeated until it is within 0.05 LU.
+- **Checks.** Members are held to the set's target by the `loudness` check (a sound in two sets with targets uses the first). The `set-spread`
+  check (`check <set>`, below) looks at the set as a whole. `view <set> set` draws the members side by side and the distance matrix.
+- A set made from a source remembers it: `set regen` makes the generated members again from the source as it is now. Members that were added with
+  `set add` are never regenerated; `set remove` takes a member out and keeps the sound.
+
+**set-spread.** Members must be neither too alike nor too different, and equally loud.
+The distance between two members is the mean absolute difference of their mel spectrograms (80 dB range, time axes as they are,
+dB), the `spectral distance` of `compare`. The check fails when a pair is closer than `setSpreadMin` (default **1 dB**) or farther
+than `setSpreadMax` (default **20 dB**), or a member's loudness is more than `loudnessTolerance` (1 LU) from the set's target (without a
+target: from the middle member). Both limits are style keys. What the numbers mean in practice, measured on this tool's own sounds:
+footstep variants from different seeds of the recipe are 4 to 7 dB apart; a footstep set with 12 % / 20 % rules is 1.5 to 2.5 dB
+apart (alike, never identical); a tonal pickup with `freq±0.04 decay±0.1` is 10 to 17 dB apart; a footstep against a door is 14 dB, a coin against an
+explosion 39 dB.
+
+**Families.** `family <sound> near|far|muffled [as=<id>]` makes the sound as it is heard near, far away or behind a wall. The rules are
+data (`FAMILIES` in `core/src/families.ts`):
+
+| Family | Loudness vs the source | Added to the master chain | Reverbs the source has |
+|---|---|---|---|
+| `near` close and present: a little louder, drier | +2 LU | nothing | mix × 0.5 |
+| `far` a long way off: quieter, darker, more reverb | -9 LU | low-pass 3500 Hz × 1, reverb size 0.65 damp 0.6 mix 0.35 | mix × 1, at least 0.35 |
+| `muffled` behind a wall: the highs gone (two low-pass stages), the rumble too, a little room | -6 LU | high-pass 60 Hz, low-pass 500 Hz × 2, reverb size 0.25 damp 0.8 mix 0.15 | mix × 1, at least 0.15 |
+
+The variant is a **copy**, stored as a layered sound (a classic source becomes a one-layer layered sound with the very same samples), with the rules
+added to its master chain; it does not refer to the source afterwards. Why a copy: a sound document renders from itself alone, so the render
+key, the browser's render, the exports and `undo` need no look-up in another document, and either sound can be edited without the other
+moving under it. The document remembers `family <kind> of <source> offset <dB>`. Because a far sound is meant to be quieter, **its loudness is
+matched to the source's plus the rule's offset** (written as a `sound set <variant> gain=` command, like a set's) and the `loudness`
+check holds it to the style's target plus that offset: `impact_far` of a −16 LUFS impact is held to −25 ±1.
+
+**Loops.** `sound loop <id> <seconds> [fade=<s>]` makes a layered sound a loop (a bed: wind, rain, fire, a crowd). The **seam is made seamless by
+rendering over the boundary**: the sound is rendered `fade` seconds longer than the loop, and the part past the end is crossfaded over the first `fade`
+seconds with an equal-power curve (`sin` and `cos` of a quarter cycle, built from the tone's polynomial sine so Node and the browser agree). The
+last sample of the loop then runs on into the first as the render itself would (the first sample *is* the sample after the last one in the long
+render), reverb and delay tails wrap around, and noise keeps its level through the join. It is not a crossfade of two copies of the start. Two
+consequences: a layer's `dur` should cover the loop plus the crossfade (the bed recipes do; a shorter source leaves silence), and a **periodic** sound
+whose cycle does not divide the loop length is two correlated copies in the crossfade, so its level can dip or swell there: choose the length to be a
+whole number of cycles, or use noise (which is what beds are). An envelope on a parameter should come back to where it started at the loop end;
+the bed recipes' wanders do exactly that.
+
+- The loop is `length` samples long exactly (`duration` is ignored); the render key changes only for a looping sound.
+- **Checks on a loop.** `click` looks at the **seam** instead of the first and last sample: it fails when the jump from the last sample to the first is
+  above `clickMax` *and* above 4 times the local sample-to-sample step (so a loud noise bed is not flagged for being noise), or when the level of the
+  last 50 ms differs from the first 50 ms by more than `seamStepMaxDb` (default 3 dB). `tail` needs no fade-out. The other checks are as ever.
+- `view <id> loop` draws the last 50 ms joined to the first (the seam marked), the two drawn over each other, the joined spectrogram, and the level
+  (50 ms windows) across four repeats with the seams marked.
+- WAV is exact; OGG is lossy, so an OGG loop is only as good as the codec at its seam (`export` says so).
+- **Ambience recipes** (beds, below): `wind`, `rain`, `fire`, `crowd`: layered, looped, seeded, with periodic wanders and bursts (the table lists them).
+  `sound new <id> voice=layered preset=rain` makes a bed that lands near −16 LUFS; `sound loop <id> off` makes it a one-shot.
+
+`examples`: `docs/examples/sets-demo.txt` makes a footstep set of six, an impact in three distances and a rain bed, and all of it passes the checks.
+
 ### Checks and the project style
 
-Six checks hold a sound to the project's style (below). Each has a score from 0 to 1, a threshold,
+Six checks hold a sound to the project's style (below), and a seventh, `set-spread`, holds a set of sounds ("Sets" above). Each has a score from 0 to 1, a threshold,
 and the exact time ranges it flags.
 
 | Check | Flags | Default |
@@ -340,15 +447,17 @@ and the exact time ranges it flags.
 | `clip` | true peak above the limit, or samples at full scale (the ranges are where) | at most -0.1 dBTP |
 | `loudness` | integrated loudness (ITU-R BS.1770, K-weighted, gated) off the target | -16 LUFS ±1 |
 | `dc` | DC offset | at most 0.5 % |
-| `click` | a jump at the first or last sample | at most 0.02 of full scale |
-| `tail` | silence padding at the start or end, or a sound cut off before it died away (the last samples are not at least 60 dB below the peak) | at most 50 ms; -60 dB |
+| `click` | a jump at the first or last sample (a loop: at its seam, see "Loops") | at most 0.02 of full scale |
+| `tail` | silence padding at the start or end, or a sound cut off before it died away (the last samples are not at least 60 dB below the peak); a loop needs no fade-out | at most 50 ms; -60 dB |
 | `harsh` | sustained energy at 2 to 5 kHz: the level of that band (dBFS, RMS of the band content, from 1024-sample Hann spectra; a full-scale sine inside it reads -3) stays above the limit for at least the minimum time (the ranges are where) | at most -20 dBFS for 80 ms |
+
+| `set-spread` | (a set, `check <set>`) members closer together than `setSpreadMin` or farther apart than `setSpreadMax`, or a member's loudness off the set's target | 1 dB; 20 dB; ±1 LU |
 
 Every check works on stereo (below). A sound shorter than 400 ms is measured as one block over its whole length (BS.1770 needs 400 ms
 blocks; padding with silence would lower the figure). `work` `done` on a request is refused while the
 sound's checks fail. Targets come from the optional `style` object in `project.json`, any of
 `loudnessTarget`, `loudnessTolerance`, `truePeakMax`, `dcMax`, `clickMax`, `silenceMax` (seconds),
-`tailFloorDb`, `harshLimitDb` (dBFS), `harshMinMs`; the defaults fill what is left out. An unknown key is an error.
+`tailFloorDb`, `harshLimitDb` (dBFS), `harshMinMs`, `setSpreadMin` (dB), `setSpreadMax` (dB), `seamStepMaxDb` (dB); the defaults fill what is left out. An unknown key is an error.
 
 ### The numbers
 
@@ -450,11 +559,13 @@ MCP `view` tool returns the image itself.
 | `spec` | a mel spectrogram (80 dB range) with a log frequency ruler in Hz and the C notes, and a time ruler |
 | `pitch` | the YIN pitch track over a grid of semitones with note names; unpitched stretches are gaps |
 | `layers` | for a layered sound: each sounding layer's waveform and spectrogram, stacked on one time axis (the layer as it enters the sum: filter, envelope, effects, gain and pan applied), its start offset marked, with its label, gain and pan |
+| `loop` | for a looping sound: the last 50 ms joined to the first (the seam marked), the two drawn over each other, the joined spectrogram, and the level across four repeats |
+| `set` | (`view <project> <set> set`) a set's members side by side on one time scale: waveform, spectrogram and a loudness bar each (the target marked), then the pairwise distance matrix in dB with the pairs outside the limits outlined |
 | `compare` | two spectrograms stacked and, under them, their difference (red: the second is louder; blue: the first), plus distance numbers: spectral distance (dB), loudness, duration, brightness, pitch start and end (semitones), envelope correlation |
 
 `describe` is a plain-words summary built only from the measured numbers (never from the sound's
 settings), then the numbers. `check` runs the checks with scores, thresholds and the exact ranges;
-it exits 1 when any sound fails.
+it exits 1 when any sound fails. `check` also takes a set's name and runs `set-spread` on it (with no names it checks every sound and every set).
 
 ### What others changed
 
@@ -496,13 +607,51 @@ patch text itself. One undo group. A sound id that appears twice in a csv is rea
 reads it: the id keeps the position of its first row and the values of its last, and a warning names
 both lines (`warning: synth.csv: 'zip' is on line 2 and again on line 4; …`).
 
+`import <project> jsfxr <string | file>` reads jsfxr's patches: the **base58** form (what follows the `#` in an `https://sfxr.me/#…` address, or the whole
+address): one byte of wave type and 22 little-endian float32 parameters, written in base58 (the alphabet without `0 O I l`; a leading `1` is a zero byte); or its **JSON**
+form (`{"wave_type":1,"p_env_sustain":0.25,…,"sound_vol":0.25}`). `import <project> bfxr <string | file>` reads Bfxr's settings string (32 comma-separated numbers in
+Bfxr's parameter order; an empty field is 0). Several strings go in one file, one per line, `<id> <string>` (a single string takes `--id`, or the file's name).
+`sfxr` (the default kind) also recognises a jsfxr string. Nothing is imported unless every row can be read. **Each row is reported**:
+
+```
+row 1 zap: exact (jsfxr base58)
+row 2 buzz: approximated (bfxr)
+    lost or changed: compressionAmount 0.3 not reproduced: compression (the classic voice has none: …)
+    lost or changed: wave triangle has no classic equivalent: sine is the nearest
+```
+
+- **Parameters carry over by name**, one for one, with no scaling: jsfxr's `p_env_attack` … `p_hpf_ramp` are the classic `attack` … `highPassSweep`; Bfxr's `attackTime`,
+  `startFrequency`, `squareDuty`, `flangerOffset`, `lpFilterCutoff` … likewise. jsfxr's base58 holds float32; each value is written as the shortest decimal that reads back as the
+  same float32 (so a `0.3` stays `0.3`, and a value jsfxr's own encoder truncated stays what the string says). Such a sound is **exact**: it is the `sound patch` of those
+  values, sample for sample. (Rendering is the engine's synth; the noise stream differs from jsfxr's and Bfxr's own, which use the platform's random numbers.)
+- **Volume.** jsfxr multiplies its output by `exp(sound_vol) - 1` and the classic voice by `volume`, so `volume = exp(sound_vol) - 1` has the same amplitude (a base58 string has no
+  `sound_vol`: jsfxr plays it at 0.5, so `volume` is 0.648721; above 1 it is clamped and the row says so). Bfxr multiplies by `masterVolume²`, so `volume = masterVolume²`.
+- **Approximated, with the loss named**: Bfxr's compression (default 0.3 in its own presets, so most Bfxr strings are approximated), harmonics (`overtones`, `overtoneFalloff`), bit crush
+  and sweep, the second pitch jump, the pitch jump repeat, and its extra waves (triangle, pink noise, tan, whistle, breaker, bit noise → the nearest classic wave); JSON's
+  `sample_rate` and `sample_size` (exports are 44,100 Hz, 16-bit); values outside a classic range (clamped). A row with something in that list is *approximated*; otherwise *exact*.
+
 `export --format`: `wav` (default; 16-bit PCM, 44,100 Hz, mono; a classic sound is written in the
 engine's pre-rendered form, each sample `trunc(s × 32000)`), `patch` (`<id>.sfxr`, the single-patch
 text: a version line, then the 25 values at six significant digits; a sound with a seed is written
 as `name=value` pairs so the seed travels), `csv` (one `synth.csv`, every column at full precision,
-so reading it back renders the same samples).
+so reading it back renders the same samples), `ogg` (Vorbis, variable bitrate, `--quality -0.1 … 1`, default 0.4; libvorbis compiled to JavaScript, the `libvorbis.js` package, MIT with
+Xiph.org's BSD licences; one or two channels; the stream ends with the exact number of samples; the same sound gives the same bytes, as every file gets the same stream serial number).
 
-A layered sound exports as a **WAV only** (16-bit, 44,100 Hz, mono or stereo, through the limiter above); `export` says so for each one
+`export <project> --all [--format wav|ogg] [--to <dir>]` (or `--set <set>` for a set's members, or `--pack`) also writes **`manifest.json`** beside the files:
+
+```
+{ "format": "soundclaw-manifest", "version": 1, "project": "demo",
+  "sounds": [ { "id": "rain", "file": "rain.ogg", "format": "ogg", "duration": 5.159, "samples": 227511, "sampleRate": 44100, "channels": 1,
+                "loudness": -16.2, "truePeak": -6, "loop": { "start": 0, "end": 227511, "startSeconds": 0, "endSeconds": 5.159 },
+                "set": null, "status": "draft", "synth": false }, … ],
+  "sets": [ { "id": "footsteps", "members": [ … ], "target": -20 } ] }
+```
+
+`loudness` and `truePeak` are of the render, before the export limiter; `loop` is null for a sound that is not a loop. **The pack layout** (`--pack`) is one flat folder in which
+the sounds marked classic (`sound classic <id> on`) are rows of a single `synth.csv` instead of audio files (their manifest entries have `"file": null, "synth": true`), and
+everything else is audio, ready to drop into a pack. Without `--all`, `--set` or `--pack` (and for WAV) no manifest is written, as before.
+
+A layered sound exports as audio only, **WAV** (16-bit, 44,100 Hz, mono or stereo, through the limiter above) **or OGG**; `export` says so for each one
 and how much the limiter reduced it, `--format csv` and `patch` refuse a layered sound that is named and skip it when everything is
 exported (a `synth.csv` row cannot hold layers). A classic sound marked classic, or never layered, keeps exporting as a row.
 `sample import <project> <file.wav> [as=<name>]` copies a WAV into `<project>/samples/`; `sample list` lists them.
@@ -517,6 +666,19 @@ usage error, 3 (`await` only) the timeout passed with nothing to report.
 only you can read, so they go through its single writer and a connected dashboard updates live.
 If a server holds the folder and its token cannot be read, a writing command refuses rather than
 write behind its back. Read-only commands (`list`, `history`, `render`, `view`, `describe`, `check`) read the files.
+
+### The dashboard's pages
+
+`soundclaw serve` prints the watch address; the page has four views, all written to by commands as `human:<name>` (what a person does is on the history):
+
+| Address | Page |
+|---|---|
+| `#/` | the cards (play, waveform, spectrogram, checks, Approve, Ask for changes, Feedback, Edit) and, above them, a tile for each set |
+| `#/sound/<id>` | the editor (classic sliders, or layers, envelopes and effects), with the **Loop** panel: a loop box (`sound loop <id> 4 …` / `off`), the length and the crossfade (each a `sound loop` command), **Play looped** (repeats until stopped) and the numbers of the seam |
+| `#/set/<set>` | a set: its members in a row (each with waveform, spectrogram, loudness, check badge, Play), **Play in sequence** (with a gap, in ms), **Regen with a new seed** (`set regen <set> seed=<n>`, the seed chosen by the page), the spread rules, the distance matrix (pairs outside the limits outlined) and the set-spread verdict |
+| `#/audition`, `#/audition/<set>` | the batch audition page: every sound (or a set's members) as a compact card with Play, the check badge, Approve, Ask and Feedback; **Play all** with a gap; filters by set, status, checks and feedback tag; the keyboard: ← → ↑ ↓ move the selection, **space** plays it, **a** approves it (`sound mark … approved`), **r** opens the note for Ask for changes (shortcuts are off while you type) |
+
+Approvals, asks and feedback from the audition page are the same requests as on the cards: they reach a waiting agent through `await`.
 
 ## Requests, await and work
 
@@ -567,12 +729,12 @@ is also served over HTTP at `/mcp` with the token as a bearer.
 | `run` | `commands`: a batch, as above. |
 | `history` | The tape, filtered by `sound`, `by` or `last` (default 50). Includes what people did. |
 | `render` | `sound`: the numbers of its render (samples, peaks, loudness, attack, tail, brightness, pitch, onsets), a description, and the check summary last. |
-| `view` | `sound`, `kind` (`wave`, `spec` default, `pitch`, `layers`, `compare`), `other` for compare: a PNG image and the numbers. |
+| `view` | `sound` (a set's name for `set`), `kind` (`wave`, `spec` default, `pitch`, `layers`, `loop`, `set`, `compare`), `other` for compare: a PNG image and the numbers. |
 | `describe` | `sound`: words from the numbers, then the numbers. |
-| `check` | `sounds` (default all): the checks with scores, thresholds and flagged ranges. |
-| `import` | `source` (csv or patch text, or a path), `id`: make classic sounds. |
+| `check` | `sounds` (sound ids and set names; default all): the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
+| `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
 | `sample` | `action` (`import` with `file` and `as`, or `list`): WAV samples for sample layers. |
-| `export` | `sounds` (default all), `format` (`wav` default, `patch`, `csv`), `out` (default `<project>/exports`). |
+| `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too. |
 | `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |
 | `request` | File (`sound`, `note`, `tags`, `like`), `reply` (`id`, `text`) or `cancel` a request. |
 | `work` | `next` (default), `progress`, `done`, `blocked`, `list`. |
