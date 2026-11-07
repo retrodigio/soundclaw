@@ -33,6 +33,7 @@ import { FAMILY_KINDS, isFamily, makeFamily } from './families.ts';
 import { LOOP_FADE, LOOP_LENGTH, MAX_DURATION, type FamilyKind, type LoopSpec } from './layered.ts';
 import { Library, MAX_SET_MEMBERS, checkMemberIds, checkSpread, defaultSetSeed, formatSpread, makeMember, memberId, parseSpread, spreadPositions, type SpreadRule } from './sets.ts';
 import { hashText } from './generators.ts';
+import { BLOCK_MARK, applyMusic, isMusicOp, parseMusic, type MusicCommand } from './music-commands.ts';
 import { SOUND_ID_RE, TONE_PARAMS, cloneSound, idClash, fmtNumber, isParamName, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
 
 export interface Diag {
@@ -88,6 +89,7 @@ export function tokenize(text: string): { lines: RawLine[]; errors: Diag[] } {
         while (k < src.length) {
           const c = src[k]!;
           if (c === '\\' && (src[k + 1] === '"' || src[k + 1] === '\\')) { v += src[k + 1]; k += 2; continue; }
+          if (c === '\\' && src[k + 1] === 'n') { v += '\n'; k += 2; continue; }
           if (c === '"') { closed = true; k++; break; }
           v += c;
           k++;
@@ -106,6 +108,7 @@ export function tokenize(text: string): { lines: RawLine[]; errors: Diag[] } {
           while (k < src.length) {
             const c = src[k]!;
             if (c === '\\' && (src[k + 1] === '"' || src[k + 1] === '\\')) { q += src[k + 1]; k += 2; continue; }
+            if (c === '\\' && src[k + 1] === 'n') { q += '\n'; k += 2; continue; }
             if (c === '"') { closed = true; k++; break; }
             q += c;
             k++;
@@ -125,7 +128,7 @@ export function tokenize(text: string): { lines: RawLine[]; errors: Diag[] } {
 
 /** A text as it is written on the tape: bare when safe, else quoted. */
 export function quote(s: string): string {
-  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, ' ')}"`;
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')}"`;
 }
 
 export const AUTHOR_RE = /^(agent|human):[A-Za-z0-9_.-]{1,32}$/;
@@ -166,7 +169,8 @@ export type Command =
   | { op: 'set-retarget'; id: string; target: number | null; text: string }
   | { op: 'set-regen'; id: string; seed: number | null; spread: SpreadRule[] | null; text: string }
   | { op: 'family'; id: string; kind: FamilyKind; as: string | null; text: string }
-  | { op: 'undo' | 'redo'; group: string | null; by: string | null; text: string };
+  | { op: 'undo' | 'redo'; group: string | null; by: string | null; text: string }
+  | MusicCommand;
 
 function checkId(t: Token | undefined, line: number, what: string): string {
   if (!t) throw new DiagError(line, 1, `${what}: give the sound's id`);
@@ -655,15 +659,34 @@ function parseLine(l: RawLine): Command {
   if (head!.v === 'layer') return parseLayer(rest, head!, line);
   if (head!.v === 'fx') return parseFx(rest, head!, line);
   if (head!.v === 'env') return parseEnvCommand(rest, head!, line);
-  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, undo, redo)`);
+  if (head!.v === 'instrument' || head!.v === 'pattern' || head!.v === 'song') return parseMusic(head!, rest, line, (tokens, ln) => parseLine({ line: ln, tokens }));
+  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, instrument, pattern, song, undo, redo)`);
 }
 
 /** A command with the line it came from. */
 export type Parsed = Command & { line: number };
 
 /** Parse command text. Every problem is reported, with its line and column. */
+/** A pattern block (`pattern <song>.<name> steps=16 tpb=4`, then indented rows) becomes one `pattern set` line; the lines it took are left empty so line numbers stay. */
+function expandPatternBlocks(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  for (let k = 0; k < lines.length; k++) {
+    const m = /^pattern\s+[A-Za-z][A-Za-z0-9_-]*\.[A-Za-z][A-Za-z0-9_-]*(\s.*)?$/.exec(lines[k]!);
+    if (!m) { out.push(lines[k]!); continue; }
+    const body = [lines[k]!];
+    let j = k + 1;
+    while (j < lines.length && /^\s+\S/.test(lines[j]!)) body.push(lines[j++]!);
+    const name = /^pattern\s+(\S+)/.exec(lines[k]!)![1]!;
+    out.push(`pattern set ${name} ${quote(BLOCK_MARK + body.join('\n'))}`);
+    for (let x = 1; x < body.length; x++) out.push('');
+    k = j - 1;
+  }
+  return out.join('\n');
+}
+
 export function parse(text: string): { commands: Parsed[]; errors: Diag[] } {
-  const t = tokenize(text);
+  const t = tokenize(expandPatternBlocks(text));
   const errors = [...t.errors];
   const commands: Parsed[] = [];
   for (const l of t.lines) {
@@ -919,6 +942,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
     case 'redo':
       throw new Error(`${c.op} is applied by the history, not to a sound`);
     default:
+      if (isMusicOp(c.op)) return applyMusic(lib, c as MusicCommand);
       return applyLayerCommand(lib, c);
   }
 }

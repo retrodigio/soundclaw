@@ -862,3 +862,10 @@ export function limitChannels(chans: readonly Float32Array[], ceilingDb: number)
   };
 }
 
+
+// ---- an effects chain over channels (the master chain of a song) ----------------------------------------------
+
+/** Run an effects chain over channels in place, in list order, each channel on its own (as a sound's master chain does). */
+export function applyFxChain(chans: readonly Float64Array[], fx: readonly Fx[]): void {
+  chans.forEach((ch, c) => { for (const f of fx) runFx(ch, f, c); });
+}

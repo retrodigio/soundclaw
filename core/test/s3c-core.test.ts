@@ -14,7 +14,7 @@ const db = (v: number): number => 20 * Math.log10(v);
 describe('loudness classes', () => {
   it('starts with the named classes, and the project style adds or replaces them', () => {
     const t = classTable(DEFAULT_STYLE);
-    expect(Object.keys(t).sort()).toEqual(['ambience', 'foley', 'impact', 'music-sting', 'standard', 'ui', 'voice']);
+    expect(Object.keys(t).sort()).toEqual(['ambience', 'foley', 'impact', 'music', 'music-sting', 'standard', 'stinger', 'ui', 'voice']);
     expect(t.standard).toEqual({ target: -16, tolerance: 1 });
     expect(t.ui!.target).toBeLessThan(t.foley!.target);
     expect(t.foley!.target).toBeLessThan(t.impact!.target);

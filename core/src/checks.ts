@@ -23,6 +23,8 @@ export const DEFAULT_CLASSES: Readonly<Record<string, LoudnessClass>> = {
   ambience: { target: -26, tolerance: 3 },
   voice: { target: -20, tolerance: 2 },
   'music-sting': { target: -16, tolerance: 2 },
+  music: { target: -16, tolerance: 2 },
+  stinger: { target: -14, tolerance: 2 },
 };
 
 export const CLASS_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;

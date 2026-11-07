@@ -12,6 +12,8 @@
 // it is never done while a tape replays: the writer measures when a command is run and writes the
 // result as ordinary `sound set <member> gain=…` commands after it (see matchCommands).
 
+import { cloneInstrument, type Instrument } from './instrument.ts';
+import { cloneSong, type SongDoc } from './song.ts';
 import { CLASSIC_FIELDS, type ClassicKey } from './classic.ts';
 import { integratedLoudness, melSpectrogram, truePeak, type MelSpec } from './analysis.ts';
 import { DEFAULT_STYLE, classTable, type CheckResult, type Style } from './checks.ts';
@@ -51,17 +53,24 @@ export interface SetDoc {
 /** The sounds of a project, and its sets. Commands replace a sound's (or a set's) object rather than mutating it. */
 export class Library extends Map<string, Sound> {
   sets = new Map<string, SetDoc>();
+  /** The project's instruments (the built-in ones are not in here). */
+  instruments = new Map<string, Instrument>();
+  songs = new Map<string, SongDoc>();
 }
 
 export function copyLibrary(lib: Library): Library {
   const out = new Library(lib);
   out.sets = new Map(lib.sets);
+  out.instruments = new Map(lib.instruments);
+  out.songs = new Map(lib.songs);
   return out;
 }
 
 export function cloneLibrary(lib: Library): Library {
   const out = new Library([...lib].map(([k, v]) => [k, cloneSound(v)] as const));
   out.sets = new Map([...lib.sets].map(([k, v]) => [k, cloneSet(v)] as const));
+  out.instruments = new Map([...lib.instruments].map(([k, v]) => [k, cloneInstrument(v)] as const));
+  out.songs = new Map([...lib.songs].map(([k, v]) => [k, cloneSong(v)] as const));
   return out;
 }
 
