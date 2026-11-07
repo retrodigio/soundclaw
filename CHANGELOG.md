@@ -6,6 +6,16 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixes from the second large use
+- **Samples**: a sample layer with no envelope and no trim plays the file as it is (no 2 ms fades, not cut by `duration=auto`), so `measure`
+  of a reference equals the file. A stereo file stays stereo through `side=left` / `side=right` on two hard-panned layers (`sample import`
+  prints the two commands; `measure` agrees with ffmpeg's `ebur128` within 0.2 LU). Files at 48 or 96 kHz (any rate) are converted to
+  44,100 Hz with a Blackman-windowed sinc that keeps their loudness within 0.2 LU, and the import states the method. Sample names keep their
+  case and are unique ignoring case. Renders of sample layers changed, so `RENDER_VERSION` is 3 and three layered goldens were regenerated
+  (`sample-plain`, `sample-trim-pitch-reverse`, `sample-pitch-envelope`).
+- **Sets**: in `set-spread` a member's own `loudness=` replaces the set's target for that member, and the check reports the per-member targets.
+- **Bursts**: `bursts(times=... level=a,b,c)` takes a level for each hit.
+
 ### Fixes from the first large use
 - **Loudness classes**: the style names classes with a target and a tolerance (`ui`, `foley`, `impact`, `ambience`, `voice`,
   `music-sting`, and `standard`, the old -16 ±1), a default class, a class per sound (`sound set <id> class=<name>`, or `loudness=<LUFS>` for

@@ -9,7 +9,7 @@ import { SOUND_SPECS, cloneLayered, layeredBody, serializeLayered, type LayeredS
 
 export const SAMPLE_RATE = 44100;
 /** Bump when the renderer's output for the same document changes: cached renders are keyed by it. */
-export const RENDER_VERSION = 2;
+export const RENDER_VERSION = 3;
 
 /** Ids are case-sensitive as written (file stems in engines are), and unique ignoring case so two never share a file on a case-insensitive disk. */
 export const SOUND_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;

@@ -64,7 +64,7 @@ redo
   and `phaserSweep` (-1..1), `lowPass` (1 = off), `lowPassSweep` (-1..1), `resonance`, `highPass`,
   `highPassSweep` (-1..1), `volume`. Ranges and formulas: docs/commands.md. Tone: `frequency`
   20-20000 Hz, `duration` 0.01-10 s, `volume` 0-1.
-- Ids are lowercase: `a-z`, `0-9`, `_`, `-`.
+- Ids keep their case and use `A-Z a-z 0-9 _ -`; two ids that differ only in case are one id too many. Sample names are the same.
 - `render <sound>` gives the numbers again; `export` writes `wav` (16-bit PCM, 44,100 Hz, mono; stereo for a layered sound with a panned layer),
   `patch` (sfxr text) or `csv` (synth.csv: classic sounds only) to `<project>/exports/` or `out`; `import` reads an
   sfxr csv or patch.
@@ -106,7 +106,9 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   are for the segment arriving at a point: `lin exp hold ease`. A fixed value set later removes the envelope.
 - Any layer off centre in `pan` makes the sound **stereo**; the checks count both channels and `describe` says stereo.
 - `sample import <project> <file.wav> as=<name>` (CLI `soundclaw sample import …`, MCP `sample`) before a `sample` layer;
-  a batch naming a missing sample is refused.
+  a batch naming a missing sample is refused. A sample layer with no envelope and no `start`/`end` plays the file as it is (no fade,
+  not cut), so `measure` of it equals the file. A 48 or 96 kHz file is converted with a windowed sinc (the import says so) and keeps
+  its loudness. A stereo file stays stereo as two layers: `layer add <id> sample sample=<name> side=left pan=-1` and `… side=right pan=1`.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower
@@ -124,7 +126,7 @@ Use these instead of making sounds one at a time whenever a game plays the same 
   commands). Name the parameters in `spread` as `sound set` / `layer set` do: a classic sound `freq±0.04 decay±0.1`; a layered
   sound `N.<param>`, `*.<param>`, `N.amp`, `N.fxK.<param>`, `gain`; `%` is relative. A pitch driven by an envelope moves as a whole.
   `view <set> set` shows the members and the distance matrix; `check <set>` runs **set-spread**: members must be neither too
-  alike (under 1 dB apart; widen the spread) nor too different (over 20 dB; narrow it), and within ±1 LU of the target. Fix a
+  alike (under 1 dB apart; widen the spread) nor too different (over 20 dB; narrow it), and within ±1 LU of the target (a member's own `loudness=` replaces the target for that member). Fix a
   member with ordinary commands; `set regen <set> seed=<n>` throws the generated members away and makes them again from the source
   as it is now (so edit the source first); `set add` / `set remove` / `set retarget` change the membership and the target.
   A classic member is quieted by its `volume`; if the target needs more than volume 1 allows, the run says how many LU it falls
@@ -164,7 +166,7 @@ class they are made for. `check` and `measure` say which class applied.
   **binding rule** (harsh against loudness: lower the 2–5 kHz energy first, then raise gain; clip against loudness: limit first),
   fix them in that order.
 - **Many hits in one layer: `bursts(...)`.** A sound has 8 layers at most; rain drops, a ratchet or a clock are one layer with
-  `env <id> 1.amp bursts(times=0.1,0.3,0.55 attack=0.002 decay=0.05 level=1)` or `bursts(count=12 over=2 jitter=0.5 level=0.4..1 seed=7)`.
+  `env <id> 1.amp bursts(times=0.1,0.3,0.55 attack=0.002 decay=0.05 level=1)` or `bursts(count=12 over=2 jitter=0.5 level=0.4..1 seed=7)`; `level=1,0.6,0.3` after `times=` gives each hit its own level.
 - **Decays: end the amplitude envelope at 0 with `@exp`** (`0:0 0.002:1 2.6:0@exp`): it is 60 dB down at its end, which is what `tail`
   asks for; `sound set <id> duration=auto` then ends the sound where it died away, inside a layer's source too.
 - **Scripts: `measure <project> [ids...] --json` measures many sounds in one process** (starting a process per sound costs about half a second each):

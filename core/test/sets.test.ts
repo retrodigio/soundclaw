@@ -245,6 +245,19 @@ describe('the set-spread check', () => {
     expect(measureSet(ms, null).result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 .* from the middle member/);
     expect(measureSet(ms.slice(0, 1), -20).result.pass).toBe(false);
   });
+  it('holds a member with its own loudness to that, and the report names the per-member targets', () => {
+    const l = lib(`${PICKUP}set new c from=coin count=4 spread="freq±0.04 decay±0.1" seed=5\n`);
+    matched(l, 'c', -20);
+    const ms = members(l, 'c');
+    ms[2]!.lufs -= 4;
+    expect(measureSet(ms, -20).result.pass).toBe(false);
+    ms[2]!.own = ms[2]!.lufs; // its own loudness is where it is
+    const m = measureSet(ms, -20);
+    expect(m.result.ranges.filter((r) => /LUFS, .* LU from/.test(r.note))).toHaveLength(0);
+    expect(m.result.threshold).toMatch(/own targets \(LUFS\): c_3 -24\.\d/);
+    ms[2]!.own = -30; // an own target it misses is flagged against that target
+    expect(measureSet(ms, -20).result.ranges.map((r) => r.note).join('\n')).toMatch(/c_3 is -24\.\d LUFS, 6\.\d LU from the own target -30\.0/);
+  });
   it('holds the members of a set to its target, and a family variant to the target plus its offset', () => {
     const l = lib(`${PICKUP}set new c from=coin count=2 target=-24 seed=1\nfamily coin far\n`);
     expect(soundStyle(l.get('c_1')!, l.sets.values()).loudnessTarget).toBe(-24);

@@ -326,6 +326,8 @@ export interface SetMember {
   id: string;
   channels: readonly Float32Array[];
   lufs: number;
+  /** The member's own loudness target (`loudness=` on the sound): it replaces the set's target for this member. */
+  own?: number;
 }
 
 export interface SetMeasure {
@@ -360,8 +362,12 @@ export function measureSet(members: readonly SetMember[], target: number | null,
   const finite = lufs.filter(Number.isFinite).sort((a, b) => a - b);
   const centre = target ?? (finite.length ? finite[Math.floor(finite.length / 2)]! : 0);
   let loud = 0;
+  const owned: string[] = [];
   lufs.forEach((l, i) => {
-    if (!Number.isFinite(l) || Math.abs(l - centre) > style.loudnessTolerance) { loud++; notes.push({ from: 0, to: dur, note: `${ids[i]} is ${Number.isFinite(l) ? `${l.toFixed(1)} LUFS, ${Math.abs(l - centre).toFixed(1)} LU from the ${target !== null ? 'target' : 'middle member'} ${centre.toFixed(1)}` : 'silent'} (within ±${style.loudnessTolerance} LU)` }); }
+    const own = members[i]!.own;
+    const aim = own ?? centre;
+    if (own !== undefined) owned.push(`${ids[i]} ${own}`);
+    if (!Number.isFinite(l) || Math.abs(l - aim) > style.loudnessTolerance) { loud++; notes.push({ from: 0, to: dur, note: `${ids[i]} is ${Number.isFinite(l) ? `${l.toFixed(1)} LUFS, ${Math.abs(l - aim).toFixed(1)} LU from the ${own !== undefined ? 'own target' : target !== null ? 'target' : 'middle member'} ${aim.toFixed(1)}` : 'silent'} (within ±${style.loudnessTolerance} LU)` }); }
   });
   const spreadLu = finite.length ? finite[finite.length - 1]! - finite[0]! : 0;
   const pass = n >= 2 && !tooAlike && !tooFar && !loud;
@@ -374,7 +380,7 @@ export function measureSet(members: readonly SetMember[], target: number | null,
     ids, matrix, lufs,
     result: {
       name: 'set-spread', pass, score: n < 2 ? 0 : Math.max(0, 1 - bad / Math.max(1, n * (n - 1) / 2 + n)), value,
-      threshold: `members ${style.setSpreadMin} to ${style.setSpreadMax} dB apart; loudness within ±${style.loudnessTolerance} LU of ${target !== null ? `the target ${target} LUFS` : 'the middle member'}`,
+      threshold: `members ${style.setSpreadMin} to ${style.setSpreadMax} dB apart; loudness within ±${style.loudnessTolerance} LU of ${target !== null ? `the target ${target} LUFS` : 'the middle member'}${owned.length ? `; own targets (LUFS): ${owned.join(', ')}` : ''}`,
       ranges: notes.slice(0, 12),
     },
   };

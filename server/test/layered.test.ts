@@ -28,13 +28,28 @@ describe('samples', () => {
   it('imports a WAV into samples/, by file name or as=<name>, and lists it', () => {
     const file = wavFile('Thump Hit.wav');
     const r = f.w.samples.import(file);
-    expect(r.info.name).toBe('thump_hit');
+    expect(r.info.name).toBe('Thump_Hit'); // the case of the file name is kept, as a sound id's is
     expect(r.created).toBe(true);
-    expect(readFileSync(join(f.dir, 'samples', 'thump_hit.wav')).length).toBe(readFileSync(file).length);
+    expect(readFileSync(join(f.dir, 'samples', 'Thump_Hit.wav')).length).toBe(readFileSync(file).length);
     expect(f.w.samples.import(file, 'other').info.name).toBe('other');
-    expect(f.w.samples.list().map((s) => s.name)).toEqual(['other', 'thump_hit']);
+    expect(f.w.samples.list().map((s) => s.name)).toEqual(['other', 'Thump_Hit']);
     expect(f.w.samples.info('other')).toMatchObject({ rate: 22050, frames: 4000 });
-    expect(f.w.snapshot().samples.map((s) => s.name)).toEqual(['other', 'thump_hit']);
+    expect(f.w.snapshot().samples.map((s) => s.name)).toEqual(['other', 'Thump_Hit']);
+  });
+  it('keeps the case of a name: a layer finds it by exactly that name, and a name that differs only in case is refused', () => {
+    const a = wavFile('a.wav');
+    f.w.samples.import(a, 'BigBoom');
+    expect(f.w.samples.list().map((s) => s.name)).toEqual(['BigBoom']);
+    expect(f.w.samples.get('BigBoom')).toBeDefined();
+    expect(f.w.samples.get('bigboom')).toBeUndefined();
+    run('sound new s voice=layered');
+    expect(fail('layer add s sample sample=bigboom')).toMatch(/names sample 'bigboom', which is not in the project/);
+    run('layer add s sample sample=BigBoom');
+    expect(f.w.render('s').samples.length).toBeGreaterThan(3000);
+    expect(f.w.samples.import(a, 'BigBoom').created).toBe(false);
+    expect(() => f.w.samples.import(wavFile('b.wav', 3000), 'bigboom')).toThrow(/clashes with the sample 'BigBoom'.*ignoring case/);
+    expect(() => f.w.samples.import(a, 'BIGBOOM')).toThrow(/clashes with the sample 'BigBoom'/);
+    expect(f.w.samples.list()).toHaveLength(1);
   });
   it('the same file again is a no-op; another file under the same name is refused; bad names and non-WAVs are refused with a reason', () => {
     const a = wavFile('a.wav');

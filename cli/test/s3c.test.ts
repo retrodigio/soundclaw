@@ -188,14 +188,14 @@ describe('the rest of the output', () => {
     writeFileSync(join(dir, 'broken.wav'), 'not a wav');
     writeFileSync(join(dir, 'notes.txt'), 'x');
     const r = sc(['sample', 'import', proj, dir]);
-    expect(r.out).toMatch(/imported sample hit_one: 0.100 s/);
+    expect(r.out).toMatch(/imported sample Hit_One: 0.100 s/);
     expect(r.out).toMatch(/imported sample hit-two/);
     expect(r.out).toMatch(/warning: broken.wav:/);
     expect(r.out).toMatch(/2 samples from/);
     expect(sc(['sample', 'list', proj]).out.split('\n').filter(Boolean)).toHaveLength(2);
-    expect(sc(['sample', 'import', proj, dir]).out).toMatch(/already in the project: sample hit_one/);
+    expect(sc(['sample', 'import', proj, dir]).out).toMatch(/already in the project: sample Hit_One/);
     expect(sc(['sample', 'import', proj, dir, 'as=x']).err).toMatch(/names one file/);
-    expect(readdirSync(join(proj, 'samples')).sort()).toEqual(['hit-two.wav', 'hit_one.wav']);
+    expect(readdirSync(join(proj, 'samples')).sort()).toEqual(['Hit_One.wav', 'hit-two.wav']);
   });
 
   it('--help lists the new commands', () => {

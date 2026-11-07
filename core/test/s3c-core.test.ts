@@ -224,6 +224,16 @@ describe('the bursts envelope', () => {
     expect([...jitterTimes].sort((x, y) => x - y)).toEqual(jitterTimes); // rising, none overlapping
   });
 
+  it('takes a level for each hit with times=, in the order written, and says what is wrong with it', () => {
+    expect(pts('bursts(times=0.1,0.3,0.5 attack=0.002 decay=0.05 level=1,0.6,0.3)')).toBe('0.1:0 0.102:1 0.152:0@exp 0.3:0 0.302:0.6 0.352:0@exp 0.5:0 0.502:0.3 0.552:0@exp');
+    expect(pts('bursts(level=0.2,0.9 times=0.5,0.1 attack=0.002 decay=0.05)')).toBe('0.1:0 0.102:0.9 0.152:0@exp 0.5:0 0.502:0.2 0.552:0@exp'); // levels follow their times
+    expect(() => burstsEnv('bursts(times=0.1,0.3,0.5 level=1,0.6)')).toThrow(/3 times but 2 levels/);
+    expect(() => burstsEnv('bursts(times=0.1,0.3 level=1,5)')).toThrow(/each level is a number from 0 to 4 \(got '5'/);
+    expect(() => burstsEnv('bursts(count=3 over=1 level=1,0.5,0.2)')).toThrow(/goes with times=/);
+    const lib = build('sound new s voice=layered seed=1\nlayer add s osc wave=white dur=2\nenv s 1.amp bursts(times=0.1,0.3 attack=0.002 decay=0.05 level=0.8,0.4)');
+    expect((lib.get('s') as LayeredSound).layers[0]!.amp!.map((p) => p.v)).toEqual([0, 0.8, 0, 0, 0.4, 0]);
+  });
+
   it('says what is wrong', () => {
     expect(() => burstsEnv('bursts(times=0.1,0.12 attack=0.002 decay=0.05)')).toThrow(/overlap/);
     expect(() => burstsEnv('bursts(times=0.1 count=3 over=1)')).toThrow(/count=<n> over|goes with the count/);

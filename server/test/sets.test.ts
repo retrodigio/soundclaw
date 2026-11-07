@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FAMILIES, loudnessOf, renderChannels, serializeSet, serializeSound, replay, samplesHash, joinChannels, type LayeredSound } from '@soundclaw/core';
-import { Writer, checkText, exportFormat, formatExportFiles, formatImportReport, importCommands, setSummary, soundSummary, viewSound, ProjectError } from '../src/index.ts';
+import { Writer, checkText, exportFormat, formatExportFiles, formatImportReport, importCommands, normalizeCommands, setSummary, soundSummary, viewSound, ProjectError } from '../src/index.ts';
 import { fixture, type Fixture } from './helpers.ts';
 import { readOgg } from './ogg.ts';
 
@@ -34,6 +34,16 @@ describe('set new through the writer', () => {
     expect(readFileSync(join(f.dir, 'sets', 'feet.set'), 'utf8')).toBe(serializeSet(f.w.set('feet')));
     expect(existsSync(join(f.dir, 'sounds', 'feet_6.sfx'))).toBe(true);
     expect(f.w.snapshot().sets.map((s) => s.id)).toEqual(['feet']);
+  });
+  it('holds a member with its own loudness to that target in set-spread, and says so', () => {
+    run(STEPS);
+    expect(f.w.measureSetDoc('feet').result.threshold).not.toMatch(/own targets/);
+    run('sound set feet_2 loudness=-26');
+    const m = f.w.measureSetDoc('feet').result;
+    expect(m.threshold).toMatch(/own targets \(LUFS\): feet_2 -26/);
+    expect(m.ranges.map((r) => r.note).join('\n')).toMatch(/feet_2 is -20\.\d LUFS, 6\.\d LU from the own target -26\.0/);
+    run(normalizeCommands(f.w, ['feet_2']).commands);
+    expect(f.w.measureSetDoc('feet').result.ranges.map((r) => r.note).join('\n')).not.toMatch(/LU from the/);
   });
   it('replays from the tape to the same sounds with nothing measured (a fresh writer has the same gains)', () => {
     run(STEPS);

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, openRequests, type ViewKind } from '@soundclaw/core';
 import {
-  EXPORT_FORMATS, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizeCommands, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, sampleLine, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizeCommands, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
@@ -118,10 +118,13 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       --classic marks every imported sound classic (it stays one classic voice and exports as a synth.csv row).
   soundclaw sample import <project> <file.wav | folder> [as=<name>]
   soundclaw sample list <project>
-      Copy a WAV (PCM 8/16/24/32-bit or float, any rate, mixed down to mono, at most 120 s) into
-      <project>/samples/ so a sample layer can name it (layer add <id> sample sample=<name>). A folder: every
-      .wav in it (as= does not apply). The name defaults to the file's name. A name that exists with other
-      content is refused (in a folder, reported and the others still go in).
+      Copy a WAV (PCM 8/16/24/32-bit or float, any rate, at most 120 s) into <project>/samples/ so a
+      sample layer can name it (layer add <id> sample sample=<name>). A folder: every .wav in it (as= does
+      not apply). The name defaults to the file's name, its case kept (names are unique ignoring case). A name
+      that exists with other content is refused (in a folder, reported and the others still go in). A file at
+      a rate other than 44,100 Hz is converted by a windowed sinc, and the import says so. A layer plays a
+      stereo file as the mix of its channels, or one side of it (side=left, side=right): the whole file in
+      stereo is two layers, side=left pan=-1 and side=right pan=1.
   soundclaw export <project> [<id>...] [--all | --set <set>] [--format wav|ogg|patch|csv] [--to <dir>] [--pack] [--quality <q>]
       Default wav: 16-bit PCM, 44,100 Hz (classic sounds as pre-rendered WAVs, trunc(s*32000), mono;
       layered sounds through a limiter at the style's true-peak ceiling, mono or stereo). ogg: Vorbis,
@@ -364,7 +367,7 @@ function cmdSample(io: Io, p: Parsed): number {
   if (verb === 'list') {
     if (!dir || file) throw new UsageError('sample list: give a project folder');
     const list = wr(io, dir).samples.list();
-    io.out(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz${x.channels > 1 ? `, ${x.channels} channels mixed to mono` : ''}, ${x.bytes} bytes, sha256 ${x.sha256.slice(0, 12)}`).join('\n') + '\n' : 'no samples (sample import <project> <file.wav>)\n');
+    io.out(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, ${x.channels === 1 ? 'mono' : x.channels === 2 ? 'stereo' : `${x.channels} channels`}, ${x.bytes} bytes, sha256 ${x.sha256.slice(0, 12)}`).join('\n') + '\n' : 'no samples (sample import <project> <file.wav>)\n');
     return 0;
   }
   if (verb !== 'import' || !dir || !file) throw new UsageError('sample: sample import <project> <file.wav> [as=<name>] | sample list <project>');
@@ -380,12 +383,12 @@ function cmdSample(io: Io, p: Parsed): number {
     if (as) throw new UsageError('sample import: as=<name> names one file, not a folder');
     const d = w.samples.importDir(file);
     w.samplesChanged();
-    io.out(`${d.imported.map((x) => `${x.created ? 'imported' : 'already in the project:'} sample ${x.info.name}: ${x.info.seconds.toFixed(3)} s, ${x.info.rate} Hz`).join('\n')}${d.imported.length ? '\n' : ''}${d.problems.map((x) => `warning: ${x}\n`).join('')}${plural(d.imported.length, 'sample')} from ${file}\n`);
+    io.out(`${d.imported.map((x) => sampleLine(x.info, x.created)).join('\n')}${d.imported.length ? '\n' : ''}${d.problems.map((x) => `warning: ${x}\n`).join('')}${plural(d.imported.length, 'sample')} from ${file}\n`);
     return d.imported.length ? 0 : 1;
   }
   const r = w.samples.import(file, as);
   w.samplesChanged();
-  io.out(`${r.created ? 'imported' : 'already in the project:'} sample ${r.info.name}: ${r.info.seconds.toFixed(3)} s, ${r.info.rate} Hz${r.info.channels > 1 ? `, ${r.info.channels} channels mixed to mono` : ''}, sha256 ${r.info.sha256.slice(0, 12)}\nuse it: layer add <sound> sample sample=${r.info.name} [start=<s>] [end=<s>] [pitch=<semitones>] [reverse=1]\n`);
+  io.out(`${sampleLine(r.info, r.created)}\nsha256 ${r.info.sha256.slice(0, 12)}\nuse it: layer add <sound> sample sample=${r.info.name} [start=<s>] [end=<s>] [pitch=<semitones>] [reverse=1] [side=left|right]\n`);
   return 0;
 }
 

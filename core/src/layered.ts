@@ -101,6 +101,7 @@ export const SOURCE_SPECS: Record<Exclude<SourceKind, 'classic'>, readonly PSpec
     num('end', 0, MAX_DURATION, 0, 's', 'trim: where to stop (0 = the end)'),
     num('pitch', -48, 48, 0, 'semitones', 'transposition (the sample\'s length changes with it)', true),
     num('reverse', 0, 1, 0, '', '1 plays it backwards', false, true),
+    choice('side', ['mix', 'left', 'right'], 'mix', 'which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each); for the whole file in stereo use two layers, side=left pan=-1 and side=right pan=1'),
   ],
 };
 
@@ -342,7 +343,7 @@ export function parseValue(spec: PSpec, raw: string, what: string): Value {
   }
   if (spec.text) {
     if (spec.name === 'sample') {
-      if (raw !== '' && !/^[a-z0-9][a-z0-9_-]{0,47}$/.test(raw)) throw new Error(`${what}: '${raw}' is not a sample name (a-z, 0-9, _ and -)`);
+      if (raw !== '' && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/.test(raw)) throw new Error(`${what}: '${raw}' is not a sample name (letters, digits, _ and -)`);
     } else if (spec.name === 'table') {
       parseTable(raw, what);
     }

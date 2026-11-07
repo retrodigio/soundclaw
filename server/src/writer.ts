@@ -183,12 +183,12 @@ export class Writer {
   /** A set's distance matrix, loudness of its members and set-spread check, measured once for each distinct set of renders. */
   measureSetDoc(id: string): SetMeasure {
     const set = this.set(id);
-    const members = set.members.map((m) => ({ id: m, r: this.render(m), lufs: this.measure(m).analysis.lufs }));
+    const members = set.members.map((m) => ({ id: m, r: this.render(m), lufs: this.measure(m).analysis.lufs, own: this.sound(m).loudness !== undefined ? this.loudnessRule(this.sound(m)).target : undefined }));
     const target = setTarget(set, this.style);
-    const key = `${target}|${JSON.stringify(this.style)}|${members.map((m) => m.r.key).join(',')}`;
+    const key = `${target}|${JSON.stringify(this.style)}|${members.map((m) => `${m.r.key}@${m.own ?? ''}`).join(',')}`;
     let m = this.setMeasures.get(key);
     if (!m) {
-      m = measureSet(members.map((x) => ({ id: x.id, channels: x.r.channels, lufs: x.lufs })), target, { ...this.style, loudnessTolerance: this.setTolerance(set) });
+      m = measureSet(members.map((x) => ({ id: x.id, channels: x.r.channels, lufs: x.lufs, ...(x.own !== undefined ? { own: x.own } : {}) })), target, { ...this.style, loudnessTolerance: this.setTolerance(set) });
       this.setMeasures.set(key, m);
       if (this.setMeasures.size > 32) this.setMeasures.delete(this.setMeasures.keys().next().value!);
     }

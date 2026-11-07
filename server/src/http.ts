@@ -248,7 +248,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       json(res, 200, o.writer.samples.list());
       return;
     }
-    const sm = /^\/api\/samples\/([a-z0-9][a-z0-9_-]*)\.wav$/.exec(url.pathname);
+    const sm = /^\/api\/samples\/([A-Za-z0-9][A-Za-z0-9_-]*)\.wav$/.exec(url.pathname);
     if (sm) {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       const bytes = o.writer.samples.bytes(sm[1]!);

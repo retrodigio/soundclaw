@@ -213,9 +213,29 @@ the highs fall faster).
 | `bright` | 0 to 1 | 0.8 | - | brightness of the pluck (0 dull … 1 bright) |
 
 *sample*: an imported WAV (`soundclaw sample import <project> <file.wav | folder> [as=<name>]`: PCM 8/16/24/32-bit or 32-bit float,
-any rate, stereo mixed to mono, at most 120 s; it is copied to `<project>/samples/`). It plays at its own rate resampled
-(linear interpolation), trimmed by `start` and `end`, transposed by `pitch` (its length changes with it) and optionally
-backwards. A batch that names a sample that is not in the project is refused. The render key includes the file's hash.
+any rate, at most 120 s; it is copied to `<project>/samples/`). A sample's name keeps the case of the file name (or of `as=`), like
+a sound's id, and two names that differ only in case are refused (`Boom` and `boom`); a layer names it exactly. The layer plays the file
+as it is: with no amplitude envelope and no `start`/`end` there is no fade at either end and `duration=auto` does not cut it, so `measure`
+of a sound that only plays a file measures the file (a trimmed layer, or one with an envelope, still gets the 2 ms fades).
+
+*Rate.* A file at a rate other than 44,100 Hz is converted to 44,100 Hz when a layer plays it, by a Blackman-windowed sinc
+(deterministic, the same bytes in Node and the browser): the kernel's cut-off is 95% of the lower of the two Nyquist frequencies
+(20.9 kHz when a 48 or 96 kHz file goes down, so nothing folds back), its length gives a transition band of about 5% of that rate,
+and its passband gain is 1, so the loudness is kept (within 0.2 LU, tested on 22.05, 32, 48 and 96 kHz files). `sample import`
+prints this method for a file whose rate is not 44,100 Hz. After that the sample is trimmed by `start` and `end` (seconds of the
+file), transposed by `pitch` (linear interpolation between samples; its length changes with it) and optionally backwards.
+
+*Stereo.* A layer is one signal. `side=mix` (the default) plays the average of all the file's channels; `side=left` and `side=right`
+play one channel of a stereo file. To keep a stereo file stereo use two layers, hard-panned:
+
+```
+layer add boom sample sample=Wind side=left pan=-1
+layer add boom sample sample=Wind side=right pan=1
+```
+
+(`pan=-1` and `pan=1` are full left and full right: the two channels come out as they are in the file, and the sound is stereo.
+`measure` of that sound agrees with ffmpeg's `ebur128` on the file within 0.2 LU.) `sample import` prints these two lines for a
+stereo file. A batch that names a sample that is not in the project is refused. The render key includes the file's hash.
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
@@ -224,6 +244,7 @@ backwards. A batch that names a sample that is not in the project is refused. Th
 | `end` | 0 to 120 s | 0 | - | trim: where to stop (0 = the end) |
 | `pitch` | -48 to 48 semitones | 0 | yes | transposition (the sample's length changes with it) |
 | `reverse` | 0 to 1 (whole) | 0 | - | 1 plays it backwards |
+| `side` | `mix`, `left`, `right` | mix | - | which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each); for the whole file in stereo use two layers, side=left pan=-1 and side=right pan=1 |
 
 **Envelopes.** `env <id> <target> "<breakpoints>"` replaces a fixed value with breakpoints `time:value`, times in seconds from the
 start of the layer (the master chain's from the start of the sound), rising. Each point may carry a curve for the segment
@@ -241,9 +262,10 @@ that arrives at it: `0:100 0.2:400@exp 0.5:100@ease`. Before the first point the
 ```
 env drops 1.amp bursts(times=0.1,0.35,0.6 attack=0.002 decay=0.05 level=1)
 env drops 1.amp bursts(count=12 over=2 jitter=0.5 attack=0.001 decay=0.04 level=0.4..1 seed=7)
+env drops 1.amp bursts(times=0.1,0.35,0.6 level=1,0.6,0.3)
 ```
 
-Each hit rises over `attack` seconds (0.0005 to 1) to its level (0 to 4) and falls back to 0 on an exponential curve over `decay` seconds (0.005 to 10; 60 dB down at its end). `times=` gives the hits' start times (they must not overlap: a hit lasts attack + decay). `count=` with `over=` (seconds) spreads that many hits evenly over the time, each moved by up to `jitter` (0 to 1, default 0.5) of its slot, seeded (`seed=`; without one it comes from the settings, so the same text is always the same hits); `level=0.4..1` draws each hit's level from a range (count form). At most 85 hits per envelope (256 breakpoints). Write it without spaces, or in quotes. It works on any target that takes an envelope.
+Each hit rises over `attack` seconds (0.0005 to 1) to its level (0 to 4) and falls back to 0 on an exponential curve over `decay` seconds (0.005 to 10; 60 dB down at its end). `times=` gives the hits' start times (they must not overlap: a hit lasts attack + decay). `count=` with `over=` (seconds) spreads that many hits evenly over the time, each moved by up to `jitter` (0 to 1, default 0.5) of its slot, seeded (`seed=`; without one it comes from the settings, so the same text is always the same hits); `level=0.4..1` draws each hit's level from a range (count form); with `times=`, `level=1,0.6,0.3` gives each hit its own level, in the order the times are written (one level for each time, or a single level for all; a list with `count=` is an error). At most 85 hits per envelope (256 breakpoints). Write it without spaces, or in quotes. It works on any target that takes an envelope.
 
 Targets: `N.amp` (the amplitude envelope of layer N, 0 to 4), `N.<param>` (a layer parameter that takes an envelope: see the
 "Envelope" column), `N.fxK.<param>` (the K-th effect of layer N), `master.fxK.<param>`. `env <id> <target> adsr(a,d,s,r[,hold])`
@@ -484,7 +506,9 @@ set new footsteps from=step count=6 target=-20 spread="1.freq±12% 2.cutoff±20%
   **A classic sound has no separate gain: its gain is its `volume` parameter** (0 to 1, linear in amplitude), so a classic member
   can be made quieter or as loud as volume 1 allows; when the target needs more, `volume` is left at 1 and a warning says by how many LU it
   falls short (`sound layer-up` makes the sound layered, sample for sample, and then gain goes to 4). The match is repeated until it is within 0.05 LU.
-- **Checks.** Members are held to the set's target by the `loudness` check (a sound in two sets with targets uses the first). The `set-spread`
+- **Checks.** Members are held to the set's target by the `loudness` check (a sound in two sets with targets uses the first). A member with
+  its own `loudness=` (`sound set <id> loudness=-24`) is held to that and not to the set's target, in `set-spread` too, which says "from the own
+  target" for it and lists the own targets in its threshold line. The `set-spread`
   check (`check <set>`, below) looks at the set as a whole. `view <set> set` draws the members side by side and the distance matrix.
 - A set made from a source remembers it: `set regen` makes the generated members again from the source as it is now. Members that were added with
   `set add` are never regenerated; `set remove` takes a member out and keeps the sound.

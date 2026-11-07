@@ -86,9 +86,12 @@ export interface SampleWav {
   frames: number;
   /** All channels averaged to one. */
   data: Float32Array;
+  /** The first two channels as they are, when the file has two or more (a stereo file stays stereo for `side=left` and `side=right`). */
+  left?: Float32Array;
+  right?: Float32Array;
 }
 
-/** Read a WAV for use as a sample: PCM 8, 16, 24 or 32 bit or 32-bit float, any rate, any channel count (mixed down to mono); other chunks are skipped. Throws a plain Error saying what is wrong. */
+/** Read a WAV for use as a sample: PCM 8, 16, 24 or 32 bit or 32-bit float, any rate, any channel count (`data` is the mix of all, `left` and `right` the first two); other chunks are skipped. Throws a plain Error saying what is wrong. */
 export function readSampleWav(bytes: Uint8Array, maxSeconds = 120): SampleWav {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = (off: number) => String.fromCharCode(bytes[off]!, bytes[off + 1]!, bytes[off + 2]!, bytes[off + 3]!);
@@ -113,13 +116,18 @@ export function readSampleWav(bytes: Uint8Array, maxSeconds = 120): SampleWav {
   if (frames < 2) throw new Error('the WAV has no audio');
   if (frames / rate > maxSeconds) throw new Error(`the WAV is ${(frames / rate).toFixed(1)} s long; samples are at most ${maxSeconds} s`);
   const data = new Float32Array(frames);
+  const left = channels >= 2 ? new Float32Array(frames) : undefined;
+  const right = channels >= 2 ? new Float32Array(frames) : undefined;
   for (let i = 0; i < frames; i++) {
     let sum = 0;
     for (let c = 0; c < channels; c++) {
       const o = dataAt + i * bpf + c * (bits / 8);
-      sum += isFloat ? v.getFloat32(o, true) : bits === 8 ? (v.getUint8(o) - 128) / 128 : bits === 16 ? v.getInt16(o, true) / 32768 : bits === 24 ? ((v.getUint8(o) | (v.getUint8(o + 1) << 8) | (v.getInt8(o + 2) << 16)) / 8388608) : v.getInt32(o, true) / 2147483648;
+      const x = isFloat ? v.getFloat32(o, true) : bits === 8 ? (v.getUint8(o) - 128) / 128 : bits === 16 ? v.getInt16(o, true) / 32768 : bits === 24 ? ((v.getUint8(o) | (v.getUint8(o + 1) << 8) | (v.getInt8(o + 2) << 16)) / 8388608) : v.getInt32(o, true) / 2147483648;
+      sum += x;
+      if (c === 0 && left) left[i] = x;
+      else if (c === 1 && right) right[i] = x;
     }
     data[i] = sum / channels;
   }
-  return { rate, channels, frames, data };
+  return { rate, channels, frames, data, ...(left && right ? { left, right } : {}) };
 }

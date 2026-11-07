@@ -11,6 +11,7 @@ import {
 } from './layered.ts';
 import { TAU, exp2, log2, sineCycles, sinRad, tanPi } from './mathx.ts';
 import { hashText } from './generators.ts';
+import { resample } from './resample.ts';
 import { SAMPLE_RATE } from './sound.ts';
 
 const SR = SAMPLE_RATE;
@@ -18,7 +19,11 @@ const SR = SAMPLE_RATE;
 /** An imported sample, as mono 44,100 Hz-independent data: the renderer resamples it. */
 export interface SampleData {
   rate: number;
+  /** The mono signal (the channels averaged). */
   data: Float32Array;
+  /** A stereo file's channels, for `side=left` and `side=right`. */
+  left?: Float32Array;
+  right?: Float32Array;
 }
 
 /** Where a sample layer finds its audio. The renderer never reads files. */
@@ -290,26 +295,28 @@ function renderSample(l: Layer, bank: SampleBank | undefined): Float64Array {
   const name = l.p.sample as string;
   const smp = name ? bank?.get(name) : undefined;
   if (!smp) return new Float64Array(Math.round(0.1 * SR)); // a missing sample is silence; the server refuses to write a batch that names one
-  const rate = smp.rate / SR;
-  const len = smp.data.length;
-  const i0 = Math.min(len, Math.floor((l.p.start as number) * smp.rate));
+  const side = l.p.side;
+  // a file at another rate is converted to 44,100 Hz first (resample.ts), so the trim and the pitch below work on the engine's own rate
+  const sig = resample(side === 'left' && smp.left ? smp.left : side === 'right' && smp.right ? smp.right : smp.data, smp.rate, SR);
+  const len = sig.length;
+  const i0 = Math.min(len, Math.floor((l.p.start as number) * SR));
   const endSec = l.p.end as number;
-  const i1 = endSec > 0 ? Math.min(len, Math.floor(endSec * smp.rate)) : len;
+  const i1 = endSec > 0 ? Math.min(len, Math.floor(endSec * SR)) : len;
   if (i1 - i0 < 2) return new Float64Array(Math.round(0.01 * SR));
   const reverse = l.p.reverse === 1;
   const pitch = param(l.p, l.envs, 'pitch');
   const cap = MAX_DURATION * SR;
-  const out = new Float64Array(Math.min(cap, Math.ceil(((i1 - i0) / rate) * 4) + 4)); // slow enough pitches are cut at the cap
+  const out = new Float64Array(Math.min(cap, (i1 - i0) * 4 + 4)); // slow enough pitches are cut at the cap
   let pos = 0;
   const span = i1 - i0 - 1;
   let n = 0;
   while (pos <= span && n < out.length) {
     const j = Math.floor(pos);
     const fr = pos - j;
-    const a = smp.data[reverse ? i1 - 1 - j : i0 + j]!;
-    const b = smp.data[reverse ? i1 - 1 - Math.min(span, j + 1) : i0 + Math.min(span, j + 1)]!;
+    const a = sig[reverse ? i1 - 1 - j : i0 + j]!;
+    const b = sig[reverse ? i1 - 1 - Math.min(span, j + 1) : i0 + Math.min(span, j + 1)]!;
     out[n++] = a * (1 - fr) + b * fr;
-    pos += rate * exp2(pitch(n) / 12);
+    pos += exp2(pitch(n) / 12);
   }
   return out.slice(0, n);
 }
@@ -556,6 +563,11 @@ interface Built {
   src: number;
 }
 
+/** A sample layer with no envelope and no trim plays the file as it is: no fade, no cut (so `measure` of a reference equals the file). */
+function playsAsIs(l: Layer): boolean {
+  return l.kind === 'sample' && !l.amp && l.p.start === 0 && l.p.end === 0;
+}
+
 function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined): { buf: Float64Array; src: number } {
   const src = renderSource(s, l, bank);
   let tail = 0;
@@ -568,7 +580,7 @@ function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined): { 
   if (l.amp) {
     const r = envReader(l.amp);
     for (let i = 0; i < buf.length; i++) buf[i] = buf[i]! * r(i);
-  } else if (l.kind !== 'classic') {
+  } else if (l.kind !== 'classic' && !playsAsIs(l)) {
     // No amplitude envelope: a 2 ms fade at both ends of the source, so a layer never clicks.
     const len = src.length;
     for (let i = 0; i < Math.min(FADE, len); i++) buf[i] = buf[i]! * (i / FADE);
@@ -675,7 +687,7 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
     for (const ch of mix) for (let i = n - 1; i > last; i--) if (Math.abs(ch[i]!) >= floor) { last = i; break; }
     // A classic layer is the classic voice as it is (layer-up keeps the very samples), so the sound is never cut inside one.
     let floorEnd = 1;
-    for (const b of built) if (b.layer.kind === 'classic') floorEnd = Math.max(floorEnd, b.offset + b.src);
+    for (const b of built) if (b.layer.kind === 'classic' || playsAsIs(b.layer)) floorEnd = Math.max(floorEnd, b.offset + b.src);
     // (a run of less than 1 ms at the end is not worth a cut: the sound keeps the length its layers give it)
     end = Math.max(1, Math.min(n, Math.max(n - last - 1 > 44 ? last + 1 : n, floorEnd)));
     if (end < n && end > floorEnd) {

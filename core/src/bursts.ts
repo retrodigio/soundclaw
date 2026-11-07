@@ -2,6 +2,7 @@
 // a sound with many hits does not need a layer for each (a sound has at most 8 layers). Two forms:
 //
 //   bursts(times=0.1,0.3,0.55, attack=0.002, decay=0.05, level=1)      hits at the given times
+//   bursts(times=0.1,0.3,0.55, level=1,0.6,0.3)                        one level per hit (in the order the times are given)
 //   bursts(count=6, over=2, jitter=0.5, attack=0.002, decay=0.05, level=0.5..1, seed=7)
 //                                                                       `count` hits spread over `over` seconds, each moved by
 //                                                                       up to `jitter` of its slot, seeded (the same text always
@@ -56,7 +57,15 @@ export function burstsEnv(text: string): Env {
   const decay = num(f, 'decay', 0.05, 0.005, 10, ' s');
   let lo = 1, hi = 1;
   const lv = f.get('level');
-  if (lv !== undefined) {
+  let perHit: number[] | null = null;
+  if (lv !== undefined && /[\s,]/.test(lv)) {
+    if (!f.has('times')) throw new Error(`bursts(...): a level for each hit (level=${lv}) goes with times=; with count= give one level or a range like 0.5..1`);
+    perHit = lv.split(/[\s,]+/).filter(Boolean).map((w) => {
+      const n = parseNumber(w);
+      if (n === null || n < 0 || n > 4) throw new Error(`bursts(...): each level is a number from 0 to 4 (got '${w}' in level=${lv})`);
+      return n;
+    });
+  } else if (lv !== undefined) {
     const r = /^(.+?)\.\.(.+)$/.exec(lv);
     const a = parseNumber(r ? r[1]! : lv), b = parseNumber(r ? r[2]! : lv);
     if (a === null || b === null || a < 0 || b > 4 || a > b) throw new Error(`bursts(...): level is a number from 0 to 4, or a range like 0.5..1 (got '${lv}')`);
@@ -72,7 +81,11 @@ export function burstsEnv(text: string): Env {
       return t;
     });
     if (!times.length) throw new Error('bursts(...): times= needs at least one time');
-    times.sort((x, y) => x - y);
+    if (perHit && perHit.length !== times.length) throw new Error(`bursts(...): ${times.length} times but ${perHit.length} levels: level= needs one level for each hit, or a single level`);
+    // the levels stay with their times in the order they were written
+    const order = times.map((t, i) => ({ t, i })).sort((x, y) => x.t - y.t || x.i - y.i);
+    if (perHit) perHit = order.map((o) => perHit![o.i]!);
+    times = order.map((o) => o.t);
   } else {
     if (!f.has('count') || !f.has('over')) throw new Error('bursts(...): give times=<t,t,...> or count=<n> over=<seconds>');
     const count = num(f, 'count', 1, 1, MAX_BURSTS);
@@ -87,12 +100,12 @@ export function burstsEnv(text: string): Env {
   if (times.length > MAX_BURSTS) throw new Error(`bursts(...): at most ${MAX_BURSTS} bursts in one envelope (an envelope has at most ${MAX_POINTS} breakpoints); split them over two layers or two sounds`);
   const out: Env = [];
   let end = -1;
-  for (const raw of times) {
+  for (const [k, raw] of times.entries()) {
     let t = round6(raw);
     if (rng && t < end) t = round6(end + 0.001);
     if (t < end - 1e-9) throw new Error(`bursts(...): the bursts at ${round6(end - attack - decay)} s and ${t} s overlap (a burst lasts attack + decay = ${round6(attack + decay)} s): use a shorter decay or spread the times`);
     if (!out.length || t > end + 1e-9) out.push({ t, v: 0, curve: 'lin' });
-    out.push({ t: round6(t + attack), v: round6(rng && hi > lo ? lo + (hi - lo) * rng.next() : hi), curve: 'lin' });
+    out.push({ t: round6(t + attack), v: round6(perHit ? perHit[k]! : rng && hi > lo ? lo + (hi - lo) * rng.next() : hi), curve: 'lin' });
     end = round6(t + attack + decay);
     out.push({ t: end, v: 0, curve: 'exp' });
   }

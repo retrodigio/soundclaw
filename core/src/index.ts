@@ -26,3 +26,4 @@ export * from './bursts.ts';
 export * from './sets.ts';
 export * from './families.ts';
 export * from './importers.ts';
+export * from './resample.ts';

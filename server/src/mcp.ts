@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { openRequests } from '@soundclaw/core';
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
+import { sampleLine } from './samples.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, normalizeCommands, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { ProjectError } from './project.ts';
 import { formatErrors, plural } from './report.ts';
@@ -275,23 +276,23 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     inputSchema: z.object({
       action: z.enum(['import', 'list']),
       file: z.string().optional().describe('import: path of the WAV file'),
-      as: z.string().optional().describe('import: the sample\'s name (a-z, 0-9, _ and -)'),
+      as: z.string().optional().describe('import: the sample\'s name (letters, digits, _ and -; the case is kept)'),
     }),
   }, (a) => w.enqueue(() => {
     try {
       if (a.action === 'list') {
         const list = w.samples.list();
-        return { content: [text(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, sha256 ${x.sha256.slice(0, 12)}`).join('\n') : 'no samples')] };
+        return { content: [text(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, ${x.channels === 1 ? 'mono' : x.channels === 2 ? 'stereo' : `${x.channels} channels`}, sha256 ${x.sha256.slice(0, 12)}`).join('\n') : 'no samples')] };
       }
       if (!a.file) return fail('import needs file');
       if (existsSync(a.file) && statSync(a.file).isDirectory()) {
         const d = w.samples.importDir(a.file);
         w.samplesChanged();
-        return { content: [text(`${[...d.imported.map((x) => `${x.created ? 'imported' : 'already in the project:'} sample ${x.info.name}: ${x.info.seconds.toFixed(3)} s`), ...d.problems.map((x) => `warning: ${x}`)].join('\n')}\n${plural(d.imported.length, 'sample')} from ${a.file}`)] };
+        return { content: [text(`${[...d.imported.map((x) => sampleLine(x.info, x.created)), ...d.problems.map((x) => `warning: ${x}`)].join('\n')}\n${plural(d.imported.length, 'sample')} from ${a.file}`)] };
       }
       const r = w.samples.import(a.file, a.as);
       w.samplesChanged();
-      return { content: [text(`${r.created ? 'imported' : 'already in the project:'} sample ${r.info.name}: ${r.info.seconds.toFixed(3)} s, ${r.info.rate} Hz, sha256 ${r.info.sha256.slice(0, 12)}`)] };
+      return { content: [text(`${sampleLine(r.info, r.created)}\nsha256 ${r.info.sha256.slice(0, 12)}`)] };
     } catch (e) {
       return errorResult(e);
     }
