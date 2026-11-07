@@ -17,7 +17,7 @@ import { integratedLoudness, stft, truePeak, yinPitch, type PitchFrame } from '.
 import { SEAM_STEP_FACTOR, classTable, seamNumbers, type CheckRange, type Style } from './checks.ts';
 import { builtinInstruments, pitchCheckOf, type Instrument } from './instrument.ts';
 import { inKey, midiFreq, noteLabel, parseKey, pitchClassName } from './music.ts';
-import { arrange, channelNotes, layerOrder, type NoteEv, type SongDoc } from './song.ts';
+import { arrange, channelNotes, layerOrder, type Channel, type NoteEv, type SongDoc } from './song.ts';
 import { parallelPairs } from './theory.ts';
 import { styleCheck, type MusicGuide } from './musicstyle.ts';
 import type { ChannelAudio, SongRender } from './songrender.ts';
@@ -55,6 +55,27 @@ export const MASK_MIN_SECONDS = 0.5;
 export const MASK_MAX_FRACTION = 0.25;
 /** Two channels are close in a band when the second is within this many dB of the first. */
 export const MASK_CLOSE_DB = 4;
+
+/**
+ * Where the measurements of a song are kept between checks (and, for the server, between processes): the numbers of one
+ * channel, of the mix, of the layers, each under a key that holds everything they depend on. The values are plain data.
+ */
+export interface Memo {
+  get(key: string): unknown;
+  put(key: string, value: unknown): void;
+}
+
+/** Bump when a measurement changes: the kept ones are then ignored. */
+export const ANALYSIS_VERSION = 3;
+
+function memoized<T>(memo: Memo | undefined, key: string, make: () => T): T {
+  if (!memo) return make();
+  const hit = memo.get(key) as T | undefined;
+  if (hit !== undefined) return hit;
+  const v = make();
+  memo.put(key, v);
+  return v;
+}
 
 type InstLookup = (id: string) => Instrument | undefined;
 export const withBuiltins = (own: InstLookup): InstLookup => (id) => own(id) ?? builtinInstruments()[id];
@@ -380,99 +401,109 @@ export interface RenderMatchResult {
   onsets: Map<string, number[]>;
 }
 
+function matchPart(part: ChannelAudio, events: readonly NoteEv[], chan: Channel, inst: Instrument | undefined): { notes: NoteMatch[]; track: PitchFrame[]; onsets: number[] } {
+  const out: NoteMatch[] = [];
+  const x = monoOf(part);
+  const env = envDb(x);
+  let peakDb = -120;
+  for (const v of env) if (v > peakDb) peakDb = v;
+  const pitched = events.some((e) => e.midi !== null);
+  const track = pitched ? yinPitch(x, { hop: 1024, fmin: 50, fmax: 4200 }) : [];
+  const attack = inst?.attack ?? 0;
+  // the instrument's declared pitch rule: the note, its pitch class (an inharmonic bell), or timing alone
+  const rule = inst ? pitchCheckOf(inst) : 'full';
+  const legato = inst?.legato === true;
+  const tolerance = MATCH_TIMING_MS / 1000 + 0.5 * attack;
+  const onsets: number[] = [];
+  // group events that start together (a chord)
+  // (notes written at the same step, even when humanise moved them apart by a few ms)
+  const byStep = new Map<string, NoteEv[]>();
+  for (const e of events) { const k = `${e.at.instance}/${e.at.step}`; byStep.set(k, [...(byStep.get(k) ?? []), e]); }
+  const groups = new Map<number, NoteEv[]>();
+  for (const g of byStep.values()) { g.sort((a, b) => a.t - b.t); const k = Math.round(g[0]!.t * SR); groups.set(k, [...(groups.get(k) ?? []), ...g]); }
+  const keys = [...groups.keys()].sort((a, b) => a - b);
+  keys.forEach((key, gi) => {
+    const grp = groups.get(key)!;
+    const first = grp[0]!;
+    const tw = first.t;
+    const nextT = gi + 1 < keys.length ? groups.get(keys[gi + 1]!)![0]!.t : Infinity;
+    const prevT = gi > 0 ? groups.get(keys[gi - 1]!)![0]!.t : -Infinity;
+    const kFrom = Math.floor(((Math.max(tw - 0.04, (tw + prevT) / 2)) * SR) / HOP), kTo = Math.ceil(((Math.min(tw + 0.12, Math.max(tw + 0.03, nextT - 0.03))) * SR) / HOP);
+    const { k, rise } = steepestRise(env, kFrom, kTo);
+    const prevEnd = gi > 0 ? Math.max(...groups.get(keys[gi - 1]!)!.map((e) => e.t + e.len)) : -1;
+    // a note that touches the one before it (no gap, or under 30 ms; under 80 ms for a legato voice) has no rise in level to find
+    const touching = prevEnd >= tw - (legato ? 0.08 : 0.03);
+    const single = grp.length === 1 && first.midi !== null && !first.fx.arp;
+    const prevGrp = gi > 0 ? groups.get(keys[gi - 1]!)! : null;
+    const prevMidi = prevGrp && prevGrp.length === 1 && prevGrp[0]!.midi !== null && !prevGrp[0]!.fx.arp ? prevGrp[0]!.midi : null;
+    const octaves = rule === 'class';
+    const changes = single && prevMidi !== null && rule !== 'onset' && (octaves ? (first.midi! - prevMidi) % 12 !== 0 : first.midi! !== prevMidi);
+    let onset: number | null = null;
+    let problem: string | null = null;
+    // the level around the note, to know whether it is heard at all
+    const winLevel = Math.max(...Array.from(env.subarray(Math.max(0, Math.floor((tw * SR) / HOP)), Math.min(env.length, Math.ceil(((tw + Math.max(0.03, first.len)) * SR) / HOP) + 1)), (v) => v), -120);
+    const levelOnset = rise >= 6 ? r4(((k * HOP) + WIN / 2 - 3 * HOP / 2) / SR) : null;
+    // where the note is written to change pitch, the onset may be the pitch change (always for a legato voice's touching notes)
+    const byPitchOnly = legato && touching;
+    let pitchAt: number | null = null;
+    if (changes && (touching || levelOnset === null || Math.abs(levelOnset - tw) > tolerance)) pitchAt = pitchOnset(x, tw - 0.04, tw + 0.12 + 0.5 * attack, first.midi!);
+    // The pitch change vouches for a note whose level gives no onset, and convicts one that begins late; it never calls a
+    // note early, for a window that straddles the old and the new note looks like the new one a little too soon.
+    const found = (byPitchOnly ? [] : [levelOnset]).filter((v): v is number => v !== null);
+    if (pitchAt !== null) found.push(pitchAt < tw - tolerance ? tw : pitchAt);
+    if (found.length) onset = found.reduce((m, v) => (Math.abs(v - tw) < Math.abs(m - tw) ? v : m));
+    if (onset !== null) onsets.push(onset);
+    if (winLevel < peakDb - NOT_HEARD_DB) problem = `not heard: the channel is ${f1(peakDb - winLevel)} dB under its loudest at ${r4(tw)} s`;
+    else if (onset !== null && Math.abs(onset - tw) > tolerance) problem = `onset ${onset < tw ? 'early' : 'late'} by ${Math.round(Math.abs(onset - tw) * 1000)} ms (written ${r4(tw)} s, heard ${onset} s)`;
+    else if (onset === null && !touching) problem = `no clear onset near ${r4(tw)} s`;
+    // pitch
+    let hz: number | null = null;
+    const pitchedGroup = grp.filter((e) => e.midi !== null);
+    if (!problem && rule !== 'onset' && pitchedGroup.length === 1 && !pitchedGroup[0]!.fx.arp && midiFreq(pitchedGroup[0]!.midi!) >= 55) {
+      const len = first.len;
+      const a = tw + Math.min(0.08, len * 0.3), b = tw + Math.max(Math.min(len, 0.5) * 0.9, 0.05);
+      const vals = track.filter((f) => f.hz !== null && f.t >= a && f.t <= b && f.clarity > 0.7).map((f) => f.hz!);
+      if (vals.length >= 2) {
+        hz = median(vals);
+        const diffs = pitchedGroup.map((e) => 12 * Math.log2(hz! / midiFreq(e.midi!)));
+        const best = diffs.reduce((m, d) => (Math.abs(d) < Math.abs(m) ? d : m), diffs[0]!);
+        const oct = Math.round(best / 12);
+        if (Math.abs(best) > MATCH_PITCH_SEMITONES && !(rule === 'class' && Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES)) {
+          // the track can lock onto a sub-harmonic of a decaying pluck: look for the written pitch in the start of the note before calling it wrong
+          const from = tw + 0.5 * attack + 0.012;
+          const until = Math.min(tw + len, Number.isFinite(nextT) ? nextT - 0.01 : Infinity, tw + 0.35);
+          const w = Math.min(2048, Math.floor((until - from) * SR));
+          if (soundsAs(x, Math.round(from * SR), w, pitchedGroup[0]!.midi!, octaves) !== true) {
+            const want = noteLabel(pitchedGroup[0]!.midi!);
+            const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)));
+            problem = Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES && oct !== 0
+              ? `wrong octave: written ${want}, heard ${got} (${Math.abs(oct)} octave${Math.abs(oct) === 1 ? '' : 's'} ${oct > 0 ? 'high' : 'low'}); check the instrument's root`
+              : `wrong pitch: written ${want}, heard ${got} (${best > 0 ? '+' : ''}${best.toFixed(1)} semitones)`;
+          }
+        }
+      }
+    }
+    for (const e of grp) out.push({ channel: part.name, t: e.t, len: e.len, midi: e.midi, drum: e.drum, onset, hz, ok: !problem, problem });
+  });
+  return { notes: out, track, onsets };
+}
+
 /** Compare every written note with the channel rendered alone. Notes with ~arp (the pitch moves) are checked for timing only. */
-export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLookup = () => undefined): RenderMatchResult {
+export function renderMatch(song: SongDoc, render: SongRender, lookup: InstLookup = () => undefined, memo?: Memo): RenderMatchResult {
   const notes: NoteMatch[] = [];
   const pitchTracks = new Map<string, PitchFrame[]>();
   const onsetLists = new Map<string, number[]>();
   for (const part of render.parts) {
     const events = render.events.get(part.name) ?? [];
     if (!events.length) continue;
-    const x = monoOf(part);
-    const env = envDb(x);
-    let peakDb = -120;
-    for (const v of env) if (v > peakDb) peakDb = v;
-    const pitched = events.some((e) => e.midi !== null);
-    const track = pitched ? yinPitch(x, { hop: 1024, fmin: 50, fmax: 4200 }) : [];
     const chan = song.channels.find((c) => c.name === part.name)!;
-    const attack = chan.inst ? (lookup(chan.inst)?.attack ?? 0) : 0;
-    // the instrument's declared pitch rule: the note, its pitch class (an inharmonic bell), or timing alone
-    const rule = chan.inst ? pitchCheckOf(lookup(chan.inst)) : 'full';
-    const legato = chan.inst ? lookup(chan.inst)?.legato === true : false;
-    const tolerance = MATCH_TIMING_MS / 1000 + 0.5 * attack;
-    pitchTracks.set(part.name, track);
-    const onsets: number[] = [];
-    // group events that start together (a chord)
-    // (notes written at the same step, even when humanise moved them apart by a few ms)
-    const byStep = new Map<string, NoteEv[]>();
-    for (const e of events) { const k = `${e.at.instance}/${e.at.step}`; byStep.set(k, [...(byStep.get(k) ?? []), e]); }
-    const groups = new Map<number, NoteEv[]>();
-    for (const g of byStep.values()) { g.sort((a, b) => a.t - b.t); const k = Math.round(g[0]!.t * SR); groups.set(k, [...(groups.get(k) ?? []), ...g]); }
-    const keys = [...groups.keys()].sort((a, b) => a - b);
-    keys.forEach((key, gi) => {
-      const grp = groups.get(key)!;
-      const first = grp[0]!;
-      const tw = first.t;
-      const nextT = gi + 1 < keys.length ? groups.get(keys[gi + 1]!)![0]!.t : Infinity;
-      const prevT = gi > 0 ? groups.get(keys[gi - 1]!)![0]!.t : -Infinity;
-      const kFrom = Math.floor(((Math.max(tw - 0.04, (tw + prevT) / 2)) * SR) / HOP), kTo = Math.ceil(((Math.min(tw + 0.12, Math.max(tw + 0.03, nextT - 0.03))) * SR) / HOP);
-      const { k, rise } = steepestRise(env, kFrom, kTo);
-      const prevEnd = gi > 0 ? Math.max(...groups.get(keys[gi - 1]!)!.map((e) => e.t + e.len)) : -1;
-      // a note that touches the one before it (no gap, or under 30 ms; under 80 ms for a legato voice) has no rise in level to find
-      const touching = prevEnd >= tw - (legato ? 0.08 : 0.03);
-      const single = grp.length === 1 && first.midi !== null && !first.fx.arp;
-      const prevGrp = gi > 0 ? groups.get(keys[gi - 1]!)! : null;
-      const prevMidi = prevGrp && prevGrp.length === 1 && prevGrp[0]!.midi !== null && !prevGrp[0]!.fx.arp ? prevGrp[0]!.midi : null;
-      const octaves = rule === 'class';
-      const changes = single && prevMidi !== null && rule !== 'onset' && (octaves ? (first.midi! - prevMidi) % 12 !== 0 : first.midi! !== prevMidi);
-      let onset: number | null = null;
-      let problem: string | null = null;
-      // the level around the note, to know whether it is heard at all
-      const winLevel = Math.max(...Array.from(env.subarray(Math.max(0, Math.floor((tw * SR) / HOP)), Math.min(env.length, Math.ceil(((tw + Math.max(0.03, first.len)) * SR) / HOP) + 1)), (v) => v), -120);
-      const levelOnset = rise >= 6 ? r4(((k * HOP) + WIN / 2 - 3 * HOP / 2) / SR) : null;
-      // where the note is written to change pitch, the onset may be the pitch change (always for a legato voice's touching notes)
-      const byPitchOnly = legato && touching;
-      let pitchAt: number | null = null;
-      if (changes && (touching || levelOnset === null || Math.abs(levelOnset - tw) > tolerance)) pitchAt = pitchOnset(x, tw - 0.04, tw + 0.12 + 0.5 * attack, first.midi!);
-      // The pitch change vouches for a note whose level gives no onset, and convicts one that begins late; it never calls a
-      // note early, for a window that straddles the old and the new note looks like the new one a little too soon.
-      const found = (byPitchOnly ? [] : [levelOnset]).filter((v): v is number => v !== null);
-      if (pitchAt !== null) found.push(pitchAt < tw - tolerance ? tw : pitchAt);
-      if (found.length) onset = found.reduce((m, v) => (Math.abs(v - tw) < Math.abs(m - tw) ? v : m));
-      if (onset !== null) onsets.push(onset);
-      if (winLevel < peakDb - NOT_HEARD_DB) problem = `not heard: the channel is ${f1(peakDb - winLevel)} dB under its loudest at ${r4(tw)} s`;
-      else if (onset !== null && Math.abs(onset - tw) > tolerance) problem = `onset ${onset < tw ? 'early' : 'late'} by ${Math.round(Math.abs(onset - tw) * 1000)} ms (written ${r4(tw)} s, heard ${onset} s)`;
-      else if (onset === null && !touching) problem = `no clear onset near ${r4(tw)} s`;
-      // pitch
-      let hz: number | null = null;
-      const pitchedGroup = grp.filter((e) => e.midi !== null);
-      if (!problem && rule !== 'onset' && pitchedGroup.length === 1 && !pitchedGroup[0]!.fx.arp && midiFreq(pitchedGroup[0]!.midi!) >= 55) {
-        const len = first.len;
-        const a = tw + Math.min(0.08, len * 0.3), b = tw + Math.max(Math.min(len, 0.5) * 0.9, 0.05);
-        const vals = track.filter((f) => f.hz !== null && f.t >= a && f.t <= b && f.clarity > 0.7).map((f) => f.hz!);
-        if (vals.length >= 2) {
-          hz = median(vals);
-          const diffs = pitchedGroup.map((e) => 12 * Math.log2(hz! / midiFreq(e.midi!)));
-          const best = diffs.reduce((m, d) => (Math.abs(d) < Math.abs(m) ? d : m), diffs[0]!);
-          const oct = Math.round(best / 12);
-          if (Math.abs(best) > MATCH_PITCH_SEMITONES && !(rule === 'class' && Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES)) {
-            // the track can lock onto a sub-harmonic of a decaying pluck: look for the written pitch in the start of the note before calling it wrong
-            const from = tw + 0.5 * attack + 0.012;
-            const until = Math.min(tw + len, Number.isFinite(nextT) ? nextT - 0.01 : Infinity, tw + 0.35);
-            const w = Math.min(2048, Math.floor((until - from) * SR));
-            if (soundsAs(x, Math.round(from * SR), w, pitchedGroup[0]!.midi!, octaves) !== true) {
-              const want = noteLabel(pitchedGroup[0]!.midi!);
-              const got = noteLabel(Math.round(69 + 12 * Math.log2(hz / 440)));
-              problem = Math.abs(best - oct * 12) <= MATCH_PITCH_SEMITONES && oct !== 0
-                ? `wrong octave: written ${want}, heard ${got} (${Math.abs(oct)} octave${Math.abs(oct) === 1 ? '' : 's'} ${oct > 0 ? 'high' : 'low'}); check the instrument's root`
-                : `wrong pitch: written ${want}, heard ${got} (${best > 0 ? '+' : ''}${best.toFixed(1)} semitones)`;
-            }
-          }
-        }
-      }
-      for (const e of grp) notes.push({ channel: part.name, t: e.t, len: e.len, midi: e.midi, drum: e.drum, onset, hz, ok: !problem, problem });
-    });
-    onsetLists.set(part.name, onsets);
+    const inst = chan.inst ? lookup(chan.inst) : undefined;
+    // everything a channel's match depends on: its samples (the key), what the notes are held to
+    const key = `${ANALYSIS_VERSION}|match|${part.key}|${inst?.attack ?? 0}|${inst ? pitchCheckOf(inst) : 'full'}|${inst?.legato === true}|${chan.inst ?? ''}`;
+    const one = memoized(memo, key, () => matchPart(part, events, chan, inst));
+    notes.push(...one.notes);
+    pitchTracks.set(part.name, one.track);
+    onsetLists.set(part.name, one.onsets);
   }
   const seenBad = new Set<string>();
   const bad = notes.filter((n) => { if (n.ok) return false; const k = `${n.channel}@${n.t}`; if (seenBad.has(k)) return false; seenBad.add(k); return true; });
@@ -507,12 +538,14 @@ export interface BandMap {
   frames: number;
 }
 
-/** Per-channel band energy (dB) over time, and the frames where two channels share the same loudest band. */
-export function bandMap(parts: readonly ChannelAudio[]): BandMap {
+/** One channel's energy (dB) in each band, one value per frame. */
+interface ChannelBands { name: string; db: Float64Array[]; frames: number }
+
+function channelBands(p: ChannelAudio, memo?: Memo): ChannelBands {
   const size = 2048, hop = 2048;
-  const per = parts.map((p) => {
+  const stored = memoized(memo, `${ANALYSIS_VERSION}|bands|${p.key}`, () => {
     const s = stft(monoOf(p), size, hop);
-    const db = BANDS.map(() => new Float64Array(s.mags.length));
+    const db = BANDS.map(() => new Array<number>(s.mags.length));
     s.mags.forEach((m, f) => {
       BANDS.forEach((b, bi) => {
         const lo = Math.max(1, Math.ceil((b.lo * size) / SR)), hi = Math.min(size / 2, Math.floor((b.hi * size) / SR));
@@ -521,8 +554,15 @@ export function bandMap(parts: readonly ChannelAudio[]): BandMap {
         db[bi]![f] = 10 * Math.log10(e + 1e-12);
       });
     });
-    return { name: p.name, db, frames: s.mags.length };
+    return db;
   });
+  return { name: p.name, db: stored.map((r) => Float64Array.from(r)), frames: stored[0]?.length ?? 0 };
+}
+
+/** Per-channel band energy (dB) over time, and the frames where two channels share the same loudest band. */
+export function bandMap(parts: readonly ChannelAudio[], memo?: Memo): BandMap {
+  const size = 2048, hop = 2048;
+  const per = parts.map((p) => channelBands(p, memo));
   const frames = Math.max(0, ...per.map((p) => p.frames));
   let top = -200;
   for (const p of per) for (const row of p.db) for (const v of row) if (v > top) top = v;
@@ -688,6 +728,8 @@ export interface ReportInput {
   instruments: InstLookup;
   /** The project's music style guide and bible (the style check). */
   guide?: MusicGuide;
+  /** Where measurements are kept between calls (and processes): each channel is analysed once, the mix once for each distinct mix. */
+  memo?: Memo;
 }
 
 export function songReport(i: ReportInput): SongReport {
@@ -695,31 +737,43 @@ export function songReport(i: ReportInput): SongReport {
   const lookup = withBuiltins(i.instruments);
   const arr = arrange(song);
   const rule = songLoudnessRule(song, style);
-  const analysis = mixNumbers(full.mix);
-  const match = renderMatch(song, full, lookup);
-  const map = bandMap(full.parts);
-  const checks: MusicCheck[] = [...mixChecks(full.mix, analysis, style, rule), keyCheck(song, arr), rangeCheck(song, arr, lookup), match.check];
+  const memo = i.memo;
+  const V = ANALYSIS_VERSION;
+  const styleKey = JSON.stringify(style);
+  // the mix: its numbers, the three checks that read it, and what the master chain took off
+  const mixPart = memoized(memo, `${V}|mix|${full.key}|${JSON.stringify(rule)}|${styleKey}`, () => {
+    const a = mixNumbers(full.mix);
+    return { analysis: a, checks: mixChecks(full.mix, a, style, rule), reduction: reductionDb(full.pre, full.mix) };
+  });
+  const analysis = mixPart.analysis;
+  const match = renderMatch(song, full, lookup, memo);
+  const map = bandMap(full.parts, memo);
+  const checks: MusicCheck[] = [...mixPart.checks, keyCheck(song, arr), rangeCheck(song, arr, lookup), match.check];
   let loop: SongReport['loop'] = null;
   if (i.loop) {
     const la = { samples: i.loop.length, duration: i.loop.length / SR, peak: 0, truePeakDb: 0, lufs: 0, dc: 0, silent: false } satisfies MixNumbers;
-    const seam = loopCheck(i.loop.mix, song.tempo, style);
+    const seam = memoized(memo, `${V}|seam|${i.loop.key}|${song.tempo}|${styleKey}`, () => loopCheck(i.loop!.mix, song.tempo, style));
     loop = { analysis: la, seam };
     checks.push(seam);
   } else checks.push({ name: 'loop-music', advisory: false, pass: true, skipped: true, score: 1, value: song.loop === false ? 'the song does not loop (loop is off)' : 'no loop region', threshold: 'the loop seam has no click and no level step', ranges: [] });
   checks.push(maskingCheck(map));
   checks.push(voiceLeadingCheck(song, arr));
   checks.push(styleCheck(song, i.guide));
-  const layers = layersCheck(song, i.loop ?? full, style, rule, arrange(song));
+  const layerSource = i.loop ?? full;
+  const layers = memoized(memo, `${V}|layers|${layerSource.key}|${JSON.stringify([song.key, song.layers, song.channels.map((c) => [c.name, c.layer]), rule])}|${styleKey}`, () => layersCheck(song, layerSource, style, rule, arrange(song)));
   checks.push(layers.check);
   const channels = full.parts.map((p) => {
     const events = full.events.get(p.name) ?? [];
-    let peak = 0;
-    for (const c of p.channels) for (let k = 0; k < c.length; k++) { const v = Math.abs(c[k]!); if (v > peak) peak = v; }
-    return { name: p.name, layer: p.layer, lufs: integratedLoudness([p.channels[0], p.channels[1]]), peakDb: peak > 0 ? 20 * Math.log10(peak) : -Infinity, notes: events.length };
+    const own = memoized(memo, `${V}|channel|${p.key}`, () => {
+      let peak = 0;
+      for (const c of p.channels) for (let k = 0; k < c.length; k++) { const v = Math.abs(c[k]!); if (v > peak) peak = v; }
+      return { lufs: integratedLoudness([p.channels[0], p.channels[1]]), peakDb: peak > 0 ? 20 * Math.log10(peak) : -Infinity };
+    });
+    return { name: p.name, layer: p.layer, lufs: own.lufs, peakDb: own.peakDb, notes: events.length };
   });
   const numbers: SongNumbers = {
     length: arr.total, loopLength: arr.loop ? arr.loop.end - arr.loop.start : null, tempo: song.tempo, swing: song.swing, time: `${song.time[0]}/${song.time[1]}`, key: song.key,
-    lufs: analysis.lufs, truePeakDb: analysis.truePeakDb, rule, channels, layers: [...new Set(full.parts.map((p) => p.layer))], masterReductionDb: reductionDb(full.pre, full.mix),
+    lufs: analysis.lufs, truePeakDb: analysis.truePeakDb, rule, channels, layers: [...new Set(full.parts.map((p) => p.layer))], masterReductionDb: mixPart.reduction,
   };
   return { numbers, checks, match, map, analysis, loop, layerMixes: layers.mixes };
 }

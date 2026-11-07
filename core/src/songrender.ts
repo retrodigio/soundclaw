@@ -45,6 +45,8 @@ export interface SongRenderOptions {
 export interface ChannelAudio {
   name: string;
   layer: string;
+  /** What the channel's samples depend on (its notes, instruments, gain, pan and length): the same key, the same samples. */
+  key: string;
   /** Left and right, the same length as the song. */
   channels: [Float32Array, Float32Array];
 }
@@ -203,13 +205,17 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
     const audio = renderChannelAudio(song, ch, ev, N, wrap, o, k);
     keys.push(k.key);
     if (k.hit) cached++;
-    parts.push({ name: ch.name, layer: ch.layer || DEFAULT_LAYER, channels: audio });
+    parts.push({ name: ch.name, layer: ch.layer || DEFAULT_LAYER, key: k.key, channels: audio });
   }
-  const { pre, mix } = mixParts(song, parts, N, wrap, o.limiter);
+  // the mix is worked out when first asked for: a measurement that is already known never needs it
+  let mixed: { pre: [Float32Array, Float32Array]; mix: [Float32Array, Float32Array] } | null = null;
+  const mixOnce = (): NonNullable<typeof mixed> => (mixed ??= mixParts(song, parts, N, wrap, o.limiter));
   // stems: the channels of each layer, in the order the layers first appear (worked out when first asked for)
   let stems: SongRender['stems'] | null = null;
   return {
-    mode, length: N, window, mix, pre, parts, events, key: sha256Text(keys.join(',') + `|${song.gain}|${song.master.length}|${JSON.stringify([song.reverb, song.delay, song.channels.map((c) => [c.name, c.reverb, c.delay])])}`), cached,
+    mode, length: N, window, parts, events, key: sha256Text(keys.join(',') + `|${song.gain}|${JSON.stringify([song.master, song.reverb, song.delay, song.channels.map((c) => [c.name, c.reverb, c.delay])])}`), cached,
+    get mix() { return mixOnce().mix; },
+    get pre() { return mixOnce().pre; },
     get stems() { return (stems ??= renderStems(song, parts, N, wrap)); },
   };
 }

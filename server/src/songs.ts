@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  arrange, builtinInstruments, joinChannels, masterChainForStems, renderStems, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
+  arrange, builtinInstruments, joinChannels, masterChainForStems, type Memo, renderStems, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
   type MusicCheck, type PartStore, type SongDoc, type SongReport, type SongRender, midiToScript, type Instrument,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -84,6 +84,77 @@ export class PartCache implements PartStore {
   }
 }
 
+const MEMO_DISK_BYTES = 64 * 1024 * 1024;
+const MEMO_ENTRIES = 4096;
+
+/** JSON that keeps the infinities a silent channel's loudness is made of. */
+const encodeNums = (_k: string, v: unknown): unknown => (typeof v === 'number' && !Number.isFinite(v) ? { $n: Number.isNaN(v) ? 'nan' : v > 0 ? 'inf' : '-inf' } : v);
+const decodeNums = (_k: string, v: unknown): unknown => {
+  if (v && typeof v === 'object' && '$n' in v) { const n = (v as { $n: string }).$n; return n === 'nan' ? NaN : n === 'inf' ? Infinity : -Infinity; }
+  return v;
+};
+
+/** The measurements of songs kept under the project's cache folder, so a check in a new process does not measure a channel it has measured before. */
+export class AnalysisMemo implements Memo {
+  private readonly dir: string | null;
+  private readonly memory = new Map<string, unknown>();
+  hits = 0;
+  misses = 0;
+
+  constructor(projectDir: string | null) {
+    this.dir = projectDir ? join(projectDir, '.cache', 'analysis') : null;
+    this.prune();
+  }
+
+  private prune(): void {
+    if (!this.dir || !existsSync(this.dir)) return;
+    try {
+      const files = readdirSync(this.dir).map((f) => ({ f, st: statSync(join(this.dir!, f)) }));
+      let total = files.reduce((n, x) => n + x.st.size, 0);
+      for (const x of files.sort((a, b) => a.st.mtimeMs - b.st.mtimeMs)) {
+        if (total <= MEMO_DISK_BYTES) break;
+        rmSync(join(this.dir, x.f), { force: true });
+        total -= x.st.size;
+      }
+    } catch {
+      // a cache that cannot be pruned is left alone
+    }
+  }
+
+  get(key: string): unknown {
+    if (this.memory.has(key)) { this.hits++; return this.memory.get(key); }
+    const f = this.dir ? join(this.dir, `${sha256Text(key)}.json`) : null;
+    if (f && existsSync(f)) {
+      try {
+        const v = JSON.parse(readFileSync(f, 'utf8'), decodeNums) as unknown;
+        this.remember(key, v);
+        this.hits++;
+        return v;
+      } catch {
+        // an unreadable file is a miss
+      }
+    }
+    this.misses++;
+    return undefined;
+  }
+
+  put(key: string, value: unknown): void {
+    this.remember(key, value);
+    if (!this.dir) return;
+    try {
+      mkdirSync(this.dir, { recursive: true });
+      writeFileSync(join(this.dir, `${sha256Text(key)}.json`), JSON.stringify(value, encodeNums));
+    } catch {
+      // not kept on disk: it is still kept in memory
+    }
+  }
+
+  private remember(key: string, v: unknown): void {
+    this.memory.set(key, v);
+    if (this.memory.size > MEMO_ENTRIES) this.memory.delete(this.memory.keys().next().value!);
+  }
+}
+
 export interface SongMeasured {
   report: SongReport;
   /** The key of the render the numbers are of. */
@@ -93,6 +164,7 @@ export interface SongMeasured {
 /** Renders and measures songs through the part cache; the measurements are kept for each distinct document. */
 export class SongBench {
   readonly parts: PartCache;
+  readonly memo: AnalysisMemo;
   private readonly measured = new Map<string, SongMeasured>();
 
   private readonly w: Writer;
@@ -100,6 +172,7 @@ export class SongBench {
   constructor(w: Writer) {
     this.w = w;
     this.parts = new PartCache(w.project.dir);
+    this.memo = new AnalysisMemo(w.project.dir);
   }
 
   /** Render a song document. */
@@ -124,7 +197,7 @@ export class SongBench {
       const full = this.render(song, { mode: 'full' });
       const hasLoop = arrange(song).loop !== null;
       const loop = hasLoop ? this.render(song, { mode: 'loop' }) : null;
-      const report = songReport({ song, full, loop, style: this.w.style, instruments: (id) => this.w.lookupInstrument(id), guide: this.w.musicGuide().guide });
+      const report = songReport({ song, full, loop, style: this.w.style, instruments: (id) => this.w.lookupInstrument(id), guide: this.w.musicGuide().guide, memo: this.memo });
       m = { report, key };
       this.measured.set(key, m);
       if (this.measured.size > 32) this.measured.delete(this.measured.keys().next().value!);

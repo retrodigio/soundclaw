@@ -217,7 +217,14 @@ export function integratedLoudness(input: Samples | readonly Samples[]): number 
     return total;
   };
   if (y.length < block) ms.push(meanSquare(0, y.length));
-  else for (let s = 0; s + block <= y.length; s += step) ms.push(meanSquare(s, s + block));
+  else {
+    // a block is four steps: sum the squares of each step once and add four of them for each block
+    const steps = Math.floor((y.length - block) / step) + 1 + block / step - 1;
+    const sub = new Float64Array(steps);
+    for (const c of ys) for (let k = 0; k < steps; k++) { let sum = 0; const to = Math.min(y.length, (k + 1) * step); for (let i = k * step; i < to; i++) sum += c[i]! * c[i]!; sub[k] = sub[k]! + sum; }
+    const per = block / step;
+    for (let s = 0, k = 0; s + block <= y.length; s += step, k++) { let t = 0; for (let j = 0; j < per; j++) t += sub[k + j]!; ms.push(t / block); }
+  }
   const lufs = (z: number): number => (z > 0 ? -0.691 + (10 * Math.log(z)) / LN10 : -Infinity);
   const abs = ms.filter((z) => lufs(z) > -70);
   if (!abs.length) return -Infinity;
