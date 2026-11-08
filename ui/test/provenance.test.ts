@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TapeEntry, WorkRequest } from '@soundclaw/core';
-import { agentSet, answeredNote, provenanceOf } from '../src/sound/provenance.ts';
+import { agentSet, answeredNote, gridVersions, provenanceOf } from '../src/sound/provenance.ts';
 
 let n = 0;
 const e = (by: string, group: string, cmd: string, at = '2026-11-08T10:00:00.000Z'): TapeEntry => ({ seq: ++n, by, group, cmd, at });
@@ -72,5 +72,47 @@ describe('the note of the request an agent answered', () => {
     expect(answeredNote([q], 'beep', 'agent:claude', '2026-11-08T11:00:00.000Z')).toBeNull();
     expect(answeredNote([q], 'other', 'agent:claude', '2026-11-08T10:00:00.000Z')).toBeNull();
     expect(answeredNote([q], 'beep', 'agent:other', '2026-11-08T10:00:00.000Z')).toBeNull();
+  });
+});
+
+describe('the clip grid\'s versions', () => {
+  it('are the distinct renders after each group, newest last, at most four numbered; a status mark or a moment is not a version', () => {
+    reset();
+    const tape = [
+      e('agent:claude', 'g1', 'sound new beep voice=classic preset=pickup seed=3'),
+      e('agent:claude', 'g2', 'sound set beep decay=0.3'),
+      e('human:ana', 'g3', 'sound mark beep approved'),
+      e('human:ana', 'g4', 'sound set beep moment="a coin lands"'),
+      e('human:ana', 'g5', 'sound set beep decay=0.2'),
+      e('agent:claude', 'g6', 'sound set beep sustain=0.1'),
+      e('human:ana', 'g7', 'sound set beep sustain=0.2'),
+      e('human:ana', 'g8', 'sound set beep punch=0.5'),
+    ];
+    const g = gridVersions(provenanceOf(tape, 'beep'));
+    expect(g.proposed).toBeNull();
+    expect(g.versions.map((v) => [v.label, v.seq, v.by, v.current])).toEqual([['v1', 5, 'human:ana', false], ['v2', 6, 'agent:claude', false], ['v3', 7, 'human:ana', false], ['v4', 8, 'human:ana', true]]);
+  });
+
+  it('the agent\'s unapproved change is the proposal apart from v1…vN; an approval or the creation is not one', () => {
+    reset();
+    const base = [e('human:ana', 'g1', 'sound new beep voice=classic preset=pickup seed=3'), e('human:ana', 'g2', 'sound set beep decay=0.3'), e('agent:claude', 'g3', 'sound set beep decay=0.11')];
+    let g = gridVersions(provenanceOf(base, 'beep'));
+    expect(g.versions.map((v) => v.label)).toEqual(['v1', 'v2']);
+    expect(g.versions.some((v) => v.current)).toBe(false);
+    expect(g.proposed).toMatchObject({ seq: 3, label: 'agent', current: true, proposed: true });
+    g = gridVersions(provenanceOf([...base, e('human:ana', 'g4', 'sound mark beep approved')], 'beep'));
+    expect(g.proposed).toBeNull();
+    expect(g.versions.at(-1)).toMatchObject({ seq: 3, label: 'v3', current: true });
+    // a sound the agent made and nobody touched: its creation is v1, not a proposal
+    reset();
+    g = gridVersions(provenanceOf([e('agent:claude', 'g1', 'sound new zap voice=classic preset=laser seed=1')], 'zap'));
+    expect(g).toMatchObject({ proposed: null, versions: [{ label: 'v1', current: true }] });
+  });
+
+  it('restoring an earlier render makes it the newest version', () => {
+    reset();
+    const tape = [e('human:ana', 'g1', 'sound new beep voice=classic preset=pickup seed=3'), e('human:ana', 'g2', 'sound set beep decay=0.3'), e('agent:claude', 'g3', 'sound set beep decay=0.4'), e('human:ana', 'g4', 'sound set beep decay=0.3')];
+    const g = gridVersions(provenanceOf(tape, 'beep'));
+    expect(g.versions.map((v) => [v.label, v.seq, v.current])).toEqual([['v1', 1, false], ['v2', 3, false], ['v3', 4, true]]);
   });
 });

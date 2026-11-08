@@ -366,9 +366,26 @@ so the package depends on it and loads it when the first OGG is made. Its stream
 same bytes. There is no permissively licensed Vorbis decoder to hold the encoder against, so the tests read the container and the headers themselves (every page's checksum,
 the three headers, sample counts) and, where `ffmpeg` is installed, decode the file and correlate it with the source.
 
-**The audition page and the set page are the same cards on other pages.** They render and measure in the browser with `core` (the numbers the CLI prints), keep their
-state (selection, filters) in the page, and write only commands: Approve is `sound mark`, Ask for changes and feedback are requests, regen is `set regen … seed=<n>` with a seed
+**The audition page and the set page are the same clip grid.** They render and measure in the browser with `core` (the numbers the CLI prints; the audition page's rows use the server's cards, so a large project opens at once), keep their
+state (selection, filters) in the page, and write only commands: Approve is `sound mark`, Ask for changes, feedback and blind A/B answers are requests, regen is `set regen … seed=<n>` with a seed
 the page chooses, loop controls are `sound loop`.
+
+**Versions are worked out from the tape, in the page.** The set page's clip grid replays the history once per member (the same replay that
+gives an editor its "who set what"), keeping a document each time the render key changes: a status mark, a moment or a class is not a version, and a
+later change that brings back an earlier render makes that render the newest. The grid shows the last four distinct renders; the latest one is the
+agent's proposal when an agent wrote it after the sound was made and no person has approved the sound since. A cell's waveform and loudness come from
+the measuring worker rendering that document; nothing is measured inside the replay. "Make current" writes ordinary commands, as the person, in one
+batch: one `sound set` for a classic or tone sound, and for a layered sound the layer, env and fx commands that turn the layers as they are into the
+layers as they were (`restoreCommands` in core). The commands are applied to a copy first and must give the earlier render key exactly; a layer
+removed since cannot get its noise back, and then nothing is written and the page says why.
+
+**Blind A/B is a judgment, not an edit.** Both sides are rendered and measured in the browser; the gains meet at the mean of the two loudnesses
+(both lowered together if a side would pass −1 dBTP), and a pair whose renders are scaled copies of each other is skipped. Both sides are scheduled
+together on two gain nodes, the one not heard at zero, so Tab switches in time. An answer is a `comparison` request: the two sides as a sound and a
+tape number, the answer, the gains and the moment. It changes nothing; the agent reads it through `await` and closes it like feedback.
+
+**The moment is words.** `moment` on a sound or a set is the situation in the game the sound is for. No render reads it (a test renders every golden
+with a moment set and finds every hash unchanged); describe, the run summaries, a request's brief and the A/B card show it. A sound with none uses its set's.
 
 ## Not yet
 

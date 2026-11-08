@@ -3,12 +3,13 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { restoreCommands, arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { CardInfo, ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
-import type { DiffReply, LensReply } from './render.worker.ts';
-import { provenanceMemo, type Provenance } from './sound/provenance.ts';
+import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
+import { gridVersions, provenanceMemo, type Provenance, type Version } from './sound/provenance.ts';
 import { loadNew, saveNew } from './studio/prefs.ts';
+import { sameUpToLevel } from './sets/abmath.ts';
 
 export interface Measured {
   analysis: Analysis;
@@ -40,7 +41,18 @@ export interface Played {
   hash: string;
   samples: number;
   key: string;
+  /** A version from the tape (a clip-grid cell): the tape number it stood at. */
+  seq?: number;
+  /** The level-matching gain it played at (dB), in a blind A/B. */
+  gain?: number;
+  /** Tab switched to this side while the pair was playing. */
+  switched?: boolean;
 }
+
+/** One side of a blind A/B: a version of a sound and the gain that matches its level. */
+export interface AbSide { id: string; seq: number; doc: Sound; gain: number }
+/** The answers a person gave on this page since it loaded. */
+export type Tally = Record<'a' | 'b' | 'both' | 'neither', number>;
 
 /** What a sound's A side is: a snapshot of its parameters, or another sound (followed as it changes). */
 export type Pin = { kind: 'snapshot'; sound: Sound; label: string } | { kind: 'sound'; id: string };
@@ -857,6 +869,160 @@ export class Store {
   }
   private loadingTape = false;
 
+  // ---- sets and audition: versions from the tape, grid cells, blind A/B ---------------------------------------------
+
+  private versionMemo = new WeakMap<Provenance, ReturnType<typeof gridVersions>>();
+  /** A member's versions for the clip grid (the whole tape is fetched first in a lean project). */
+  versions(id: string): { versions: Version[]; proposed: Version | null } {
+    const p = this.provenance(id);
+    let v = this.versionMemo.get(p);
+    if (!v) { v = gridVersions(p); this.versionMemo.set(p, v); }
+    return v;
+  }
+
+  private cells = new Map<string, CellReply>();
+  private celling = new Set<string>();
+  /** A version's cell (small peaks, loudness, true peak) from the measuring worker; null until it arrives. */
+  cell(doc: Sound): CellReply | null {
+    const key = this.keyOf(doc);
+    const have = this.cells.get(key);
+    if (have) return have;
+    if (this.ready(doc) && !this.celling.has(key)) {
+      this.celling.add(key);
+      void this.renderer.cell(doc, this.samples, this.token)
+        .then((r) => { this.cells.set(key, r); this.hashes.set(key, r.hash); if (this.cells.size > 200) this.cells.delete(this.cells.keys().next().value!); })
+        .catch(() => undefined)
+        .finally(() => { this.celling.delete(key); this.changed(); });
+    }
+    return null;
+  }
+
+  /** Make an earlier version of a sound current: one batch of ordinary commands, written as this person (or why it cannot be). */
+  async restoreVersion(id: string, want: Sound): Promise<{ ok: boolean; error?: string; commands?: string[] }> {
+    const now = await this.docNow(id);
+    if (!now) return { ok: false, error: `no sound '${id}'` };
+    const r = restoreCommands(now, want, (n) => this.sampleBank.hash(n) ?? 'missing');
+    if ('error' in r) return { ok: false, error: r.error };
+    if (!r.commands.length) return { ok: true, commands: [] };
+    const res = await this.run(r.commands.join('\n'));
+    return res.ok ? { ok: true, commands: r.commands } : { ok: false, error: res.errors[0]?.message ?? 'refused' };
+  }
+
+  /** Are two versions the same sound once their levels are matched (one render a scaled copy of the other)? */
+  async identical(a: Sound, b: Sound): Promise<boolean> {
+    if (this.keyOf(a) === this.keyOf(b)) return true;
+    const [ra, rb] = await Promise.all([this.renderer.render(a, this.samples, this.token), this.renderer.render(b, this.samples, this.token)]);
+    return sameUpToLevel(ra.channels, rb.channels);
+  }
+
+  /** A blind A/B answer, as a comparison request the agent receives through await. */
+  compare(body: Omit<Extract<PersonRequest, { action: 'compare' }>, 'action'>): Promise<Answer> {
+    return this.request({ action: 'compare', ...body });
+  }
+
+  /** The answers given on this page since it loaded (the A/B card's session tally). */
+  tally: Tally = { a: 0, b: 0, both: 0, neither: 0 };
+  countAnswer(a: keyof Tally): void { this.tally = { ...this.tally, [a]: this.tally[a] + 1 }; this.changed(); }
+
+  /** Play a version of a sound (a clip-grid cell); playing it again stops it. */
+  async playVersion(id: string, seq: number, doc: Sound): Promise<void> {
+    this.markSeen(id);
+    await this.playDoc(`${id}@${seq}`, doc, id, undefined, false, false, undefined, { seq });
+  }
+
+  /** Play versions one after the other with a gap (ms): a row or a column of the grid. */
+  async playVersions(items: { id: string; seq: number; doc: Sound }[], gapMs: number): Promise<void> {
+    const token = ++this.seqToken;
+    this.stop();
+    const keys = items.map((x) => `${x.id}@${x.seq}`);
+    for (let i = 0; i < items.length; i++) {
+      if (token !== this.seqToken) return;
+      this.sequence = { ids: keys, index: i };
+      this.changed();
+      const x = items[i]!;
+      await this.playDoc(keys[i]!, x.doc, x.id, undefined, true, false, undefined, { seq: x.seq });
+      await this.idle();
+      if (token !== this.seqToken) return;
+      if (i < items.length - 1) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    if (token === this.seqToken) { this.sequence = null; this.changed(); }
+  }
+
+  /** The blind A/B playing now: which side is heard. Both sides are scheduled together; Tab switches which one is heard, in time. */
+  ab: { side: 'A' | 'B'; a: AbSide; b: AbSide } | null = null;
+  private abNodes: { A: GainNode; B: GainNode; sources: AudioBufferSourceNode[]; hashes: { A: string; B: string }; samples: { A: number; B: number } } | null = null;
+
+  /** Play a pair: `side` is heard, `times` starts `interval` seconds apart, each side at its level-matching gain. */
+  async playAB(a: AbSide, b: AbSide, side: 'A' | 'B', times: number, interval: number): Promise<void> {
+    this.stopSequence();
+    const token = ++this.playToken;
+    this.playing = `ab#${side}`;
+    this.rendering = this.playing;
+    this.ab = { side, a, b };
+    this.changed();
+    try {
+      const [ra, rb] = await Promise.all([this.renderer.render(a.doc, this.samples, this.token), this.renderer.render(b.doc, this.samples, this.token)]);
+      if (token !== this.playToken) return;
+      this.rendering = null;
+      this.ctx ??= new AudioContext({ sampleRate: 44100 });
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      if (token !== this.playToken) return;
+      const ctx = this.ctx;
+      const lin = (db: number): number => 10 ** (db / 20);
+      const gains = { A: ctx.createGain(), B: ctx.createGain() };
+      gains.A.gain.value = side === 'A' ? lin(a.gain) : 0;
+      gains.B.gain.value = side === 'B' ? lin(b.gain) : 0;
+      gains.A.connect(this.out());
+      gains.B.connect(this.out());
+      const t0 = ctx.currentTime + 0.05;
+      const sources: AudioBufferSourceNode[] = [];
+      let end = 0;
+      for (const [r, g] of [[ra, gains.A], [rb, gains.B]] as const) {
+        const buf = ctx.createBuffer(r.channels.length, r.channels[0]!.length, 44100);
+        r.channels.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+        for (let k = 0; k < times; k++) {
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(g);
+          src.start(t0 + k * interval);
+          sources.push(src);
+          end = Math.max(end, k * interval + buf.duration);
+        }
+      }
+      this.abNodes = { ...gains, sources, hashes: { A: ra.hash, B: rb.hash }, samples: { A: ra.channels[0]!.length, B: rb.channels[0]!.length } };
+      const heard = side === 'A' ? a : b;
+      this.played.push({ id: heard.id, slot: side, seq: heard.seq, gain: heard.gain, hash: this.abNodes.hashes[side], samples: this.abNodes.samples[side], key: this.keyOf(heard.doc) });
+      this.clock = { at: performance.now() + 50, from: 0, len: end, loop: false };
+      const last = sources.at(-1)!;
+      last.onended = () => { if (this.abNodes?.sources === sources) { this.abNodes = null; this.ab = null; this.playing = null; this.changed(); this.wake(); } };
+    } catch (e) {
+      if (token !== this.playToken) return;
+      this.rendering = null;
+      this.playing = null;
+      this.ab = null;
+      this.error = `could not play: ${(e as Error).message}`;
+      this.changed();
+      this.wake();
+    }
+  }
+
+  /** Tab: hear the other side of the playing pair from this moment on. */
+  switchAB(): boolean {
+    const n = this.abNodes, ab = this.ab;
+    if (!n || !ab || !this.ctx) return false;
+    const side = ab.side === 'A' ? 'B' : 'A';
+    const t = this.ctx.currentTime;
+    const lin = (db: number): number => 10 ** (db / 20);
+    n.A.gain.setValueAtTime(side === 'A' ? lin(ab.a.gain) : 0, t);
+    n.B.gain.setValueAtTime(side === 'B' ? lin(ab.b.gain) : 0, t);
+    this.ab = { ...ab, side };
+    this.playing = `ab#${side}`;
+    const heard = side === 'A' ? ab.a : ab.b;
+    this.played.push({ id: heard.id, slot: side, seq: heard.seq, gain: heard.gain, hash: n.hashes[side], samples: n.samples[side], key: this.keyOf(heard.doc), switched: true });
+    this.changed();
+    return true;
+  }
+
   private setMeasures = new Map<string, { key: string; m: SetMeasure | null }>();
   private setFetching = new Set<string>();
 
@@ -983,6 +1149,13 @@ export class Store {
       // already stopped
     }
     this.source = null;
+    if (this.abNodes) {
+      for (const x of this.abNodes.sources) { try { x.stop(); } catch { /* not started */ } }
+      this.abNodes.A.disconnect();
+      this.abNodes.B.disconnect();
+      this.abNodes = null;
+    }
+    this.ab = null;
     this.clock = null;
     const wasSong = this.songPlay !== null;
     this.songPlay = null;
@@ -1084,7 +1257,7 @@ export class Store {
   }
 
   /** Play a sound document under a playing key (a toggle: playing it again stops it). It is rendered in the worker, so the page never waits for it. */
-  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false, loop = false, region?: [number, number]): Promise<void> {
+  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false, loop = false, region?: [number, number], extra: { seq?: number } = {}): Promise<void> {
     if (this.playing === key && !restart) { this.stop(); return; }
     this.stop();
     const token = ++this.playToken;
@@ -1103,7 +1276,7 @@ export class Store {
         else region = undefined;
       }
       const samples = chans[0]!;
-      this.played.push({ id, ...(slot ? { slot } : {}), ...(loop ? { loop: true } : {}), ...(region ? { region } : {}), hash: r.hash, samples: samples.length, key: this.keyOf(s) });
+      this.played.push({ id, ...(slot ? { slot } : {}), ...(loop ? { loop: true } : {}), ...(region ? { region } : {}), ...(extra.seq !== undefined ? { seq: extra.seq } : {}), hash: r.hash, samples: samples.length, key: this.keyOf(s) });
       this.ctx ??= new AudioContext({ sampleRate: 44100 });
       if (this.ctx.state === 'suspended') await this.ctx.resume();
       if (token !== this.playToken) return;

@@ -2,7 +2,7 @@
 // the samples a sound names (once; the page's token travels with each request), keeps what it has
 // rendered by the render key, and answers with the channels and the hash of their samples.
 
-import { renderParts, peaks, analyze, fullScaleOf, joinChannels, loudnessCurve, measuredChannels, melSpectrogram, mixdown, specMax, SPEC_RANGE_DB, type PitchFrame, readSampleWav, renderChannels, renderKey, runChecks, samplesHash, type Analysis, type CheckResult, type MelSpec, type SampleBank, type SampleData, type Sound, type Style } from '@soundclaw/core';
+import { renderParts, peaks, analyze, integratedLoudness, truePeak, fullScaleOf, joinChannels, loudnessCurve, measuredChannels, melSpectrogram, mixdown, specMax, SPEC_RANGE_DB, type PitchFrame, readSampleWav, renderChannels, renderKey, runChecks, samplesHash, type Analysis, type CheckResult, type MelSpec, type SampleBank, type SampleData, type Sound, type Style } from '@soundclaw/core';
 
 export interface RenderRequest {
   id: number;
@@ -11,7 +11,7 @@ export interface RenderRequest {
   samples: { name: string; sha256: string }[];
   token: string;
   /** `render`: the channels (to play). `measure`: the numbers, checks and spectrogram (for an editor), held to `style` (the loudness class `basis`). */
-  op?: 'render' | 'measure' | 'strips' | 'lens' | 'diff';
+  op?: 'render' | 'measure' | 'strips' | 'lens' | 'diff' | 'cell';
   style?: Style;
   basis?: string;
   /** `strips`: columns of peaks per layer. */
@@ -45,6 +45,9 @@ export interface DiffReply {
   summary: string;
 }
 
+/** A clip-grid cell: a small waveform, the integrated loudness and the true peak of one version (no other measurement). */
+export interface CellReply { peaks: StripPeaks; lufs: number | null; truePeakDb: number | null; duration: number; hash: string }
+
 export interface MeasureReply { analysis: Analysis; checks: CheckResult[]; spec: MelSpec; hash: string }
 export interface StripPeaks { min: number[]; max: number[] }
 export type RenderReply =
@@ -53,6 +56,7 @@ export type RenderReply =
   | { id: number; ok: true; key: string; measure: MeasureReply; ms: number }
   | { id: number; ok: true; key: string; lens: LensReply; ms: number }
   | { id: number; ok: true; key: string; diff: DiffReply; ms: number }
+  | { id: number; ok: true; key: string; cell: CellReply; ms: number }
   | { id: number; ok: false; error: string };
 
 const held = new Map<string, { sha: string; data: SampleData }>();
@@ -102,6 +106,15 @@ self.onmessage = async (ev: MessageEvent<RenderRequest>) => {
       channels = renderChannels(q.sound, bank);
       renders.set(key, channels);
       if (renders.size > 24) renders.delete(renders.keys().next().value!);
+    }
+    if (q.op === 'cell') {
+      const mc = measuredChannels(q.sound, channels);
+      const l = integratedLoudness(mc);
+      const tp = Math.max(...mc.map((c) => truePeak(c)));
+      const pk = peaks(mixdown(channels), 120);
+      const cell: CellReply = { peaks: { min: Array.from(pk.min), max: Array.from(pk.max) }, lufs: Number.isFinite(l) ? l : null, truePeakDb: tp > 0 ? 20 * Math.log10(tp) : null, duration: channels[0]!.length / 44100, hash: samplesHash(joinChannels(channels)) };
+      (self as unknown as Worker).postMessage({ id: q.id, ok: true, key, cell, ms: Math.round(performance.now() - t0) } satisfies RenderReply);
+      return;
     }
     if (q.op === 'measure') {
       const loop = q.sound.voice === 'layered' && !!q.sound.loop;

@@ -8,7 +8,7 @@ import {
   CHECK_NAMES, SAMPLE_RATE, audibleLayers, readSampleWav, resample, resampleMethod, sha256Hex, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
   pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, fmtStep, loopView, seamNumbers, setView, formatSpread, type Analysis, type CheckResult, type LoudnessRule, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
-import { Library, applyCommand, bindingRules, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
+import { Library, applyCommand, bindingRules, momentLine, momentOf, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
 import { encodeOgg } from './ogg.ts';
 import { ProjectError } from './project.ts';
 import { plural } from './report.ts';
@@ -29,7 +29,8 @@ export function checkLine(m: Measured): string {
 /** `describe`: the plain-words summary, then the numbers. */
 export function describeText(w: Writer, id: string): string {
   const m = w.measure(id);
-  return `${id}: ${describe(m.analysis)}\n${formatNumbers(m.analysis)}\n${checkLine(m)}`;
+  const moment = momentOf(w.sound(id), w.sets());
+  return `${id}: ${describe(m.analysis)}\n${moment ? `${momentLine(moment)}\n` : ''}${formatNumbers(m.analysis)}\n${checkLine(m)}`;
 }
 
 /** The set-spread check of a set, as lines: the verdict, the numbers and where it flags. */
@@ -67,7 +68,7 @@ function loudnessWords(rules: readonly LoudnessRule[], s: { loudnessTarget: numb
 /** One set in a few lines: members, target, rules, loudness and the set-spread verdict. */
 export function setSummary(w: Writer, id: string): string {
   const set = w.set(id);
-  const head = `set ${id}: ${plural(set.members.length, 'member')} [${set.members.join(', ')}]${set.from ? ` from ${set.from}` : ''}${set.target !== null ? `, target ${set.target} LUFS` : ', no loudness target'}${set.spread.length ? `, spread "${formatSpread(set.spread)}"` : ''}, seed ${set.seed}`;
+  const head = `set ${id}: ${plural(set.members.length, 'member')} [${set.members.join(', ')}]${set.from ? ` from ${set.from}` : ''}${set.target !== null ? `, target ${set.target} LUFS` : ', no loudness target'}${set.spread.length ? `, spread "${formatSpread(set.spread)}"` : ''}, seed ${set.seed}${set.moment ? `, moment "${set.moment}"` : ''}`;
   if (set.members.length < 2) return head;
   const m = w.measureSetDoc(id);
   return `${head}\n    set-spread ${m.result.pass ? 'pass' : 'FAIL'}: ${m.result.value}`;
@@ -114,6 +115,7 @@ export function soundJson(w: Writer, id: string, extra: Record<string, unknown> 
   const m = w.measure(id);
   return {
     id, voice: s.voice, status: s.status,
+    moment: momentOf(s, w.sets()),
     class: { name: m.rule.className, target: m.rule.target, tolerance: m.rule.tolerance, basis: m.rule.basis },
     pass: checksPass(m.checks), numbers: numbersJson(m.analysis), description: describe(m.analysis),
     checks: m.checks.map(checkJson), binding: bindingRules(m.checks), ...extra,

@@ -1,6 +1,6 @@
 // Screenshots of the dashboard on an invented example project: a few sounds, a set, a song and
 // requests in different states. Run it after `pnpm build`:
-//   node scripts/screens-studio.ts <name> [sounds]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages)
+//   node scripts/screens-studio.ts <name> [sounds|sets]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page)
 // It starts its own server on a temporary project and stops it; nothing is left running.
 
 import { mkdirSync } from 'node:fs';
@@ -159,6 +159,69 @@ async function soundShots(): Promise<void> {
   }
 }
 
+// ---- sets and audition: the clip grid and the blind A/B card (`node scripts/screens-studio.ts <name> sets`) ----
+
+const SET_ST3 = `sound new laser voice=classic preset=laser seed=3
+sound new coin_pickup voice=classic preset=pickup seed=5
+sound new jump voice=classic preset=jump seed=2
+sound new footstep_base voice=layered preset=footstep seed=11
+set new footsteps_grass from=footstep_base count=4 as=footstep_grass_01,footstep_grass_02,footstep_grass_03,footstep_grass_04 class=foley spread="1.freq±12% *.gain±20%" seed=2
+set moment footsteps_grass "The player walks slowly across a meadow at night. Steps repeat every 0.4 s under quiet music, for a minute or more."
+`;
+
+async function setShots(): Promise<void> {
+  const a = await startAgent();
+  const browser = await chromium.launch();
+  const run = async (script: string, by: string) => { const r = await a.cli(['run', a.dir, '-e', script, '--by', by]); if (r.code !== 0) throw new Error(r.err || r.out); };
+  try {
+    await run(SET_ST3, 'agent:claude');
+    // versions: the agent's and a person's, an approval, a proposal still open and one member pushed quiet (the spread warning)
+    await run('sound set footstep_grass_01 seed=21', 'agent:claude');
+    await run('sound mark footstep_grass_01 approved', 'human:ana');
+    await run('sound set footstep_grass_02 seed=41', 'human:ana');
+    await run('sound set footstep_grass_02 seed=57', 'agent:claude');
+    await run('sound set footstep_grass_03 seed=33', 'human:ana');
+    await run('sound set footstep_grass_03 seed=34', 'human:ana');
+    await run('sound set footstep_grass_04 out=-5.5', 'agent:claude');
+    const shots: { file: string; theme: 'dark' | 'light'; hash: string; act?: (p: Page) => Promise<void> }[] = [];
+    for (const theme of ['dark', 'light'] as const) {
+      shots.push({ file: `set-${theme}`, theme, hash: '#/set/footsteps_grass' });
+      shots.push({ file: `ab-answered-${theme}`, theme, hash: '#/set/footsteps_grass', act: async (p) => {
+        await p.locator('body').click({ position: { x: 4, y: 4 } });
+        await p.keyboard.press('a');
+        await p.getByTestId('ab-recorded').waitFor();
+        await p.getByTestId('ab-card').scrollIntoViewIfNeeded();
+      } });
+      shots.push({ file: `audition-${theme}`, theme, hash: '#/audition', act: async (p) => {
+        await p.getByTestId('cell-footstep_grass_02').click();
+        await p.getByTestId('cell-footstep_grass_03').click({ modifiers: ['Shift'] });
+        await p.keyboard.press('c');
+        await p.getByTestId('ab-matched').waitFor({ timeout: 20_000 });
+      } });
+    }
+    for (const v of shots) {
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+      await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p)); } catch { /* storage off */ } }, { theme: v.theme, density: 'compact', panels: { bottomOpen: false, railOpen: false } });
+      const page = await ctx.newPage();
+      await page.goto(`${a.url}&name=ana${v.hash}`);
+      await page.getByTestId('connection').and(page.locator('[data-status=open]')).waitFor();
+      await page.getByTestId(v.hash.startsWith('#/set') ? 'set-page' : 'audition').waitFor();
+      if (v.hash.startsWith('#/set')) await page.getByTestId('ab-matched').waitFor({ timeout: 20_000 });
+      await page.waitForTimeout(800);
+      if (v.act) await v.act(page);
+      await page.waitForTimeout(600);
+      const file = join(OUT, `${v.file}-1440x900.png`);
+      await page.screenshot({ path: file });
+      console.log(file);
+      await ctx.close();
+    }
+  } finally {
+    await browser.close();
+    await a.close();
+  }
+}
+
+if (process.argv[3] === 'sets') { await setShots(); process.exit(0); }
 if (process.argv[3] === 'sounds') { await soundShots(); process.exit(0); }
 
 const agent = await project();

@@ -61,6 +61,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
                                                             count seeded variants of a sound, each a real sound
                                                             (<set>_1 ... or the names you give), matched to the loudness target by gain
         set add|remove <set> <sound>...   set retarget <set> <LUFS>|none   set class <set> <name>|none   set regen <set> [seed=<n>] [spread="..."]
+        sound set <id> moment="<the game situation>"|none   set moment <set> "…"|none   (words only)
         family <sound> near|far|muffled [as=<id>]           the sound heard near, far away or through a wall
         layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]
         layer set <id> <n> <param>=<value> ...   layer remove|move|mute|solo <id> <n> [to=<m> | on|off]
@@ -178,7 +179,9 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another
       sound, good; with --like naming the other sound); a note may then be left out, and the tag
       good alone is praise (no mark). Without an id, lists the requests still
-      open, claimed or blocked (open ones say seen by <agent> once an agent has been handed them).
+      open, claimed or blocked (open ones say seen by <agent> once an agent has been handed them),
+      the dashboard's blind A/B answers among them as comparisons (which side fits better in the moment,
+      each side a sound as at a tape number, with the gain that matched its level).
       --by is human:<name> (default human:cli).
   soundclaw reply <project> <request> "<answer>" [--by <author>]      answer a blocked request (it opens again)
   soundclaw cancel <project> <request> ["<why>"] [--by <author>]       withdraw a request
@@ -203,8 +206,8 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       Install the Claude Code skill into ~/.claude/skills/soundclaw (or <dir>/.claude/skills/soundclaw).
       skill path prints where it is.
   soundclaw await <project-folder | watch-url> [--timeout <seconds>, default 600] [--since <cursor>] [--as <name>] [--json]
-      Wait on the running server for what people ask in the dashboard (a request, a reply, a
-      withdrawn request, or an approval or rejection mark), print the events with their next
+      Wait on the running server for what people ask in the dashboard (a request, a blind A/B
+      comparison, a reply, a withdrawn request, or an approval or rejection mark), print the events with their next
       step (work claims a request; history reads a mark) and a cursor, then EXIT. Run it in the
       background and restart it with --since <cursor> after each exit: its exit is what wakes an
       agent. Exit 0 with events, 3 on timeout, 1 if no server can be reached. Requests handed

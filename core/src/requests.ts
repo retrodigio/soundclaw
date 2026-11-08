@@ -18,15 +18,46 @@
 
 import { isFeedbackTag } from './editor.ts';
 
-/** `change`: something should be different. `feedback`: only praise (the tag `good`); nothing to change, the agent just acknowledges it. */
-export const REQUEST_KINDS = ['change', 'feedback'] as const;
+/**
+ * `change`: something should be different. `feedback`: only praise (the tag `good`); nothing to change, the agent just acknowledges it.
+ * `comparison`: a person's blind judgment of two versions (A and B, each a sound at a tape number) against the moment in the game they
+ * are for; nothing is asked to change, the agent reads it and closes it like feedback.
+ */
+export const REQUEST_KINDS = ['change', 'feedback', 'comparison'] as const;
 export type RequestKind = (typeof REQUEST_KINDS)[number];
+/** A comparison's answers: A fits better, B fits better, both would do, neither would do. */
+export const COMPARISON_ANSWERS = ['a', 'b', 'both', 'neither'] as const;
+export type ComparisonAnswer = (typeof COMPARISON_ANSWERS)[number];
+/** One side of a comparison: a sound as it stood after a tape entry. */
+export interface ComparedSide { sound: string; seq: number }
+/** What a comparison request records besides its note. */
+export interface Comparison {
+  a: ComparedSide;
+  b: ComparedSide;
+  answer: ComparisonAnswer;
+  /** The moment the person judged them in (absent: the sounds had none). */
+  moment?: string;
+  /** The level-matching gain applied to each side as it played (dB). */
+  gains: { a: number; b: number };
+}
+
+/** An answer in words, as the dashboard's buttons say it. */
+export const ANSWER_WORDS: Record<ComparisonAnswer, string> = { a: 'A fits better', b: 'B fits better', both: 'Both would do', neither: 'Neither would do' };
+
+const sideWords = (x: ComparedSide): string => `${x.sound} as at #${x.seq}`;
+const db = (g: number): string => `${g > 0 ? '+' : g < 0 ? '−' : '±'}${Math.abs(g).toFixed(1)} dB`;
+
+/** A comparison in words: `A fits better in "…": A was step as at #12 (gain +1.2 dB), B was step as at #20 (gain −0.3 dB)`. */
+export function comparisonWords(c: Comparison): string {
+  return `${ANSWER_WORDS[c.answer]}${c.moment ? ` in "${c.moment}"` : ' (no moment given)'}: A was ${sideWords(c.a)} (gain ${db(c.gains.a)}), B was ${sideWords(c.b)} (gain ${db(c.gains.b)})`;
+}
+
 export const REQUEST_STATES = ['open', 'claimed', 'blocked', 'done', 'cancelled'] as const;
 export type RequestState = (typeof REQUEST_STATES)[number];
 
 /** One line of requests.jsonl. */
 export type RequestRecord =
-  | { type: 'request'; id: string; sound: string; kind: RequestKind; note: string; by: string; at: string; /** The `sound mark … rejected` it goes with (tape seq). */ mark?: number; /** Quick tags a person clicked (too loud, good, …). */ tags?: string[]; /** With `too similar to another sound`: the other sound. */ other?: string }
+  | { type: 'request'; id: string; sound: string; kind: RequestKind; note: string; by: string; at: string; /** The `sound mark … rejected` it goes with (tape seq). */ mark?: number; /** Quick tags a person clicked (too loud, good, …). */ tags?: string[]; /** With `too similar to another sound`: the other sound. */ other?: string; /** A comparison's sides, answer, moment and gains. */ comparison?: Comparison }
   | { type: 'claim' | 'progress' | 'done' | 'blocked' | 'reply' | 'cancel' | 'seen'; id: string; by: string; at: string; text?: string };
 
 export interface RequestEvent {
@@ -49,6 +80,8 @@ export interface WorkRequest {
   tags: string[];
   /** The sound a `too similar` tag points at. */
   other?: string;
+  /** A comparison request's sides, answer, moment and gains. */
+  comparison?: Comparison;
   state: RequestState;
   /** Who claimed it (while claimed, and after). */
   claimedBy: string | null;
@@ -63,6 +96,25 @@ export interface WorkRequest {
 
 const ID_RE = /^r\d+$/;
 const NAME_RE = /^[a-z][a-z0-9_-]*$/;
+/** A sound id as the sounds have them (case kept). */
+const SOUND_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
+
+/** Why a comparison cannot be recorded (null: it can). */
+export function comparisonProblem(c: unknown): string | null {
+  if (!c || typeof c !== 'object') return 'a comparison request carries the comparison (a, b, answer, gains)';
+  const x = c as Partial<Comparison>;
+  for (const k of ['a', 'b'] as const) {
+    const v = x[k] as Partial<ComparedSide> | undefined;
+    if (!v || typeof v !== 'object' || typeof v.sound !== 'string' || !SOUND_RE.test(v.sound)) return `a comparison's ${k} names a sound`;
+    if (typeof v.seq !== 'number' || !Number.isInteger(v.seq) || v.seq < 1) return `a comparison's ${k} names the tape number of its version (a whole number from 1)`;
+  }
+  if (x.a!.sound === x.b!.sound && x.a!.seq === x.b!.seq) return 'a comparison compares two different versions';
+  if (!(COMPARISON_ANSWERS as readonly string[]).includes(x.answer as string)) return `a comparison's answer is ${COMPARISON_ANSWERS.join(', ')}`;
+  if (x.moment !== undefined && (typeof x.moment !== 'string' || !x.moment.trim() || x.moment.length > 400)) return 'a comparison\'s moment is text (at most 400 characters), or left out';
+  const g = x.gains as { a?: unknown; b?: unknown } | undefined;
+  if (!g || typeof g !== 'object' || [g.a, g.b].some((v) => typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > 60)) return 'a comparison records the gain applied to each side (dB, within ±60)';
+  return null;
+}
 
 /** Why this record cannot follow these requests (null: it can). */
 export function requestProblem(reqs: ReadonlyMap<string, WorkRequest>, r: RequestRecord): string | null {
@@ -71,13 +123,19 @@ export function requestProblem(reqs: ReadonlyMap<string, WorkRequest>, r: Reques
   if (typeof r.at !== 'string') return 'a record needs a time (at)';
   if (r.type === 'request') {
     if (reqs.has(r.id)) return `request ${r.id} already exists`;
-    if (typeof r.sound !== 'string' || !NAME_RE.test(r.sound)) return 'a request names a sound (a-z, 0-9, _ and -)';
+    if (typeof r.sound !== 'string' || !(r.kind === 'comparison' ? SOUND_RE : NAME_RE).test(r.sound)) return 'a request names a sound (a-z, 0-9, _ and -)';
     if (!(REQUEST_KINDS as readonly string[]).includes(r.kind)) return `a request's kind is ${REQUEST_KINDS.join(', ')}`;
     if (typeof r.note !== 'string') return 'a request has a note (it may be empty)';
     if (!r.note.trim()) return 'a change request says what should change';
     if (r.tags !== undefined && (!Array.isArray(r.tags) || r.tags.some((t) => typeof t !== 'string' || !isFeedbackTag(t)))) return 'tags are from the list on the card (a sound: too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good; a song: too busy, too sparse, too loud, too repetitive, wrong mood, good)';
     if (r.other !== undefined && (typeof r.other !== 'string' || !NAME_RE.test(r.other))) return 'the other sound is a sound id';
     if (r.kind === 'feedback' && !(r.tags?.length && r.tags.every((t) => t === 'good'))) return 'a feedback request carries the tag good and nothing else';
+    if (r.kind === 'comparison') {
+      const p = comparisonProblem(r.comparison);
+      if (p) return p;
+      if (r.tags?.length || r.other !== undefined || r.mark !== undefined) return 'a comparison carries no tags, other sound or mark';
+      if (r.sound !== r.comparison!.a.sound && r.sound !== r.comparison!.b.sound) return 'a comparison request names one of the two sounds it compares';
+    } else if (r.comparison !== undefined) return 'only a comparison request carries a comparison';
     return null;
   }
   const q = reqs.get(r.id);
@@ -109,6 +167,7 @@ export function applyRequest(reqs: Map<string, WorkRequest>, r: RequestRecord): 
   if (r.type === 'request') {
     reqs.set(r.id, {
       id: r.id, sound: r.sound, kind: r.kind, note: r.note, by: r.by, at: r.at, ...(r.mark !== undefined ? { mark: r.mark } : {}), tags: [...(r.tags ?? [])], ...(r.other ? { other: r.other } : {}),
+      ...(r.comparison ? { comparison: { a: { ...r.comparison.a }, b: { ...r.comparison.b }, answer: r.comparison.answer, ...(r.comparison.moment ? { moment: r.comparison.moment } : {}), gains: { ...r.comparison.gains } } } : {}),
       state: 'open', claimedBy: null, latest: null, question: null, seen: [], events: [],
     });
     return;

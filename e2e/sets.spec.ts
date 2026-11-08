@@ -28,7 +28,7 @@ async function open(page: Page, setup: string, hash: string): Promise<void> {
 
 const FOUR = 'sound new a voice=classic preset=pickup seed=1; sound new b voice=classic preset=laser seed=2; sound new c voice=classic preset=blip seed=3; sound new d voice=classic preset=hit seed=4';
 
-test('the audition page: every sound as a card, the keyboard moves, plays, approves and asks for changes', async ({ page }) => {
+test('the audition page: every sound as a row, the keyboard moves, plays, approves and asks for changes', async ({ page }) => {
   await open(page, FOUR, '#/audition');
   await expect(page.getByTestId('audition')).toHaveAttribute('data-count', '4');
   for (const id of ['a', 'b', 'c', 'd']) await expect(page.getByTestId(`aud-${id}`)).toBeVisible();
@@ -129,7 +129,7 @@ test('a set\'s page: the members in a row, play in sequence, regen with a new se
   await expect(page.getByTestId('set-page')).toHaveAttribute('data-set', 'footsteps');
   await expect(page.getByTestId('members').locator('[data-testid^=member-footsteps_]')).toHaveCount(6);
   await expect(page.getByTestId('set-info')).toContainText('6 members from step');
-  await expect(page.getByTestId('set-info')).toContainText('class foley');
+  await expect(page.getByTestId('set-info')).toContainText('loudness class "foley"');
   await expect(page.getByTestId('spread-rules')).toContainText('1.freq±12% 2.cutoff±20% *.gain±20%');
   // the spread numbers: the distance matrix and the verdict agree with the CLI's check
   await expect(page.getByTestId('set-check')).toHaveAttribute('data-pass', 'true');

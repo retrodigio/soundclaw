@@ -50,6 +50,8 @@ export interface ToneSound {
   /** The loudness class the checks hold the sound to (a name in the style's loudnessClasses), and a loudness (LUFS) for this sound alone. */
   loudClass?: string;
   loudness?: number;
+  /** The situation in the game the sound is for (`sound set <id> moment="…"`). Words only: rendering never reads it. */
+  moment?: string;
 }
 
 /** The classic voice: 25 sfxr-style parameters (and optionally the noise seed). */
@@ -62,6 +64,7 @@ export interface ClassicSound {
   classicOnly?: boolean;
   loudClass?: string;
   loudness?: number;
+  moment?: string;
 }
 
 export type { LayeredSound };
@@ -121,8 +124,24 @@ export function serializeSound(s: Sound): string {
     if (s.loudClass) lines.push(`class ${s.loudClass}`);
     if (s.loudness !== undefined) lines.push(`loudness ${fmtNumber(s.loudness)}`);
   }
+  if (s.moment) lines.push(`moment ${quoteText(s.moment)}`);
   lines.push(`status ${s.status}`);
   return lines.join('\n') + '\n';
+}
+
+/** The longest moment text (characters). */
+export const MOMENT_MAX = 400;
+
+/** A text as a document line holds it: in double quotes, with `\\`, `"` and new lines escaped (as the command language writes text). */
+export function quoteText(s: string): string {
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')}"`;
+}
+
+/** Why a moment text cannot be kept (null: it can). */
+export function momentProblem(text: string): string | null {
+  if (!text.trim()) return 'the moment says what happens in the game when the sound plays (or moment=none to clear it)';
+  if (text.length > MOMENT_MAX) return `the moment is at most ${MOMENT_MAX} characters (got ${text.length})`;
+  return null;
 }
 
 /** What the renderer reads: the voice and its parameters, nothing else (a status mark does not change the audio). */

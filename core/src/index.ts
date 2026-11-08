@@ -42,3 +42,4 @@ export * from './drums.ts';
 export * from './compose.ts';
 export * from './stingers.ts';
 export * from './musicstyle.ts';
+export * from './restore.ts';

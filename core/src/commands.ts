@@ -8,11 +8,13 @@
 //   sound generate <id> <category|random> [seed=<n>]
 //   sound mutate <id> [amount=<0..1>] [seed=<n>] [as=<new id>]      (also written `mutate <id> ...`)
 //   sound mark <id> approved|rejected|draft ["note"]
+//   sound set <id> moment="<the situation in the game>"|none   words only: no render reads them
 //   sound layer-up <id>                         a classic sound becomes layered (the classic voice is layer 1)
 //   sound classic <id> on|off                   keep a sound one classic voice (refuses layer-up)
 //   sound loop <id> <seconds>|off [fade=<seconds>]   a looping bed: seamless at its seam (layered sounds)
 //   set new <set> from=<sound> count=<n> [target=<LUFS>] [spread="<param>±<amount> ..."] [seed=<n>]
 //   set add|remove <set> <sound>...   set retarget <set> <LUFS>|none   set regen <set> [seed=<n>] [spread="..."]
+//   set moment <set> "<the situation in the game>"|none
 //   family <sound> near|far|muffled [as=<id>]   the sound as heard near, far away or through a wall
 //   layer add <id> <kind> [<param>=<value> ...] [at=<n>]     kind: classic, osc, fm, ks, sample
 //   layer set <id> <n> <param>=<value> ...      (also source=<kind>)
@@ -35,7 +37,7 @@ import { Library, MAX_SET_MEMBERS, checkMemberIds, checkSpread, defaultSetSeed, 
 import { hashText } from './generators.ts';
 import { BLOCK_MARK, applyMusic, isMusicOp, parseMusic, type MusicCommand } from './music-commands.ts';
 import { COMPOSE_HEADS, applyCompose, isComposeOp, parseCompose, type ComposeCommand } from './compose.ts';
-import { SOUND_ID_RE, TONE_PARAMS, cloneSound, idClash, fmtNumber, isParamName, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
+import { SOUND_ID_RE, TONE_PARAMS, cloneSound, idClash, fmtNumber, isParamName, momentProblem, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
 
 export interface Diag {
   line: number;
@@ -166,6 +168,7 @@ export type Command =
   | { op: 'copy' | 'rename'; id: string; to: string; text: string }
   | { op: 'remove'; id: string; fromSets: boolean; text: string }
   | { op: 'set-class'; id: string; class: string | null; text: string }
+  | { op: 'set-moment'; id: string; moment: string | null; text: string }
   | { op: 'set-new'; id: string; from: string; count: number; target: number | null; class: string | null; names: string[] | null; spread: SpreadRule[]; seed: number | null; text: string }
   | { op: 'set-add' | 'set-remove'; id: string; sounds: string[]; text: string }
   | { op: 'set-retarget'; id: string; target: number | null; text: string }
@@ -378,7 +381,7 @@ function spreadOf(v: string, t: Token, line: number): SpreadRule[] {
 
 function parseSet(rest: Token[], head: Token, line: number): Command {
   const [verb, ...args] = rest;
-  if (!verb) throw new DiagError(line, head.col, 'set: new, add, remove, retarget, class or regen');
+  if (!verb) throw new DiagError(line, head.col, 'set: new, add, remove, retarget, class, moment or regen');
   const id = checkId(args[0], line, `set ${verb.v}`);
   if (verb.v === 'new') {
     let from: string | null = null, count: number | null = null, target: number | null = null, seed: number | null = null;
@@ -429,6 +432,14 @@ function parseSet(rest: Token[], head: Token, line: number): Command {
     if (!t || args.length > 2 || (t.v !== 'none' && !CLASS_NAME_RE.test(t.v))) throw new DiagError(line, (t ?? verb).col, `set class ${id}: give a loudness class name (like ui, foley, impact), or none`);
     return { op: 'set-class', id, class: t.v === 'none' ? null : t.v, text: `set class ${id} ${t.v}` };
   }
+  if (verb.v === 'moment') {
+    const t = args[1];
+    if (!t || args.length > 2) throw new DiagError(line, (t ?? verb).col, `set moment ${id}: give the moment in quotes (the situation in the game the set's sounds are for), or none`);
+    if (!t.quoted && t.v === 'none') return { op: 'set-moment', id, moment: null, text: `set moment ${id} none` };
+    const problem = momentProblem(t.v);
+    if (problem) throw new DiagError(line, t.col, problem);
+    return { op: 'set-moment', id, moment: t.v.trim(), text: `set moment ${id} ${quote(t.v.trim())}` };
+  }
   if (verb.v === 'retarget') {
     const t = args[1];
     if (!t || args.length > 2) throw new DiagError(line, (t ?? verb).col, `set retarget ${id}: give the loudness in LUFS (like -20), or none`);
@@ -449,7 +460,7 @@ function parseSet(rest: Token[], head: Token, line: number): Command {
     }
     return { op: 'set-regen', id, seed, spread, text: `set regen ${id}${seed !== null ? ` seed=${seed}` : ''}${spread ? ` spread=${quote(formatSpread(spread))}` : ''}` };
   }
-  throw new DiagError(line, verb.col, `unknown set command '${verb.v}' (new, add, remove, retarget, class, regen)`);
+  throw new DiagError(line, verb.col, `unknown set command '${verb.v}' (new, add, remove, retarget, class, moment, regen)`);
 }
 
 function parseFamily(rest: Token[], head: Token, line: number): Command {
@@ -512,9 +523,23 @@ function parseLine(l: RawLine): Command {
       if (!pairs.length) throw new DiagError(line, verb.col, `sound set ${id}: give at least one <param>=<value> (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, out, seed)`);
       const values: [string, SetValue][] = [];
       for (const t of pairs) {
-        const m = /^([A-Za-z]+)=(.*)$/.exec(t.v);
+        const m = /^([A-Za-z]+)=(.*)$/s.exec(t.v);
         if (!m) throw new DiagError(line, t.col, `'${t.v}' is not <param>=<value>`);
         const name = m[1]!;
+        if (name === 'moment') {
+          // words, not a number: moment="<text>" (quoted) or moment=none (bare) to clear it; '' in the values means cleared
+          const quoted = m[2]!.length >= 2 && m[2]!.startsWith('"') && m[2]!.endsWith('"');
+          const text = quoted ? m[2]!.slice(1, -1) : m[2]!;
+          let value = '';
+          if (quoted || text !== 'none') {
+            const problem = momentProblem(text);
+            if (problem) throw new DiagError(line, t.col, problem);
+            value = text.trim();
+          }
+          if (values.some(([n]) => n === name)) throw new DiagError(line, t.col, 'moment is set twice in one command');
+          values.push([name, value]);
+          continue;
+        }
         if (!isParamName(name)) throw new DiagError(line, t.col, `no parameter '${name}' (tone: ${TONE_PARAMS.map((p) => p.name).join(', ')}; classic: ${CLASSIC_FIELDS.map((p) => p.name).join(', ')}, seed; layered: duration, gain, out, seed; any sound: class, loudness)`);
         let value: SetValue;
         if (name === 'class') {
@@ -548,7 +573,7 @@ function parseLine(l: RawLine): Command {
         if (values.some(([n]) => n === name)) throw new DiagError(line, t.col, `${name} is set twice in one command`);
         values.push([name, value]);
       }
-      return { op: 'set', id, values, text: `sound set ${id} ${values.map(([n, v]) => `${n}=${typeof v === 'string' ? v : n === 'wave' ? WAVE_NAMES[v] ?? fmtNumber(v) : fmtNumber(v)}`).join(' ')}` };
+      return { op: 'set', id, values, text: `sound set ${id} ${values.map(([n, v]) => `${n}=${n === 'moment' ? (v ? quote(v as string) : 'none') : typeof v === 'string' ? v : n === 'wave' ? WAVE_NAMES[v] ?? fmtNumber(v) : fmtNumber(v)}`).join(' ')}` };
     }
     if (verb.v === 'patch') {
       const id = checkId(args[0], line, 'sound patch');
@@ -741,13 +766,14 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       const s = lib.get(c.id);
       if (!s) throw new Error(`no sound '${c.id}'`);
       const next = cloneSound(s);
-      const marks = c.values.filter(([n]) => n === 'class' || n === 'loudness');
+      const marks = c.values.filter(([n]) => n === 'class' || n === 'loudness' || n === 'moment');
       for (const [n, v] of marks) {
-        if (n === 'class') { if (v === 'none') delete next.loudClass; else next.loudClass = v as string; }
+        if (n === 'moment') { if (v) next.moment = v as string; else delete next.moment; }
+        else if (n === 'class') { if (v === 'none') delete next.loudClass; else next.loudClass = v as string; }
         else if (v === 'auto') delete next.loudness;
         else next.loudness = v as number;
       }
-      const values = c.values.filter(([n]) => n !== 'class' && n !== 'loudness');
+      const values = c.values.filter(([n]) => n !== 'class' && n !== 'loudness' && n !== 'moment');
       if (next.voice === 'layered') {
         for (const [n, v] of values) {
           if (n === 'duration') next.duration = v === 'auto' ? null : checkNumber(specOf(SOUND_SPECS, 'duration')!, v as number, c.id);
@@ -866,6 +892,15 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       const set = lib.sets.get(c.id);
       if (!set) throw new Error(`no set '${c.id}'`);
       lib.sets.set(c.id, { ...set, target: c.target });
+      return undefined;
+    }
+    case 'set-moment': {
+      const set = lib.sets.get(c.id);
+      if (!set) throw new Error(`no set '${c.id}'`);
+      const next = { ...set };
+      if (c.moment) next.moment = c.moment;
+      else delete next.moment;
+      lib.sets.set(c.id, next);
       return undefined;
     }
     case 'set-class': {

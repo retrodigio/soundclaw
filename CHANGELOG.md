@@ -41,6 +41,22 @@ All notable changes to SoundClaw are listed here. The format follows
 - **New in core's measuring code:** `loudnessCurve` (loudness over time). No render changed; the golden hashes are as they were.
 - **Fixed:** the request line on a needs-attention card clipped the bottom of its state chip.
 
+### Sets, audition and blind A/B
+- **The moment.** `sound set <id> moment="…"` and `set moment <set> "…"` say what happens in the game when a sound plays ("steps repeat every
+  0.4 s under quiet music"). Words only: commands with a normal form on the history, shown by `describe`, `measure --json`, the run summaries,
+  the MCP text and a change request's brief; a member without one uses its set's. No render reads it: every golden hash is unchanged.
+- **Comparisons.** A new request kind, `comparison`: two versions (each a sound and a tape number), the answer (A, B, both or neither fits
+  better), the moment and the gains that matched their levels. It arrives through `await`, MCP and `request` in words, and the agent closes it
+  like feedback.
+- **The set page** has a header with the loudness class and the spread, a set loudness meter (the class band, one mark per member), and a clip
+  grid: each member's last four distinct versions from the history, the current one marked, the agent's unapproved change in a dashed violet
+  column. Click plays a cell, Enter makes it current (one batch of ordinary commands, as you), 1–9 play a row and ⇧1–9 a column.
+- **Blind A/B.** Drag two cells onto the card, pick two and press C, or "Compare with current": levels matched (gain shown, an identical pair
+  skipped), A and B at random with the names hidden, the moment (or a field that writes it), Play ×4 at the moment's interval, Tab to switch in
+  time, and four answers (A, B, =, N) that each write a comparison; then the names, a session tally and the next pair.
+- **The audition page** is the same grid with one column, the A/B card beside it, and its paging, filters, play-all and keys as before.
+- **New in core:** `restoreCommands` (the commands that give a sound an earlier version's render, checked on a copy). No render changed.
+
 ### The dashboard on large projects
 - **A project of 400 sounds, 100 samples and 3,000 commands opens at once.** The page used to fetch every sample and render and measure
   every sound on its own thread before it listed anything (a 60-sound slice took 88 s and froze the tab; the whole project never finished).

@@ -7,6 +7,7 @@ import './styles.css';
 import './studio/studio.css';
 import './studio/shell.css';
 import './sound/sound.css';
+import './sets/sets.css';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const store = new Store();

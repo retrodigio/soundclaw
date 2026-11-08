@@ -21,7 +21,7 @@ import { Rng, hashText } from './generators.ts';
 import { FX_SPECS, layerSpecs, parseTarget, specOf, type Env, type LayeredSound, type PSpec } from './layered.ts';
 import { melDistance } from './views.ts';
 import { CLASSIC_FULL_SCALE, measuredChannels, mixdown, renderChannels } from './render.ts';
-import { SOUND_ID_RE, cloneSound, type Sound } from './sound.ts';
+import { SOUND_ID_RE, cloneSound, quoteText, type Sound } from './sound.ts';
 import type { SampleBank } from './synth.ts';
 
 export const MAX_SET_MEMBERS = 32;
@@ -48,6 +48,8 @@ export interface SetDoc {
   members: string[];
   /** The members `set new` and `set regen` made (regen replaces these; others are the person's). */
   generated: string[];
+  /** The situation in the game the set's sounds are for (`set moment <set> "…"`); a member's own moment comes first. */
+  moment?: string;
 }
 
 /** The sounds of a project, and its sets. Commands replace a sound's (or a set's) object rather than mutating it. */
@@ -398,6 +400,16 @@ export function loudnessFor(s: Sound, sets: Iterable<SetDoc>, style: Style = DEF
   return { className: base[0], target, tolerance: base[1].tolerance, basis };
 }
 
+/** The moment a sound is judged in: its own, else the moment of the set it is in (null: neither has one). */
+export function momentOf(s: Sound, sets: Iterable<SetDoc>): { text: string; set: string | null } | null {
+  if (s.moment) return { text: s.moment, set: null };
+  for (const set of sets) if (set.moment && set.members.includes(s.id)) return { text: set.moment, set: set.id };
+  return null;
+}
+
+/** A moment as a line for the agent: `moment: "…"`, or `moment (of set steps): "…"`. */
+export const momentLine = (m: { text: string; set: string | null }): string => `moment${m.set ? ` (of set ${m.set})` : ''}: "${m.text}"`;
+
 /** The style a sound's checks are held to: its loudness rule's target and tolerance in place of the style's. */
 export function soundStyle(s: Sound, sets: Iterable<SetDoc>, style: Style = DEFAULT_STYLE): Style {
   const r = loudnessFor(s, sets, style);
@@ -479,5 +491,6 @@ export function serializeSet(s: SetDoc): string {
   const lines = ['soundclaw set 1', `id ${s.id}`, `from ${s.from ?? 'none'}`, `seed ${s.seed}`, `target ${s.target === null ? 'none' : fmt(s.target)}`, `spread ${s.spread.length ? formatSpread(s.spread) : 'none'}`];
   if (s.class) lines.push(`class ${s.class}`);
   lines.push(`members ${s.members.join(' ') || 'none'}`, `generated ${s.generated.join(' ') || 'none'}`);
+  if (s.moment) lines.push(`moment ${quoteText(s.moment)}`);
   return lines.join('\n') + '\n';
 }

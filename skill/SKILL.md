@@ -146,9 +146,12 @@ Use these instead of making sounds one at a time whenever a game plays the same 
 - **Bringing sounds from other tools:** `import <project> jsfxr "<base58 or sfxr.me URL or JSON>" --id zap`, `import <project> bfxr
   "<settings string>" --id zap`; several in a file, one `<id> <string>` per line. Every row is reported **exact** or **approximated**
   with the loss named (Bfxr's compression and harmonics, its extra waves): read it and tell the person what changed.
-- **Listening in a batch:** the dashboard's **Audition** page (`#/audition`, or `#/audition/<set>`) shows every sound as a compact
-  card with the check badge; the person goes through them with the keyboard (arrows, space, `a` approves, `r` asks for changes) and
-  their approvals and requests reach you through `await` as ever. A set has its own page (`#/set/<id>`).
+- **Listening in a batch:** the dashboard's **Audition** page (`#/audition`, or `#/audition/<set>`) shows every sound as a row
+  with the check badge; the person goes through them with the keyboard (arrows, space, `a` approves, `r` asks for changes) and
+  their approvals and requests reach you through `await` as ever. A set has its own page (`#/set/<id>`): a grid of each member's
+  last versions from the history, where your latest unapproved change is a column of its own, and a person may make an earlier
+  version current again (a batch of ordinary commands written as them: read it with `changes` before you build on the sound).
+  Both pages have the blind A/B card, whose answers reach you as `comparison` requests (below).
 
 ## Music: write a song in passes, and check each pass
 
@@ -290,6 +293,36 @@ Take requests before anything else:
    claim it again when `await` reports the reply.
 
 A request leaves the sound marked `rejected`; the person approves it again when it is right.
+
+### The moment, and blind comparisons
+
+**Give every sound you make for a known situation a moment**: `sound set <id> moment="The player walks
+slowly across a meadow at night; steps repeat every 0.4 s under quiet music"` (a set's members can share one:
+`set moment <set> "…"`; `moment=none` clears it). Say what happens in the game, how often the sound repeats
+("every 0.4 s"), and what plays under it. It is words only: no render reads it, so it never changes a sound.
+`describe` and the run summaries print it, and a change request's brief carries it, so judge your edits
+against it too.
+
+People compare versions blind in the dashboard: two cells of a set's grid (a sound at two points on the
+tape, or two sounds) play level-matched with the names hidden, under the fixed question "Which one fits
+better in this moment?". Each answer arrives through `await` as a **comparison**:
+
+```
+comparison r5 (step_2) from human:ana at …: A fits better in "walks slowly across a meadow at night":
+  A was step_2 as at #12 (gain +1.2 dB), B was step_2 as at #20 (gain −0.3 dB)
+```
+
+How to read and use one:
+
+- `#12` and `#20` are tape numbers: `history --sound step_2` shows what each version was (the state after
+  that entry). The gains matched their loudness, so the preference is not about level: look at what else
+  differs (`view <sound> compare <other>` for two sounds; for two versions of one, the commands between them).
+- **A or B fits better**: keep the direction of the winner in what you make next. If the loser is the current
+  version, the person may restore the winner from the grid themselves; do not undo their choices.
+- **Both would do**: that difference does not matter in this moment; spend effort elsewhere.
+- **Neither would do**: both miss the moment; read the moment again and move away from both.
+- "(no moment given)": write a moment for the sound (ask the person if you do not know the situation).
+- Nothing is asked to change: claim it with `work`, then close it with `work(action="done", text="<what you take from it>")`.
 `soundclaw request <project> <sound> --note "…"` files a request yourself (for the person to see).
 
 ## House rules

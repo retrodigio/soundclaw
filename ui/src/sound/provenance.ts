@@ -1,9 +1,11 @@
 // Who set what, worked out from the history tape. The tape is replayed once, group by group, and a
 // sound's document is compared before and after each group: the latest group that changed a
 // parameter (or a layer, or a device) is that control's trail. A control is "set by the agent" when
-// its trail is an agent's and no person has approved the sound since. Pure functions, no DOM.
+// its trail is an agent's and no person has approved the sound since. The same replay keeps the
+// sound as it stood after each group that changed it: the versions a set's clip grid shows (the
+// replay only applies commands; nothing is measured in it). Pure functions, no DOM.
 
-import { CLASSIC_KEYS, Library, applyCommand, cloneSound, effectiveEntries, parse, type Fx, type Layer, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { CLASSIC_KEYS, Library, applyCommand, cloneSound, effectiveEntries, parse, renderKey, type Fx, type Layer, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 
 /** The latest group to change something, and what it was before. */
 export interface Trail {
@@ -16,6 +18,9 @@ export interface Trail {
   /** The value after (a classic parameter). */
   now?: number;
 }
+
+/** The sound as it stood after one group that changed it: `seq` is the group's last tape entry. */
+export interface Snapshot { seq: number; group: string; by: string; at?: string; doc: Sound; /** Its render key (the samples a sample layer names are not hashed in: they do not change on the tape). */ key: string }
 
 /** One group that changed the sound. */
 export interface GroupInfo { group: string; by: string; at?: string; seq: number; cmds: string[]; kinds: string[] }
@@ -33,6 +38,8 @@ export interface Provenance {
   beforeAgent: Sound | null;
   /** The groups that changed the sound, oldest first. */
   groups: GroupInfo[];
+  /** The sound after each group that changed its render, oldest first (the document is as it stood after the last group of the run). */
+  snapshots: Snapshot[];
   /** Problems that stopped the replay from knowing the sound (a partial tape). */
   complete: boolean;
 }
@@ -56,7 +63,7 @@ function changedClassic(a: Sound, b: Sound): string[] {
 const layerBody = (l: Layer): string => json({ kind: l.kind, p: l.p, mute: l.mute, solo: l.solo, amp: l.amp, envs: l.envs });
 
 export function emptyProvenance(): Provenance {
-  return { params: new Map(), layers: new Map(), devices: new Map(), approvedAfter: 0, before: null, beforeAgent: null, groups: [], complete: false };
+  return { params: new Map(), layers: new Map(), devices: new Map(), approvedAfter: 0, before: null, beforeAgent: null, groups: [], snapshots: [], complete: false };
 }
 
 /** Replay the tape and read one sound's trails. `tape` is the whole tape (or what the page holds of it). */
@@ -83,6 +90,10 @@ export function provenanceOf(tape: readonly TapeEntry[], id: string): Provenance
       const before = prevDoc ? cloneSound(prevDoc) : null;
       const cmds = curEntries.map((e) => e.cmd).filter((c) => c.split(/\s+/).slice(0, 4).includes(id));
       out.groups.push({ group: cur, by, ...(first.at ? { at: first.at } : {}), seq: base.seq, cmds, kinds: [] });
+      // a group that changed only words or a status (a mark, a moment, a class) leaves the version as it was
+      const key = renderKey(now);
+      if (out.snapshots.at(-1)?.key !== key) out.snapshots.push({ seq: base.seq, group: cur, by, ...(first.at ? { at: first.at } : {}), doc: cloneSound(now), key });
+      else out.snapshots[out.snapshots.length - 1]!.doc = cloneSound(now);
       if (before) {
         if (now.voice === 'classic' && before.voice === 'classic') {
           for (const k of changedClassic(before, now)) {
@@ -154,4 +165,36 @@ export function answeredNote(requests: readonly WorkRequest[], sound: string, by
     if (text && (!best || c > best.claimed)) best = { text, claimed: c };
   }
   return best?.text ?? null;
+}
+
+/** A column of a set's clip grid: one distinct version of a member. */
+export interface Version extends Snapshot {
+  /** v1…vN, oldest first, among the versions shown (the agent's proposal is not numbered). */
+  label: string;
+  /** The document holds this version now. */
+  current: boolean;
+  /** The agent's latest change, nobody having approved it since: proposed. */
+  proposed: boolean;
+}
+
+/**
+ * The versions a set's grid shows for one member: its most recent distinct renders (a later group that brings an earlier render
+ * back makes that the newest), at most `max` of them numbered v1…vN oldest first, and the agent's proposal apart from them: the
+ * latest version when it is an agent's change (not the sound's creation) that no person has approved since.
+ */
+export function gridVersions(p: Provenance, max = 4): { versions: Version[]; proposed: Version | null } {
+  const seen = new Set<string>();
+  const distinct: Snapshot[] = [];
+  for (let i = p.snapshots.length - 1; i >= 0; i--) {
+    const v = p.snapshots[i]!;
+    if (seen.has(v.key)) continue;
+    seen.add(v.key);
+    distinct.unshift(v);
+  }
+  if (!distinct.length) return { versions: [], proposed: null };
+  const last = distinct.at(-1)!;
+  const pending = distinct.length > 1 && isAgent(last.by) && last.seq > p.approvedAfter;
+  const shown = (pending ? distinct.slice(0, -1) : distinct).slice(-max);
+  const versions = shown.map((v, i) => ({ ...v, label: `v${i + 1}`, current: !pending && v === last, proposed: false }));
+  return { versions, proposed: pending ? { ...last, label: 'agent', current: true, proposed: true } : null };
 }

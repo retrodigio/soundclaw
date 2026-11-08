@@ -285,6 +285,8 @@ export interface LayeredSound {
   loudClass?: string;
   /** A loudness (LUFS) for this sound alone, in place of its class's target. */
   loudness?: number;
+  /** The situation in the game the sound is for. Words only: rendering never reads it. */
+  moment?: string;
   /** The next layer's salt. */
   nextSalt: number;
   layers: Layer[];

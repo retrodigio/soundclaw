@@ -96,7 +96,7 @@ export function buildFeed(store: Store, limit = 40): FeedItem[] {
     items.push({ key: `t${e.seq}`, by: e.by, text: e.cmd, meta: `#${e.seq} · ${e.by}${e.at ? ` · ${ago(e.at, now)}` : ''}`, at: e.at ? Date.parse(e.at) : 0, sound });
   }
   for (const q of store.requests.slice(-12)) {
-    items.push({ key: `q${q.id}`, by: q.by, text: `${q.by.startsWith('human:') ? 'You asked' : `${q.by} asked`}: ${q.note}`, meta: `request ${q.id} · ${q.sound} · ${ago(q.at, now)}`, at: Date.parse(q.at), sound: null });
+    items.push({ key: `q${q.id}`, by: q.by, text: `${q.by.startsWith('human:') ? (q.kind === 'comparison' ? 'You compared' : 'You asked') : `${q.by} ${q.kind === 'comparison' ? 'compared' : 'asked'}`}: ${q.note}`, meta: `request ${q.id} · ${q.sound} · ${ago(q.at, now)}`, at: Date.parse(q.at), sound: null });
     q.events.forEach((ev, i) => {
       if (!ev.text && ev.type !== 'claim') return;
       items.push({ key: `q${q.id}e${i}`, by: ev.by, text: `${ev.type === 'claim' ? 'Claimed' : ev.type === 'done' ? 'Finished' : ev.type === 'blocked' ? 'Asked' : ev.type === 'progress' ? 'Progress' : ev.type}${ev.text ? `: ${ev.text}` : ''}`, meta: `request ${q.id} · ${ago(ev.at, now)}`, at: Date.parse(ev.at), sound: ev.type === 'done' ? q.sound : null });

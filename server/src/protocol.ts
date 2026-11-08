@@ -78,6 +78,8 @@ export interface Snapshot {
 /** What a person can ask from the dashboard. */
 export type PersonRequest =
   | { action: 'request'; kind: 'change'; sound: string; note: string; /** Quick tags (too loud, …, good). */ tags?: string[]; /** With `too similar to another sound`. */ other?: string }
+  /** A blind A/B judgment: two versions (sound and tape number), the answer, the moment they were judged in and the gain each side played at. */
+  | { action: 'compare'; a: { sound: string; seq: number }; b: { sound: string; seq: number }; answer: 'a' | 'b' | 'both' | 'neither'; moment?: string; gains: { a: number; b: number } }
   | { action: 'reply'; id: string; text: string }
   | { action: 'cancel'; id: string; text?: string };
 

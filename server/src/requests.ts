@@ -6,7 +6,7 @@
 
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTHOR_RE, SIMILAR_TAG, foldRequests, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, songText, type RequestRecord, type WorkRequest } from '@soundclaw/core';
+import { ANSWER_WORDS, AUTHOR_RE, SIMILAR_TAG, comparisonProblem, comparisonWords, foldRequests, momentLine, momentOf, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, songText, type RequestRecord, type WorkRequest } from '@soundclaw/core';
 import { unseenOpen, type AgentEvent } from './await.ts';
 import { checkLine, failingChecks } from './ears.ts';
 import { songCheckLine, songFailing } from './songs.ts';
@@ -53,6 +53,7 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   const at = w.stamp();
   if (q.action === 'reply') return appendRequest(p, { type: 'reply', id: q.id, by, at, text: String(q.text ?? '') });
   if (q.action === 'cancel') return appendRequest(p, { type: 'cancel', id: q.id, by, at, ...(q.text ? { text: q.text } : {}) });
+  if (q.action === 'compare') return personComparison(w, by, q);
   const reqs = readRequests(p);
   const id = nextRequestId(reqs);
   const text = (q.note ?? '').trim();
@@ -78,11 +79,33 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   return appendRequest(p, { ...rec, mark: r.added.at(-1)?.seq });
 }
 
+/**
+ * A person's blind A/B answer, recorded as a `comparison` request: nothing is marked on the sounds (it is a judgment, like praise).
+ * Both sides must be sounds of the project at a tape entry that exists; the request names the sound both sides are of, else A's.
+ */
+function personComparison(w: Writer, by: string, q: Extract<PersonRequest, { action: 'compare' }>): WorkRequest {
+  const p = w.project;
+  const moment = typeof q.moment === 'string' && q.moment.trim() ? q.moment.trim() : undefined;
+  const comparison = { a: { sound: q.a?.sound, seq: q.a?.seq }, b: { sound: q.b?.sound, seq: q.b?.seq }, answer: q.answer, ...(moment ? { moment } : {}), gains: { a: q.gains?.a, b: q.gains?.b } };
+  const problem = comparisonProblem(comparison);
+  if (problem) throw new ProjectError(problem);
+  const total = w.tape().at(-1)?.seq ?? 0;
+  for (const side of [comparison.a, comparison.b]) {
+    if (!w.has(side.sound!)) throw new ProjectError(`no sound '${side.sound}' to compare`);
+    if (side.seq! > total) throw new ProjectError(`the tape has no entry #${side.seq} (it ends at #${total})`);
+  }
+  const reqs = readRequests(p);
+  const c = comparison as import('@soundclaw/core').Comparison;
+  const rec: RequestRecord = { type: 'request', id: nextRequestId(reqs), sound: c.a.sound, kind: 'comparison', note: ANSWER_WORDS[c.answer], comparison: c, by, at: w.stamp() };
+  return appendRequest(p, rec);
+}
+
 /** A request as one line: `r3 change beep: "softer" (from human:ana at …; claimed by agent:claude)`. */
 export function requestLine(q: WorkRequest): string {
   // An open request an agent was handed reads as the dashboard's card does: "seen by agent:claude".
   const state = q.state === 'claimed' ? `claimed by ${q.claimedBy}` : q.state === 'blocked' ? `blocked: "${q.question}"`
     : q.state === 'open' && q.seen.length ? `seen by ${q.seen.map((x) => x.by).join(', ')}` : q.state;
+  if (q.comparison) return `${q.id} comparison ${q.sound}: ${comparisonWords(q.comparison)} (from ${q.by} at ${q.at}; ${state})`;
   return `${q.id} ${q.kind} ${q.sound}${q.tags.length ? ` [${q.tags.join(', ')}]` : ''}${q.note && q.note !== tagsNote(q.tags, q.other) ? `: "${q.note}"` : ''}${q.other ? ` (like ${q.other})` : ''} (from ${q.by} at ${q.at}; ${state})`;
 }
 
@@ -141,7 +164,7 @@ export const MAX_AWAIT_S = 3600;
 export async function awaitRequests(w: Writer, o: { cursor?: string; timeoutS: number; by: string; via: 'cli' | 'mcp'; signal?: AbortSignal }): Promise<{ events: AgentEvent[]; cursor: string; timedOut: boolean }> {
   const timeoutMs = Math.max(0, Math.min(MAX_AWAIT_S, o.timeoutS)) * 1000;
   const r = await w.hub.wait({ cursor: o.cursor, initial: () => unseenOpen(readRequests(w.project)), timeoutMs, by: o.by, via: o.via, signal: o.signal });
-  if (r.events.length) await w.enqueue(() => markSeen(w, r.events.filter((e) => (e.kind === 'request' || e.kind === 'reply') && e.id).map((e) => e.id!), o.by));
+  if (r.events.length) await w.enqueue(() => markSeen(w, r.events.filter((e) => (e.kind === 'request' || e.kind === 'comparison' || e.kind === 'reply') && e.id).map((e) => e.id!), o.by));
   return r;
 }
 
@@ -230,8 +253,17 @@ export function requestBrief(w: Writer, q: WorkRequest, steps: WorkSteps = MCP_S
   if (w.hasSong(q.sound)) out.push(`the song now:\n${songText(w.song(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else if (w.has(q.sound)) out.push(`the sound now:\n${serializeSound(w.sound(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else out.push(`sound '${q.sound}' does not exist any more`);
+  const moment = w.has(q.sound) ? momentOf(w.sound(q.sound), w.sets()) : null;
+  if (moment && !q.comparison) out.push(`${momentLine(moment)} (the situation in the game it is for: judge the change against it)`);
   if (q.kind === 'feedback') {
     out.push(`This is praise (tag good): nothing needs to change. Close it with ${steps.done(q.id, 'a short acknowledgement')}.`);
+    return out.join('\n');
+  }
+  if (q.comparison) {
+    const c = q.comparison;
+    out.push(`This is a judgment, not a change request: the person heard A and B blind, level-matched (the gains above), ${c.moment ? `and judged which fits better in the moment "${c.moment}"` : 'with no moment given (add one with sound set <id> moment="…" so the next comparison means something)'}.`);
+    out.push(`Read A and B as they were with \`history --sound ${c.a.sound}\`${c.b.sound !== c.a.sound ? ` and \`history --sound ${c.b.sound}\`` : ''} (#${c.a.seq} and #${c.b.seq} are the tape entries the versions stood at). ${c.answer === 'a' || c.answer === 'b' ? `Keep the direction of ${c.answer.toUpperCase()} in what you make next; the loudness gain was matched, so the preference is not about level.` : c.answer === 'both' ? 'Either version fits: the difference between them does not matter in this moment.' : 'Neither fits this moment: the next version should move away from both.'}`);
+    out.push(`Nothing needs to change because of it on its own. Close it with ${steps.done(q.id, 'what you take from it')}.`);
     return out.join('\n');
   }
   if (q.other) out.push(`The person finds it too like ${q.other}: \`view ${q.sound} compare ${q.other}\` shows how close they are.`);
