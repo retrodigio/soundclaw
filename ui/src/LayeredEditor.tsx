@@ -20,7 +20,8 @@ import { LensPanel, type Axis } from './sound/Lenses.tsx';
 import { SH, SW, chainOf, dropDeviceCommands, envSketch, mainValues, sketch, type Scope } from './sound/devices.ts';
 import { agentSet, answeredNote, type Trail } from './sound/provenance.ts';
 import type { RunResult, Store } from './store.ts';
-import { Badge, Button, Slider } from './studio/controls.tsx';
+import { Badge, Button, Knob, Segmented, Slider, IconButton } from './studio/controls.tsx';
+import type { ValueSpec } from './studio/values.ts';
 import { Spark } from './studio/icons.tsx';
 import { useActions, type Action } from './studio/registry.ts';
 
@@ -39,61 +40,74 @@ interface ControlProps {
   samples: string[];
   hasEnv: boolean;
   onMove(v: Value): void;
+  /** A drag in progress: the page shows it, nothing is written. */
+  onPreview(v: Value): void;
   onRelease(): void;
   onReset(): void;
   onEnv?(): void;
 }
 
-function Control({ ckey, spec, value, samples, hasEnv, onMove, onRelease, onReset, onEnv }: ControlProps) {
+/** How a parameter reads on a knob: the stored number in its unit. */
+export function paramSpec(sp: PSpec): ValueSpec {
+  const digits = sp.integer ? 0 : undefined;
+  switch (sp.unit) {
+    case 'Hz': return { unit: 'hz', ...(digits !== undefined ? { digits } : {}) };
+    case 's': return { unit: 's' };
+    case 'dB': return { unit: 'db' };
+    case 'st': return { unit: 'st' };
+    case '': return { unit: 'plain', digits: digits ?? (sp.max - sp.min <= 2 ? 2 : sp.max - sp.min <= 50 ? 1 : 0) };
+    default: return { unit: 'plain', custom: { show: (v) => `${Number(v.toPrecision(3))} ${sp.unit}`, read: (t) => { const n = Number.parseFloat(t.replace('−', '-')); return Number.isFinite(n) ? n : null; }, entry: (v) => String(Number(v.toPrecision(4))), hint: `a number in ${sp.unit}` } };
+  }
+}
+
+/** One parameter, drawn with the studio components: a knob for a number, a segmented control for a few choices, a styled select for many, a text field for a name. */
+function Control({ ckey, spec, value, samples, hasEnv, onMove, onPreview, onRelease, onReset, onEnv }: ControlProps) {
   const tid = ckey.replace(/:/g, '-');
   if (spec.choices) {
+    const cur = String(value);
+    if (spec.choices.length <= 4) {
+      return (
+        <div className="pc wide" data-testid={`row-${tid}`} title={spec.help}>
+          <span className="cap">{spec.name}</span>
+          <Segmented label={spec.name} value={cur} testId={`ctl-${tid}`} onChange={(c) => { onMove(c); onRelease(); }} options={spec.choices.map((c) => ({ value: c, label: c, testId: `ctl-${tid}-${c}` }))} />
+        </div>
+      );
+    }
     return (
-      <div className="slider" data-testid={`row-${tid}`}>
-        <label htmlFor={`c-${tid}`} title={spec.help}>{spec.name}</label>
-        <select id={`c-${tid}`} data-testid={`ctl-${tid}`} value={String(value)} onChange={(e) => { onMove(e.target.value); onRelease(); }}>
+      <div className="pc wide" data-testid={`row-${tid}`} title={spec.help}>
+        <label htmlFor={`c-${tid}`} className="cap">{spec.name}</label>
+        <select id={`c-${tid}`} className="sel" data-testid={`ctl-${tid}`} value={cur} onChange={(e) => { onMove(e.target.value); onRelease(); }}>
           {spec.choices.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <span /><span /><span />
       </div>
     );
   }
   if (spec.text) {
     const isSample = spec.name === 'sample';
     return (
-      <div className="slider" data-testid={`row-${tid}`}>
-        <label htmlFor={`c-${tid}`} title={spec.help}>{spec.name}</label>
+      <div className="pc wide" data-testid={`row-${tid}`} title={spec.help}>
+        <label htmlFor={`c-${tid}`} className="cap">{spec.name}</label>
         {isSample ? (
-          <select id={`c-${tid}`} data-testid={`ctl-${tid}`} value={String(value)} onChange={(e) => { onMove(e.target.value); onRelease(); }}>
+          <select id={`c-${tid}`} className="sel" data-testid={`ctl-${tid}`} value={String(value)} onChange={(e) => { onMove(e.target.value); onRelease(); }}>
             <option value="">(none)</option>
             {samples.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         ) : (
-          <input id={`c-${tid}`} type="text" data-testid={`ctl-${tid}`} defaultValue={String(value)} key={String(value)} onBlur={(e) => { if (e.target.value !== String(value)) { onMove(e.target.value); onRelease(); } }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+          <input id={`c-${tid}`} type="text" className="txt" data-testid={`ctl-${tid}`} defaultValue={String(value)} key={String(value)} onBlur={(e) => { if (e.target.value !== String(value)) { onMove(e.target.value); onRelease(); } }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
         )}
-        <span /><span /><span />
       </div>
     );
   }
   const v = typeof value === 'number' ? value : (spec.default as number);
-  const changed = v !== spec.default;
-  const step = spec.integer && spec.max - spec.min <= 20 ? 1 : 0;
+  const log = isLogScale(spec);
+  const integer = !!spec.integer;
   return (
-    <div className={`slider${changed ? ' changed' : ''}`} data-testid={`row-${tid}`}>
-      <label htmlFor={`c-${tid}`} title={spec.help}>{spec.name}</label>
-      {step ? (
-        <input id={`c-${tid}`} type="range" min={spec.min} max={spec.max} step={1} value={v} data-testid={`ctl-${tid}`}
-          onChange={(e) => onMove(Number(e.target.value))}
-          onPointerDown={() => window.addEventListener('pointerup', onRelease, { once: true })} onKeyUp={onRelease} onBlur={onRelease} onDoubleClick={onReset} />
-      ) : (
-        <input id={`c-${tid}`} type="range" min={0} max={1000} step={1} value={Math.round(sliderPosition(spec, v) * 1000)} data-testid={`ctl-${tid}`}
-          onChange={(e) => onMove(sliderValue(spec, Number(e.target.value) / 1000))}
-          onPointerDown={() => window.addEventListener('pointerup', onRelease, { once: true })} onKeyUp={onRelease} onBlur={onRelease} onDoubleClick={onReset} />
-      )}
-      <output data-testid={`val-${tid}`} title={`default ${String(spec.default)}`}>{v}{spec.unit && spec.unit.length <= 2 ? ` ${spec.unit}` : ''}</output>
-      {spec.env && onEnv ? (
-        <button className={`link env-btn${hasEnv ? ' on' : ''}`} data-testid={`env-btn-${tid}`} title={hasEnv ? 'This parameter follows an envelope: edit it below' : 'Replace the fixed value with an envelope'} onClick={onEnv}>{hasEnv ? '∿ env' : '∿'}</button>
-      ) : <span />}
-      <button className="link reset" data-testid={`reset-${tid}`} disabled={!changed} onClick={onReset} title={`back to the default, ${String(spec.default)}`} aria-label={`reset ${spec.name}`}>↺</button>
+    <div className="pc" data-testid={`row-${tid}`} title={spec.help}>
+      <Knob label={spec.name} testId={`ctl-${tid}`} value={v} min={spec.min} max={spec.max} def={spec.default as number} size={40} disabled={hasEnv} spec={paramSpec(spec)} bipolar={spec.min < 0 && spec.max > 0 && -spec.min === spec.max}
+        step={integer ? 1 : log ? Math.max(Math.abs(v) * 0.05, 1e-6) : (spec.max - spec.min) / 100}
+        {...(log ? { warp: { to: (x: number) => sliderPosition(spec, x), from: (f: number) => sliderValue(spec, f) } } : {})}
+        onDraft={(x) => onPreview(roundSpec(spec, x))} onCommit={(x) => { const r = roundSpec(spec, x); if (r === spec.default && v !== r) onReset(); else onMove(r); }} />
+      {spec.env && onEnv ? <button type="button" className={`env-chip${hasEnv ? ' on' : ''}`} data-testid={`env-btn-${tid}`} title={hasEnv ? 'This parameter follows an envelope: edit it below' : 'Replace the fixed value with an envelope'} onClick={onEnv}>{hasEnv ? '∿ env ●' : '∿ env'}</button> : null}
     </div>
   );
 }
@@ -150,23 +164,22 @@ function EnvEditor({ run, sound, target, onTarget, targets, span }: { run(cmds: 
   const ticks = log ? [spec.min, spec.min * Math.sqrt(spec.max / spec.min), spec.max] : [spec.min, (spec.min + spec.max) / 2, spec.max];
 
   return (
-    <section className="panel" data-testid="env-editor" aria-label="Envelope editor">
-      <h3>Envelope</h3>
-      <div className="row">
-        <select data-testid="env-target" value={t.target} onChange={(e) => { setSel(0); setDraft(null); onTarget(e.target.value); }}>
+    <section className="env-editor" data-testid="env-editor" aria-label="Envelope editor">
+      <span className="cap">Envelope</span>
+      <div className="env-bar">
+        <select className="sel" data-testid="env-target" value={t.target} onChange={(e) => { setSel(0); setDraft(null); onTarget(e.target.value); }}>
           {targets.map((x) => <option key={x.target} value={x.target}>{x.env ? '● ' : ''}{x.label}</option>)}
         </select>
         {env ? (
           <>
-            <button data-testid="env-clear" onClick={() => void send(null)}>Remove envelope</button>
-            <label className="toggle">curve into point {sel + 1}
-              <select data-testid="env-curve" value={env[sel]?.curve ?? 'lin'} disabled={sel === 0} onChange={(e) => void send(env.map((p, k) => (k === sel ? { ...p, curve: e.target.value as Curve } : p)))}>
-                {CURVES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
-            <button data-testid="env-remove-point" disabled={env.length < 2} onClick={() => { void send(env.filter((_, k) => k !== sel)); setSel(0); }}>Remove point</button>
+            <Button testId="env-clear" onClick={() => void send(null)}>Remove envelope</Button>
+            {sel > 0 ? (
+              <Segmented label={`Curve into point ${sel + 1}`} value={env[sel]?.curve ?? 'lin'} testId="env-curve" onChange={(c) => void send(env.map((p, k) => (k === sel ? { ...p, curve: c as Curve } : p)))}
+                options={CURVES.map((c) => ({ value: c, label: c, testId: `env-curve-${c}` }))} />
+            ) : <span className="dim small">the first point has no curve</span>}
+            <Button testId="env-remove-point" disabled={env.length < 2} onClick={() => { void send(env.filter((_, k) => k !== sel)); setSel(0); }}>Remove point</Button>
           </>
-        ) : <button data-testid="env-make" onClick={() => void send(flatEnv(t.fixed, tmax))}>Make envelope (now fixed at {t.fixed})</button>}
+        ) : <Button testId="env-make" onClick={() => void send(flatEnv(t.fixed, tmax))}>Make envelope (now fixed at {t.fixed})</Button>}
       </div>
       <svg ref={svg} className="envgraph" viewBox={`0 0 ${GW} ${GH}`} width="100%" data-testid="env-graph" data-target={t.target} data-points={env ? env.length : 0}
         onDoubleClick={(e) => {
@@ -254,7 +267,7 @@ function MiniWave({ peaks: p, n, color }: { peaks: StripPeaks | undefined; n: nu
       g.fillRect(x, mid - Math.max(0, hi) * mid, 1, Math.max(1, (Math.max(0, hi) - Math.min(0, lo)) * mid));
     }
   }, [p, color]);
-  return <canvas ref={ref} className="mini-wave" width={190} height={26} data-testid={`strip-${n}`} aria-hidden />;
+  return <canvas ref={ref} className="track-wave" width={190} height={26} data-testid={`strip-${n}`} aria-hidden />;
 }
 
 const layerColor = (i: number): string => `var(--layer-${(i % 8) + 1})`;
@@ -264,7 +277,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
   const sound = found?.voice === 'layered' ? found : undefined;
   const runCmd = (cmds: string): Promise<RunResult> => (voice ? voice.run(cmds) : store.run(cmds));
   const [sel, setSel] = useState(1);
-  const [open, setOpen] = useState<OpenPanel>({ kind: 'source', n: 1 });
+  const [open, setOpen] = useState<OpenPanel>(voice ? { kind: 'source', n: 1 } : null);
   const [envTarget, setEnvTarget] = useState('1.amp');
   const [draft, setDraft] = useState<Record<string, Value>>({});
   const [menu, setMenu] = useState<string | null>(null);
@@ -359,7 +372,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
 
   const controlFor = (ckey: string, spec: PSpec, current: Value | undefined, hasEnv: boolean, onEnv?: () => void) => (
     <Control key={ckey} ckey={ckey} spec={spec} value={val(ckey, current)} samples={samples} hasEnv={hasEnv}
-      onMove={(v) => move(ckey, v)} onRelease={releaseFor(ckey)} onReset={() => resetTo(ckey, spec.default)} onEnv={onEnv} />
+      onMove={(v) => move(ckey, v)} onPreview={(v) => setDraft((d) => ({ ...d, [ckey]: v }))} onRelease={releaseFor(ckey)} onReset={() => resetTo(ckey, spec.default)} onEnv={onEnv} />
   );
   const toEnv = (target: string, fixed: number, exists: boolean) => () => {
     setEnvTarget(target);
@@ -474,44 +487,47 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     );
   };
 
-  /** The open card: every parameter of a device, or of the layer's source, and the envelope graph. */
+  /** The device detail panel, docked to the right of the tracks: every parameter of the selected device or source, and the envelope graph. */
   const panel = (which: NonNullable<OpenPanel>) => {
+    const close = <IconButton label="Close the panel" testId="panel-close" kind="quiet" onClick={() => setOpen(null)}><span aria-hidden>×</span></IconButton>;
     if (which.kind === 'source') {
       const l = sound.layers[which.n - 1];
       if (!l) return null;
       const n = which.n;
       const ps = LAYER_SPECS.find((x) => x.name === 'pan')!;
+      const os = LAYER_SPECS.find((x) => x.name === 'offset')!;
       const pk = `L:${n}:pan`, ok = `L:${n}:offset`;
+      const numeric = layerSpecs(l.kind).filter((sp) => !['offset', 'gain', 'pan', 'seed'].includes(sp.name));
       return (
-        <div className="track-panel" data-testid="layer-panel" data-layer={n}>
-          <fieldset className="group" data-testid="layer-source">
-            <legend>Layer {n}: {layerLabel(l)}</legend>
-            <div className="slider">
-              <label htmlFor="c-source">source</label>
-              <select id="c-source" data-testid="ctl-source" value={l.kind} onChange={(e) => void now(`layer set ${id} ${n} source=${e.target.value}`)}>
-                {SOURCE_KINDS.map((k) => <option key={k} value={k} disabled={k === 'sample' && !samples.length}>{k}</option>)}
-              </select>
-              <span /><span /><span />
-            </div>
-            {layerSpecs(l.kind).filter((sp) => !['offset', 'gain', 'pan', 'seed'].includes(sp.name) && !(['filter', 'cutoff', 'q'].includes(sp.name))).map((sp) =>
+        <aside className="device-panel" data-testid="layer-panel" data-layer={n} aria-label={`Layer ${n} source`}>
+          <div className="dp-head"><span className="dp-title">Layer {n} · source</span><span className="mono dim small">{layerLabel(l)}</span><span className="spacer" />{close}</div>
+          <div className="pc wide" data-testid="layer-source" title="the layer's source">
+            <span className="cap">source</span>
+            <Segmented label="Source" value={l.kind} testId="ctl-source" onChange={(k) => void now(`layer set ${id} ${n} source=${k}`)}
+              options={SOURCE_KINDS.filter((k) => k !== 'sample' || samples.length || l.kind === 'sample').map((k) => ({ value: k, label: k, testId: `ctl-source-${k}` }))} />
+          </div>
+          <div className="pc-grid">
+            {numeric.filter((sp) => !['filter', 'cutoff', 'q'].includes(sp.name)).map((sp) =>
               controlFor(`L:${n}:${sp.name}`, sp, l.p[sp.name], !!l.envs[sp.name], sp.env ? toEnv(`${n}.${sp.name}`, l.p[sp.name] as number, !!l.envs[sp.name]) : undefined))}
-            <div className="slider"><label>amplitude</label>
-              <span className="dim" data-testid="amp-state">{l.amp ? `envelope, ${l.amp.length} points` : l.kind === 'classic' ? 'the classic voice\'s own envelope' : '2 ms fade in and out'}</span>
-              <span /><button className={`link env-btn${l.amp ? ' on' : ''}`} data-testid="env-btn-amp" onClick={toEnv(`${n}.amp`, 1, !!l.amp)}>{l.amp ? '∿ env' : '∿'}</button><span /></div>
-            {layerSpecs(l.kind).filter((sp) => ['filter', 'cutoff', 'q'].includes(sp.name)).map((sp) =>
+            <div className="pc" data-testid="amp-row">
+              <span className="cap">amplitude</span>
+              <span className="dim small" data-testid="amp-state">{l.amp ? `envelope, ${l.amp.length} points` : l.kind === 'classic' ? 'the classic voice\'s own envelope' : '2 ms fade in and out'}</span>
+              <button type="button" className={`env-chip${l.amp ? ' on' : ''}`} data-testid="env-btn-amp" onClick={toEnv(`${n}.amp`, 1, !!l.amp)}>{l.amp ? '∿ env ●' : '∿ env'}</button>
+            </div>
+            {numeric.filter((sp) => ['filter', 'cutoff', 'q'].includes(sp.name)).map((sp) =>
               controlFor(`L:${n}:${sp.name}`, sp, l.p[sp.name], !!l.envs[sp.name], sp.env ? toEnv(`${n}.${sp.name}`, l.p[sp.name] as number, !!l.envs[sp.name]) : undefined))}
             {controlFor(`L:${n}:seed`, { ...LAYER_SPECS.find((x) => x.name === 'seed')!, default: 0 }, l.p.seed ?? 0, false)}
-            <div className="slider" data-testid={`row-L-${n}-pan`}><label title="pan: -1 left, 1 right">pan</label>
-              <input type="range" min={0} max={1000} value={Math.round(sliderPosition(ps, val(pk, l.p.pan) as number) * 1000)} data-testid={`layer-pan-${n}`} disabled={!!l.envs.pan}
-                onChange={(e) => move(pk, sliderValue(ps, Number(e.target.value) / 1000))} onPointerDown={() => window.addEventListener('pointerup', releaseFor(pk), { once: true })} onKeyUp={releaseFor(pk)} onBlur={releaseFor(pk)} />
-              <output>{val(pk, l.p.pan)}</output><span /><span /></div>
-            <div className="slider"><label title="start offset, seconds">offset</label>
-              <input type="number" min={0} max={10} step={0.01} data-testid={`layer-offset-${n}`} value={String(val(ok, l.p.offset))}
-                onChange={(e) => setDraft((d) => ({ ...d, [ok]: Number(e.target.value) }))} onBlur={() => { if (draft[ok] !== undefined) { co.push(ok, draft[ok]!); co.flush(); } }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-              <span /><span /><span /></div>
-          </fieldset>
+            <div className="pc wide" data-testid={`row-L-${n}-pan`}>
+              <Slider label="Pan" testId={`layer-pan-${n}`} value={val(pk, l.p.pan) as number} min={ps.min} max={ps.max} def={ps.default as number} bipolar disabled={!!l.envs.pan} spec={{ unit: 'plain', digits: 2 }} step={0.02}
+                onDraft={(v) => setDraft((d) => ({ ...d, [pk]: roundSpec(ps, v) }))} onCommit={(v) => move(pk, roundSpec(ps, v))} />
+            </div>
+            <div className="pc" data-testid={`row-L-${n}-offset`}>
+              <Knob label="offset" testId={`layer-offset-${n}`} value={val(ok, l.p.offset) as number} min={os.min} max={os.max} def={os.default as number} size={40} spec={{ unit: 's' }} step={0.01}
+                onDraft={(v) => setDraft((d) => ({ ...d, [ok]: roundSpec(os, v) }))} onCommit={(v) => move(ok, roundSpec(os, v))} />
+            </div>
+          </div>
           {layer && <EnvEditor run={runCmd} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
-        </div>
+        </aside>
       );
     }
     const chain = chainOf(sound, which.scope);
@@ -520,20 +536,23 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     const sc = scopeKey(which.scope), k = which.k;
     const wh = chainWhere(which.scope);
     return (
-      <div className="track-panel" data-testid={which.scope === 'M' ? 'fx-master' : 'fx-layer'}>
-        <fieldset className="group fx" data-testid={`fx-panel-${sc}-${k}`} data-kind={f.kind}>
-          <legend>{which.scope === 'M' ? 'Master' : `Layer ${which.scope}`} · {k}. {f.kind}</legend>
-          <div className="row">
-            <button className="link" data-testid={`fx-up-${sc}-${k}`} disabled={k === 1} onClick={() => void now(`fx move ${id}${wh} ${k} to=${k - 1}`).then(() => setOpen({ kind: 'fx', scope: which.scope, k: k - 1 }))} title="earlier in the chain">← earlier</button>
-            <button className="link" data-testid={`fx-down-${sc}-${k}`} disabled={k === chain.length} onClick={() => void now(`fx move ${id}${wh} ${k} to=${k + 1}`).then(() => setOpen({ kind: 'fx', scope: which.scope, k: k + 1 }))} title="later in the chain">later →</button>
-            <button className="link" data-testid={`fx-remove-${sc}-${k}`} onClick={() => { void now(`fx remove ${id}${wh} ${k}`); setOpen(null); }} title="remove this effect">× remove</button>
-          </div>
+      <aside className="device-panel" data-testid={which.scope === 'M' ? 'fx-master' : 'fx-layer'} aria-label={`${f.kind} effect`}>
+        <div className="dp-head" data-testid={`fx-panel-${sc}-${k}`} data-kind={f.kind}>
+          <span className="dp-title">{which.scope === 'M' ? 'Master' : `Layer ${which.scope}`} · {k}. {f.kind}</span><span className="spacer" />{close}
+        </div>
+        <div className="dp-btns">
+          <Button kind="quiet" testId={`fx-up-${sc}-${k}`} disabled={k === 1} onClick={() => void now(`fx move ${id}${wh} ${k} to=${k - 1}`).then(() => setOpen({ kind: 'fx', scope: which.scope, k: k - 1 }))} title="earlier in the chain">← earlier</Button>
+          <Button kind="quiet" testId={`fx-down-${sc}-${k}`} disabled={k === chain.length} onClick={() => void now(`fx move ${id}${wh} ${k} to=${k + 1}`).then(() => setOpen({ kind: 'fx', scope: which.scope, k: k + 1 }))} title="later in the chain">later →</Button>
+          <Button kind="danger" testId={`fx-remove-${sc}-${k}`} onClick={() => { void now(`fx remove ${id}${wh} ${k}`); setOpen(null); }} title="remove this effect">Remove</Button>
+        </div>
+        <div className="pc-grid">
           {FX_SPECS[f.kind].map((sp) => controlFor(`F:${which.scope === 'M' ? 'M' : which.scope}:${k}:${sp.name}`, sp, f.p[sp.name], !!f.envs[sp.name], sp.env ? toEnv(`${which.scope === 'M' ? 'master' : which.scope}.fx${k}.${sp.name}`, f.p[sp.name] as number, !!f.envs[sp.name]) : undefined))}
-        </fieldset>
+        </div>
         {layer && <EnvEditor run={runCmd} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
-      </div>
+      </aside>
     );
   };
+  const panelEl = open ? panel(open) : null;
 
   const gs = LAYER_SPECS.find((x) => x.name === 'gain')!;
   const gainWarp = { to: (v: number) => sliderPosition(gs, v), from: (f: number) => sliderValue(gs, f) };
@@ -592,7 +611,6 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
             {addMenu(n)}
           </div>
         </div>
-        {open && ((open.kind === 'source' && open.n === n) || (open.kind === 'fx' && open.scope === n)) && panel(open)}
       </div>
     );
   };
@@ -644,6 +662,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
 
       {!voice && <LensPanel store={store} sound={sound} height={190} prov={prov} outline={prov.beforeAgent} previous={prov.before} layersLens={layersLens} onAxis={setAxis} />}
 
+      <div className="lay-grid" data-panel={panelEl ? 'open' : undefined} onKeyDown={(e) => { if (e.key === 'Escape' && panelEl && (e.target as HTMLElement).closest('.device-panel')) setOpen(null); }}>
       <section className="tracks" data-testid="layers" aria-label="Layers" data-count={sound.layers.length}>
         {sound.layers.length === 0 && <p className="dim" data-testid="no-layers">No layers yet: add one with + Layer, or start from a recipe.</p>}
         <div data-testid="layer-strips" className="tracks-list">
@@ -657,10 +676,11 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
               {addMenu('M')}
             </div>
           </div>
-          {open?.kind === 'fx' && open.scope === 'M' && panel(open)}
         </div>
         <div className="lay-hints"><span>Drag a device onto another layer to move it · ⌥ drag copies</span><span>Enter opens a device · Tab moves along the chain</span><span>Drag the handle to reorder layers</span></div>
       </section>
+      {panelEl}
+      </div>
 
       {!voice && (
         <details className="sound-more" open>

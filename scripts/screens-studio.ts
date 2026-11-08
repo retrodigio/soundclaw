@@ -98,7 +98,7 @@ async function soundShots(): Promise<void> {
     const r = await a.cli(['run', a.dir, '-e', SOUNDS_ST2]);
     if (r.code !== 0) throw new Error(r.err || r.out);
     let first = true;
-    const shots: { file: string; theme: 'dark' | 'light'; density: 'compact' | 'comfortable'; hash: string; lens?: string; wait: string; extra?: (p: Page) => Promise<void> }[] = [];
+    const shots: { file: string; theme: 'dark' | 'light'; density: 'compact' | 'comfortable'; hash: string; lens?: string; wait: string; w?: number; h?: number; extra?: (p: Page) => Promise<void> }[] = [];
     for (const theme of ['dark', 'light'] as const) {
       shots.push({ file: `home-${theme}`, theme, density: 'compact', hash: '#/', wait: 'home' });
       shots.push({ file: `classic-${theme}-compact`, theme, density: 'compact', hash: '#/sound/coin_pickup', wait: 'editor' });
@@ -108,11 +108,12 @@ async function soundShots(): Promise<void> {
         shots.push({ file: `analysis-${lens}-${theme}`, theme, density: 'compact', hash: '#/sound/laser/analysis', lens: key, wait: 'analysis-page' });
       }
     }
+    shots.push({ file: 'analysis-wave-dark-1024', theme: 'dark', density: 'compact', hash: '#/sound/laser/analysis', lens: '1', wait: 'analysis-page', w: 1024, h: 768 });
     shots.push({ file: 'classic-dark-comfortable', theme: 'dark', density: 'comfortable', hash: '#/sound/coin_pickup', wait: 'editor' });
     shots.push({ file: 'layered-dark-comfortable', theme: 'dark', density: 'comfortable', hash: '#/sound/explosion_big', wait: 'editor' });
     shots.push({ file: 'layered-dark-device-open', theme: 'dark', density: 'compact', hash: '#/sound/explosion_big', wait: 'editor', extra: async (p) => { await p.getByTestId('fx-1-1').click(); await p.getByTestId('fx-panel-1-1').scrollIntoViewIfNeeded(); await p.waitForTimeout(300); } });
     for (const v of shots) {
-      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+      const ctx = await browser.newContext({ viewport: { width: v.w ?? 1440, height: v.h ?? 900 }, reducedMotion: 'reduce' });
       await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p)); } catch { /* storage off */ } }, { theme: v.theme, density: v.density, panels: { bottomOpen: v.hash === '#/' } });
       const page = await ctx.newPage();
       await page.goto(`${a.url}&name=ana${v.hash}`);
@@ -147,7 +148,7 @@ async function soundShots(): Promise<void> {
       }
       if (v.extra) await v.extra(page);
       await page.waitForTimeout(700);
-      const file = join(OUT, `${v.file}-1440x900.png`);
+      const file = join(OUT, `${v.file}-${v.w ?? 1440}x${v.h ?? 900}.png`);
       await page.screenshot({ path: file });
       console.log(file);
       await ctx.close();

@@ -35,9 +35,11 @@ async function addLayer(page: Page, kind: string): Promise<void> {
   await page.getByTestId(`add-layer-${kind}`).click();
 }
 
-/** Set a range input to a position (0 to 1000) and wait for the command that follows. */
-async function fillRange(page: Page, testid: string, pos: number): Promise<void> {
-  await page.getByTestId(testid).fill(String(pos));
+/** Type a value (with its unit, if any) into a knob. */
+async function typeKnob(page: Page, testid: string, text: string): Promise<void> {
+  await page.getByTestId(testid).click();
+  await page.getByTestId(`${testid}-entry`).fill(text);
+  await page.getByTestId(`${testid}-entry`).press('Enter');
 }
 
 test('builds a three-layer impact in the editor, drags an envelope point (one history entry), adds an effect and plays', async ({ page }) => {
@@ -47,8 +49,8 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   // layer 1: a sine thump at 60 Hz
   await addLayer(page, 'osc');
   await expect(page.getByTestId('layer-row-1')).toBeVisible();
-  await fillRange(page, 'ctl-L-1-freq', 159); // 20 * 1000^0.159 = 60 Hz
-  await fillRange(page, 'ctl-L-1-dur', 392); // 0.4 s (log scale, 0.01 to 123 s)
+  await typeKnob(page, 'ctl-L-1-freq', '60'); // 60 Hz
+  await typeKnob(page, 'ctl-L-1-dur', '0.4s');
   // both moves came within the pause: they are written together, as one command
   await expect.poll(async () => (await texts(page)).filter((t) => /^layer set impact 1 freq=\d+(\.\d+)? dur=0\.\d+$/.test(t)).length, { timeout: 8000 }).toBe(1);
 
@@ -57,13 +59,13 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await expect(page.getByTestId('layer-row-2')).toBeVisible();
   await page.getByTestId('ctl-L-2-wave').selectOption('white');
   await page.getByTestId('ctl-L-2-filter').selectOption('lp');
-  await fillRange(page, 'ctl-L-2-dur', 245); // about 0.1 s
+  await typeKnob(page, 'ctl-L-2-dur', '100ms');
   await expect.poll(async () => (await texts(page)).some((t) => /^layer set impact 2 .*filter=lp/.test(t))).toBe(true);
 
   // layer 3: a short square click
   await addLayer(page, 'osc');
   await page.getByTestId('ctl-L-3-wave').selectOption('square');
-  await fillRange(page, 'ctl-L-3-dur', 74); // about 0.02 s
+  await typeKnob(page, 'ctl-L-3-dur', '20ms');
   await expect.poll(async () => (await texts(page)).some((t) => /^layer set impact 3 .*wave=square/.test(t))).toBe(true);
   await expect(page.getByTestId('layer-row-3')).toBeVisible();
   await expect(page.locator('[data-testid^=layer-row-]')).toHaveCount(3);
@@ -97,7 +99,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
 
   // an exponential curve into the second point, an amplitude envelope, and an effect
   await page.getByTestId('env-point-1').click();
-  await page.getByTestId('env-curve').selectOption('exp');
+  await page.getByTestId('env-curve-exp').click();
   await expect.poll(async () => (await texts(page))[0]).toMatch(/^env impact 1\.freq ".*@exp"$/);
   await page.getByTestId('device-add-1').click();
   await page.getByTestId('fx-add-L1-reverb').click();

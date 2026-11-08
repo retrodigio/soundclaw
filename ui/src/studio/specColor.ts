@@ -14,16 +14,17 @@ function rgbOf(css: string): [number, number, number] {
 }
 
 /** 256 colours (r, g, b) from quiet to loud, for the theme in effect. */
-export function specLut(): Uint8ClampedArray {
+export function specLut(shape?: { floor: number; gamma: number }): Uint8ClampedArray {
   const cs = getComputedStyle(document.documentElement);
   const get = (n: string) => cs.getPropertyValue(n).trim();
-  const key = `${get('--ground')}|${get('--ember')}|${get('--spec-hi')}`;
+  const key = `${get('--ground')}|${get('--ember')}|${get('--spec-hi')}|${shape ? `${shape.floor}/${shape.gamma}` : ''}`;
   if (cache?.key === key) return cache.lut;
   const ground = rgbOf(get('--ground')), ember = rgbOf(get('--ember')), hi = rgbOf(get('--spec-hi'));
   const lut = new Uint8ClampedArray(256 * 3);
   const mix = (a: number[], b: number[], t: number, i: number) => { for (let k = 0; k < 3; k++) lut[i * 3 + k] = Math.round(a[k]! + (b[k]! - a[k]!) * t); };
   for (let i = 0; i < 256; i++) {
-    const t = i / 255;
+    // the lenses lift the floor to the ground and bend the ramp, so only real energy glows
+    const t = shape ? Math.max(0, (i / 255 - shape.floor) / (1 - shape.floor)) ** shape.gamma : i / 255;
     // ember opacity rises from 0 to 0.85 over the first 80 %, the top fifth goes on to the pale highlight
     const alpha = Math.min(1, t / 0.8) ** 1.4 * 0.85;
     const base = [0, 0, 0];

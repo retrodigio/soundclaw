@@ -74,13 +74,31 @@ const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > 
 
 export interface Flag { id: string; kind: 'fail' | 'warn'; name: string; from: number; to: number; label: string }
 
+/** A note with its long numbers rounded: "starts at level 0.7213" reads "starts at level 0.72". */
+export const roundNumbers = (t: string): string => t.replace(/-?\d+\.\d{3,}/g, (m) => String(Number(Number(m).toFixed(m.length > 7 ? 1 : 2))));
+
+/**
+ * Markers that fall within `gap` pixels of one another become one cluster (a marker "× 3 checks" with a list).
+ * `x` is a flag's position in pixels; the flags are taken in time order.
+ */
+export function clusterFlags(flags: Flag[], x: (f: Flag) => number, gap = 24): Flag[][] {
+  const sorted = [...flags].sort((a, b) => a.from - b.from);
+  const out: Flag[][] = [];
+  for (const f of sorted) {
+    const last = out[out.length - 1];
+    if (last && x(f) - x(last[last.length - 1]!) < gap) last.push(f);
+    else out.push([f]);
+  }
+  return out;
+}
+
 /** The failing checks' ranges as markers. */
 export function flagsOf(data: LensReply | null): Flag[] {
   if (!data) return [];
   const out: Flag[] = [];
   for (const c of data.checks) {
     if (c.pass) continue;
-    c.ranges.forEach((r, i) => out.push({ id: `${c.name}-${i}`, kind: 'fail', name: c.name, from: r.from, to: r.to, label: `${c.name}${r.note ? ` · ${r.note}` : ''} ${r.from.toFixed(3)} s` }));
+    c.ranges.forEach((r, i) => out.push({ id: `${c.name}-${i}`, kind: 'fail', name: c.name, from: r.from, to: r.to, label: `${c.name} ${r.from.toFixed(3)} s${r.note ? ` · ${roundNumbers(r.note)}` : ''}` }));
   }
   return out;
 }
@@ -182,8 +200,27 @@ function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, da
   const box = useRef<HTMLDivElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; t: number; moved: boolean; extend: boolean; base: { a: number; b: number } | null } | null>(null);
+  const [width, setWidth] = useState(800);
+  const [openCluster, setOpenCluster] = useState<number | null>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(Math.max(1, el.clientWidth)));
+    ro.observe(el);
+    setWidth(Math.max(1, el.clientWidth));
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    if (openCluster === null) return;
+    const off = () => setOpenCluster(null);
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') off(); };
+    window.addEventListener('pointerdown', off);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('pointerdown', off); window.removeEventListener('keydown', key); };
+  }, [openCluster]);
   const span = view.t1 - view.t0;
   const pct = (t: number): number => ((t - view.t0) / (span || 1)) * 100;
+  const clusters = useMemo(() => clusterFlags(flags, (f) => ((f.from - view.t0) / ((view.t1 - view.t0) || 1)) * width), [flags, view.t0, view.t1, width]);
   const timeAt = (clientX: number): number => {
     const r = box.current!.getBoundingClientRect();
     return clamp(view.t0 + ((clientX - r.left) / Math.max(1, r.width)) * span, 0, duration);
@@ -263,14 +300,38 @@ function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, da
       {axis.sel && <div className="lens-sel" data-testid="lens-sel" style={{ left: `${pct(axis.sel.a)}%`, width: `${Math.max(0.15, pct(axis.sel.b) - pct(axis.sel.a))}%` }} />}
       {axis.cursor !== null && <div className="lens-cursor" data-testid="lens-cursor" style={{ left: `${pct(axis.cursor)}%` }} />}
       <div ref={head} className="lens-playhead" data-testid="lens-playhead" style={{ display: 'none' }} />
-      {flags.map((f, i) => (
-        <span key={f.id} className="lens-flagband" data-kind={f.kind} style={{ left: `${pct(f.from)}%`, width: `${Math.max(0.2, pct(f.to) - pct(f.from))}%` }}>
-          <button type="button" className={`lens-flag${flags.findIndex((g) => g.name === f.name) === i ? '' : ' more'}`} data-kind={f.kind} data-testid={`flag-${f.id}`} data-from={f.from} data-to={f.to} title={`${f.label}: jump here and loop it`} style={{ top: 6 + (flags.findIndex((g) => g.name === f.name) === i ? [...new Set(flags.map((g) => g.name))].indexOf(f.name) * 22 : 0) }}
-            onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onFlag(f); }}>
-            <span className="mono" aria-hidden>×</span> {f.label} <span className="lens-flag-hint">click to loop</span>
-          </button>
-        </span>
+      {flags.map((f) => (
+        <span key={f.id} className="lens-flagband" data-kind={f.kind} style={{ left: `${pct(f.from)}%`, width: `${Math.max(0.2, pct(f.to) - pct(f.from))}%` }} />
       ))}
+      {clusters.map((c, i) => {
+        const f = c[0]!;
+        const top = 6 + (i % 3) * 22;
+        if (c.length === 1) {
+          return (
+            <button key={f.id} type="button" className="lens-flag" data-kind={f.kind} data-testid={`flag-${f.id}`} data-from={f.from} data-to={f.to} style={{ left: `calc(${pct(f.from)}% + 3px)`, top }} title={`${f.label}: jump here and loop it`}
+              onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onFlag(f); }}>
+              <span className="mono" aria-hidden>×</span> {f.label} <span className="lens-flag-hint">click to loop</span>
+            </button>
+          );
+        }
+        return (
+          <span key={`c${i}`} className="lens-flag-wrap" style={{ left: `calc(${pct(f.from)}% + 3px)`, top }}>
+            <button type="button" className="lens-flag" data-kind={f.kind} data-testid={`flag-cluster-${i}`} aria-haspopup="menu" aria-expanded={openCluster === i} title={c.map((g) => g.label).join('\n')}
+              onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setOpenCluster(openCluster === i ? null : i); }}>
+              <span className="mono" aria-hidden>×</span> {c.length} checks
+            </button>
+            {openCluster === i && (
+              <div className="flag-pop" role="menu" data-testid={`flag-pop-${i}`} onPointerDown={(e) => e.stopPropagation()}>
+                {c.map((g) => (
+                  <button key={g.id} type="button" role="menuitem" className="flag-row" data-testid={`flag-${g.id}`} data-from={g.from} data-to={g.to} onClick={(e) => { e.stopPropagation(); setOpenCluster(null); onFlag(g); }}>
+                    <span className="mono" aria-hidden>×</span><span>{g.label}</span><span className="lens-flag-hint">click to loop</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -365,16 +426,24 @@ function WaveLens({ data, view, axis, live, outline }: { data: LensReply; view: 
   }, [pk, view.t0, view.t1, axis.level]);
   const ghost = useMemo(() => {
     if (!outline) return '';
-    // only the upper edge, drawn dashed
+    // the earlier waveform's envelope, upper and lower, as two thin dashed lines (a run of the loudest peaks, smoothed)
     const n = outline.max.length;
-    let s = '';
+    if (!n) return '';
+    const amp = new Float32Array(n);
+    const w = Math.max(1, Math.round(n / 120));
+    for (let i = 0; i < n; i++) { let m = 0; for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) m = Math.max(m, Math.abs(outline.max[j]!), Math.abs(outline.min[j]!)); amp[i] = m; }
+    const sm = new Float32Array(n);
+    for (let i = 0; i < n; i++) { let s2 = 0, c = 0; for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) { s2 += amp[j]!; c++; } sm[i] = s2 / c; }
+    let up = '', dn = '';
     for (let i = 0; i < n; i++) {
       const t = ((i + 0.5) / n) * outline.duration;
       const x = ((t - view.t0) / (view.t1 - view.t0)) * W;
       if (x < -5 || x > W + 5) continue;
-      s += `${s ? 'L' : 'M'}${x.toFixed(1)} ${(H / 2 - clamp(outline.max[i]! * axis.level, -1, 1) * (H / 2)).toFixed(1)}`;
+      const a2 = clamp(sm[i]! * axis.level, 0, 1) * (H / 2);
+      up += `${up ? 'L' : 'M'}${x.toFixed(1)} ${(H / 2 - a2).toFixed(1)}`;
+      dn += `${dn ? 'L' : 'M'}${x.toFixed(1)} ${(H / 2 + a2).toFixed(1)}`;
     }
-    return s;
+    return `${up} ${dn}`;
   }, [outline, view.t0, view.t1, axis.level]);
   // loudness over time: −48 … −6 LUFS from the bottom to the top
   const loud = useMemo(() => {
@@ -460,7 +529,7 @@ function SpecLens({ data, view, hover: at }: { data: LensReply; view: { t0: numb
   const { theme } = usePrefs();
   const { w, h, data: bytes } = data.spec;
   const bmp = useBitmap(w, h, (img) => {
-    const lut = specLut();
+    const lut = specLut({ floor: 0.3, gamma: 1.7 });
     for (let f = 0; f < w; f++) for (let k = 0; k < h; k++) {
       const v = bytes[f * h + k]! * 3;
       const o = ((h - 1 - k) * w + f) * 4;
@@ -558,7 +627,7 @@ function CompareLens({ store, sound, data, previous, view }: { store: Store; sou
       const o = ((ch - 1 - k) * cw + f) * 4;
       const col = v >= 0 ? warm : cool;
       img.data[o] = col[0]!; img.data[o + 1] = col[1]!; img.data[o + 2] = col[2]!;
-      img.data[o + 3] = Math.round(255 * Math.min(1, Math.abs(v) * 1.6) ** 1.2);
+      img.data[o + 3] = Math.round(255 * Math.min(1, Math.max(0, (Math.abs(v) - 0.1) / 0.8)) ** 1.3); // under 3 dB of difference is nothing
     }
   }, [diff, usePrefs().theme]);
   const dur = diff?.duration ?? data.duration;
@@ -659,7 +728,7 @@ function NumbersStrip({ store, sound, data, prov }: { store: Store; sound: Sound
         <div key={n.key} className="strip-card" data-kind={n.kind} data-testid={`nstrip-${n.key}`}>
           <span className="cap">{n.label}</span>
           <span className="mono strip-v">{n.value}</span>
-          <span className="strip-n">{n.kind && <Badge kind={n.kind}>{''}</Badge>}{n.note}</span>
+          <span className="nstrip-note">{n.kind && <Badge kind={n.kind}>{''}</Badge>}{n.note}</span>
         </div>
       ))}
       {!a && <span className="dim strip-wait">measuring…</span>}

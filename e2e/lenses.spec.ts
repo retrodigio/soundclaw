@@ -119,10 +119,12 @@ test('the cursor, the selection and the zoom are kept across lenses', async ({ p
 });
 
 test('a flag is a marker: a click jumps to it and loops it', async ({ page }) => {
-  // a classic preset starts at a high level: the click check flags the first millisecond
+  // a classic preset starts at a high level: the click check flags the first millisecond (and the harsh stretch starts there too, so the two share one marker)
   await openAnalysis(page, 'sound new zap voice=classic preset=pickup seed=3', 'zap');
   const flag = page.getByTestId('flag-click-0');
-  await expect(flag).toBeVisible();
+  /** Open the marker's list when the flag is in one. */
+  const reveal = async () => { if (!(await flag.isVisible())) await page.locator('[data-testid^=flag-cluster-]').first().click(); await expect(flag).toBeVisible(); };
+  await reveal();
   await expect(flag).toContainText(/click/);
   const from = Number(await flag.getAttribute('data-from'));
   const n = (await played(page)).length;
@@ -136,11 +138,14 @@ test('a flag is a marker: a click jumps to it and loops it', async ({ page }) =>
   await expect(page.getByTestId('lens-readout')).toHaveAttribute('data-cursor', String(from));
   expect(await sel(page)).toMatch(/^0,0\.0\d+$/);
   await page.keyboard.press('2');
-  await expect(page.getByTestId('flag-click-0')).toBeVisible();
+  await expect(page.locator('[data-testid^=flag-]').first()).toBeVisible();
   await expect(page.getByTestId('lens-sel')).toBeVisible();
-  // the flag is a button, reachable by keyboard
+  // the marker is a button, reachable by keyboard
   await page.keyboard.press('1');
-  await page.getByTestId('flag-click-0').focus();
+  await page.locator('[data-testid^=flag-cluster-], button.lens-flag').first().focus();
+  await page.keyboard.press('Enter');
+  await reveal();
+  await flag.focus();
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await played(page)).length).toBe(n + 2);
 });

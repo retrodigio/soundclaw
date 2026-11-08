@@ -11,9 +11,8 @@ export function AnalysisPage({ store, id }: { store: Store; id: string }) {
   const data = store.lens(sound);
   const kind = sound.voice === 'classic' ? 'classic' : sound.voice === 'layered' ? `layered · ${sound.layers.length} layer${sound.layers.length === 1 ? '' : 's'}` : 'tone';
   const seed = sound.voice === 'classic' ? ` · seed ${sound.patch.seed ?? 'auto'}` : sound.voice === 'layered' ? ` · seed ${sound.seed}` : '';
-  const dir = store.project?.dir ?? '<project>';
   return (
-    <section className="analysis" data-testid="analysis-page" data-sound={id}>
+    <section className="analysis-page" data-testid="analysis-page" data-sound={id}>
       <header className="analysis-head">
         <a href={`#/sound/${id}`} className="back" data-testid="back-to-editor">← editor</a>
         <h1>{id}</h1>
@@ -23,7 +22,7 @@ export function AnalysisPage({ store, id }: { store: Store; id: string }) {
       <div className="lens-foot">
         <span>1–5 switch lens · the cursor, selection and zoom stay put</span>
         <span>Click a flag to jump to it and loop it</span>
-        <span>These are the numbers the agent reads: <code className="mono" data-testid="measure-command">soundclaw measure {dir} {id} --json</code></span>
+        <span>These are the numbers the agent reads: <code className="mono" data-testid="measure-command">soundclaw measure . {id} --json</code></span>
       </div>
     </section>
   );
