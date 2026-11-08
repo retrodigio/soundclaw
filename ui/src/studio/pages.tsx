@@ -87,7 +87,7 @@ export function Page({ store, onPlay, onOpen }: { store: Store; onPlay(id: strin
   const r = store.route;
   switch (r.kind) {
     case 'sound': return <EditorGate key={`${r.id}/${r.view ?? ''}`} store={store} id={r.id} {...(r.view ? { view: r.view } : {})} />;
-    case 'song': return <SongEditor key={r.id} store={store} id={r.id} />;
+    case 'song': return <SongEditor key={r.id} store={store} id={r.id} {...(r.view ? { view: r.view } : {})} />;
     case 'audition': return <AuditionPage key={r.set ?? 'all'} store={store} setId={r.set} />;
     case 'set': {
       const set = store.sets.find((x) => x.id === r.id);

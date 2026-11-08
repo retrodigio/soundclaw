@@ -136,10 +136,15 @@ button.chip-c:hover { border-color: var(--line2); color: var(--text); }
 .loud-band { position: absolute; top: -3px; bottom: -3px; background: var(--pass-bg); border-left: 1px solid var(--pass); border-right: 1px solid var(--pass); }
 .loud-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); }
 .loud-read { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-12); }
-.loud.vertical { flex-direction: row; min-width: 0; height: 160px; }
-.loud.vertical .loud-bar { width: 8px; height: 100%; }
-.loud.vertical .loud-fill { top: auto; bottom: 0; left: 0; width: 8px; height: auto; }
-.loud.vertical .loud-band { left: -3px; right: -3px; top: auto; bottom: auto; border: none; border-top: 1px solid var(--pass); border-bottom: 1px solid var(--pass); }
+.loud.vertical { flex-direction: row; gap: 10px; min-width: 0; height: 200px; align-items: stretch; }
+.loud.vertical .loud-bar { width: 26px; height: 100%; flex: none; background: var(--ground); border-radius: 4px; }
+.loud.vertical .loud-fill { top: auto; bottom: 0; left: 0; width: 100%; height: auto; border-radius: 0 0 4px 4px; background: var(--pass); opacity: 0.9; }
+.loud.vertical[data-kind='warn'] .loud-fill { background: var(--warn); }
+.loud.vertical[data-kind='fail'] .loud-fill { background: var(--fail); }
+.loud.vertical .loud-band { left: -2px; right: -2px; top: auto; border: none; border-top: 1.5px solid var(--text); border-bottom: 1.5px solid var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.loud.vertical .loud-scale { flex-direction: column-reverse; justify-content: space-between; }
+.loud.vertical .loud-scale span:nth-child(2) { display: none; }
+.loud.vertical .loud-read { flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 4px; }
 
 /* tooltip, popover, toast, banner */
 .tip-wrap { position: relative; display: inline-flex; }

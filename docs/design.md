@@ -238,7 +238,7 @@ that opens over the page, below 900 px the library is an overlay, and there is n
   ground, ember at rising opacity, then a pale highlight (`--spec-hi`).
 - **Agent rail.** Presence, the claimed request ("working on"), your requests with their state (sent, seen, claimed, working, blocked, ready for
   review), the live feed built from the tape and the request events (a play button where a sound changed), and the ask field.
-- **Bottom panel.** Detail (the selected sound's waveform with check markers and its numbers), Mixer (a sound's loudness, a song's channels) and
+- **Bottom panel.** Detail (the selected sound's waveform with check markers and its numbers), Mixer (a sound's loudness, or a song's strips: faders and live meters, as the song page's mixer) and
   History (the tape, for the focused item).
 - **Palette and shortcuts.** Every action is registered once (`registry.ts`) with an id, a label, a group and a shortcut; the palette (⌘K) searches
   them and the project's items, `?` shows the shortcut sheet built from the registry, and one keyboard handler runs them. Shortcuts never fire while a
@@ -293,6 +293,45 @@ card within a chain is one `fx move`; dragging it onto another layer or the mast
 envelopes, then an `fx remove`), and ⌥-drag leaves the original. Dragging uses pointer events, not the browser's drag and drop, so it works the
 same everywhere and is testable. "+" at the end of a chain adds an effect; "+ Layer" adds a layer. A layered effect has no enabled flag, so there is
 no bypass toggle.
+
+## The song pages
+
+A song has two pages that share a header (play, loop, the intensity selector for layered songs, undo, the settings): the arrangement, `#/song/<id>`, and
+the mixer, `#/song/<id>/mixer` (also the bottom panel's Mixer tab). `ui/src/song/` holds the pieces; `ui/src/song/model.ts` holds everything they work out
+(no React, so unit tests read it).
+
+**The arrangement** is a row per channel, ordered by game layer (the stem tag and a rule between layers), on a bar ruler. The sections are markers; the
+loop region is a band with two handles (an end or the whole band snaps to the sections' edges, one `song loop` per drag) and the seam check's verdict is a
+badge at its end. Each placement of a pattern in which a channel plays is a clip with a sketch of its notes. A clip is violet and dashed while the agent
+wrote its row and nobody has approved it: `patternAuthors` reads the tape (undone groups left out) and calls a `pattern/channel` row the agent's when the
+latest command that changed it was an agent's (a `pattern set` counts the rows whose cells differ from what the tape last said, a note edit its row, a
+helper its channel) and neither `song mark … approved` nor a person's edit of that row came after. Song checks are drawn from the server's report
+(`/api/song/<id>.json`): masking is a dashed amber box on both lanes over its stretch, the longest stretch of each pair labelled, other failing checks that
+name a channel sit on its lane, and a flag click selects it and puts the partner's notes behind the roll. A drag on the ruler picks bars (R asks for changes
+pinned to them and the selected channel); a click puts the cursor there. The playhead and the cursor readout move by style and text from a
+`requestAnimationFrame` loop; React hears only when the step changes.
+
+**The split editor.** The piano roll (all its gestures) is on the left and the pattern text on the right. The text is the normal form `pattern set` takes. A
+note selected in the roll lights its token (the tokens are found from the text itself, so a note-list row works too), and a caret or selection in the text picks
+the notes under it. Typing is read again 300 ms after the last key: a problem is underlined with its message and nothing is written; text that means something new
+is one `pattern set` (the very command an agent would write), so one pause is one batch. The person's layout is kept: when the pattern changes and the text already
+means it, the text is left alone; an outside change (the roll, the agent, an undo) replaces it and puts the caret back on its line and column, unless the person is
+mid-edit, when a link offers the reload. Rows the agent wrote have a violet left border. The grid for drum hits is a tab beside the roll.
+
+**The inspector** (⌥2; closed until opened, an overlay below 1040 px) holds the instruments, helpers, song order and changes (what the agent wrote that
+nobody approved, with Approve, and the song's recent commands) and the ask box; the palette finds each ("Song: show the helpers" and so on).
+
+**The mixer** has a strip for each channel (instrument and effect inserts, pan, a send knob named for each bus the song has, a fader with a stereo meter, the
+gain, the channel's own integrated loudness from the server's per-channel analysis or "silent here", M and S, ⌥ for the whole stem), then each send bus (its
+effect's knobs and its return level) and the master (the limiter's ceiling and the most gain reduction it made, a vertical loudness target, short-term loudness
+live, the loudness range and the true peak). Every knob and fader writes one `song channel set`, `song send`, `song fx set` or `song set` when a drag ends; a
+control whose latest change is the agent's, with no approval or edit since (`paramTrails`), has the violet tick. The masking lane links the strips the masking
+check names; a click solos both and loops the stretch (listening only), the same click again clears it.
+
+**Meters.** `ui/src/song/meters.worker.ts` keeps a small track per channel (the peak and the K-weighted energy of each 1/60 s) and posts the levels at the
+playhead about thirty times a second while a song plays; the send buses are run there too. The page sends it a channel's audio once, so after an edit only the
+changed channel crosses; and only while a mixer is showing. Meters read the latest values in `requestAnimationFrame` (`MeterHub.reader`), falling at 30 dB
+a second, as a peak or as the short-term loudness; a test counts the mixer's renders over a second of playback.
 
 ## Requests, await and presence
 

@@ -57,6 +57,27 @@ All notable changes to SoundClaw are listed here. The format follows
 - **The audition page** is the same grid with one column, the A/B card beside it, and its paging, filters, play-all and keys as before.
 - **New in core:** `restoreCommands` (the commands that give a sound an earlier version's render, checked on a copy). No render changed.
 
+### Songs and the mixer
+- **The arrangement.** A track per channel grouped by game layer, a bar ruler with the sections as markers, the loop region with handles, the seam
+  check as a badge, a clip for each placement of a pattern with a note sketch, and the send buses. Clips the agent wrote and nobody approved are violet
+  and dashed (worked out from the tape; approving the song or editing the row clears them). Song checks are drawn on the lanes and bars they name:
+  masking is a dashed amber box over both channels and its stretch, with a label; selecting a flag shows the partner's notes behind the roll as ghost
+  notes. The intensity selector (layered songs) picks which layers play. A drag on the ruler picks bars, and R asks for changes pinned to them and the
+  selected channel. The cursor and every capability of the old page stay.
+- **Roll and pattern text, in sync.** The piano roll sits beside the pattern text. Selected notes light their tokens; typing is read again after 300 ms,
+  a problem is underlined with its message and nothing is written, and text that means something new is one `pattern set` (one pause, one batch). The
+  caret stays; rows the agent wrote have a violet left border. The pattern grid is a tab. The instruments, helpers, song order and changes are in the
+  inspector (⌥2), found by the palette.
+- **The mixer** at `#/song/<id>/mixer` and in the bottom panel: a strip per channel (inserts, pan, a send knob per bus, a fader with a stereo meter, gain,
+  the channel's own loudness or "silent here", M and S), the send buses, and the master (the limiter's ceiling and gain reduction, a vertical loudness
+  target, short-term loudness, range and true peak). Each drag writes one `song channel set`, `song send`, `song fx set` or `song set`; the agent's
+  last change shows the violet tick. A masking lane links clashing strips: a click solos both and loops the bars.
+- **Live meters** come from a worker at about 30 Hz and are drawn every animation frame; React does not render at meter rate. Peak or short-term loudness.
+- **New in core's measuring code:** `loudnessRange` (EBU Tech 3342), shown by the mixer and added to the song's JSON as `numbers.loudnessRange`. No render
+  changed; the golden hashes are as they were.
+- **Fixed:** the piano roll threw when the playing step was in a pattern that has no row for the channel; the typed-entry field of a knob or fader
+  scrolled the page, which could move the control away from a double-click.
+
 ### The dashboard on large projects
 - **A project of 400 sounds, 100 samples and 3,000 commands opens at once.** The page used to fetch every sample and render and measure
   every sound on its own thread before it listed anything (a 60-sound slice took 88 s and froze the tab; the whole project never finished).

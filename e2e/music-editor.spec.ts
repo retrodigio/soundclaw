@@ -56,6 +56,14 @@ async function open(page: Page, setup = SETUP, song = 'demo'): Promise<void> {
   await expect(page.getByTestId('song-editor')).toBeVisible();
 }
 
+/** The inspector open on a tab (it starts closed on a song's page). */
+async function inspect(page: Page, tab: 'instruments' | 'helpers' | 'order' | 'changes'): Promise<void> {
+  if (!(await page.getByTestId('inspector').isVisible())) await page.getByTestId('inspector-toggle').click();
+  await page.getByTestId(`insp-tab-${tab}`).click();
+}
+const showGrid = (page: Page) => page.getByTestId('split-tab-grid').click();
+const showRoll = (page: Page) => page.getByTestId('split-tab-roll').click();
+
 /** The page point of a step and pitch in a channel's roll. */
 async function rollAt(page: Page, ch: string, step: number, midi: number, dx = 0.5): Promise<{ x: number; y: number }> {
   const svg = page.getByTestId(`roll-grid-${ch}`);
@@ -91,7 +99,9 @@ test('the piano roll: add, move and lengthen a note, one history entry each; fx 
   await expect(page.getByTestId('note-lead-6-E5')).toHaveAttribute('data-len', '2');
   expect((await humanGroups(page)).at(-1)).toEqual(['pattern note len demo.verse lead 6 2']);
   expect(await humanGroups(page)).toHaveLength(3);
+  await showGrid(page);
   await expect(page.getByTestId('cell-lead-7')).toHaveClass(/hold/);
+  await showRoll(page);
   // the selected note gets a slide from the small menu
   await page.getByTestId('note-lead-6-E5').click({ button: 'right' });
   await page.getByTestId('roll-fx-slide').click();
@@ -137,10 +147,12 @@ test('the piano roll: add, move and lengthen a note, one history entry each; fx 
 
 test('the grid: a drum hit painted by a click, and a drag that paints several hits as one entry', async ({ page }) => {
   await open(page);
+  await showGrid(page);
   await expect(page.getByTestId('hit-drums-k-1')).toHaveAttribute('data-on', 'false');
   await page.getByTestId('hit-drums-k-1').click();
   await expect(page.getByTestId('hit-drums-k-1')).toHaveAttribute('data-on', 'true');
   expect(await humanGroups(page)).toEqual([['pattern note add demo.verse drums 1 k']]);
+  await page.getByTestId('hit-drums-oh-3').scrollIntoViewIfNeeded();
   const a = (await page.getByTestId('hit-drums-oh-3').boundingBox())!, b = (await page.getByTestId('hit-drums-oh-5').boundingBox())!;
   await drag(page, { x: a.x + a.width / 2, y: a.y + a.height / 2 }, { x: b.x + b.width / 2, y: b.y + b.height / 2 });
   await expect(page.getByTestId('hit-drums-oh-5')).toHaveAttribute('data-on', 'true');
@@ -154,24 +166,25 @@ test('the grid: a drum hit painted by a click, and a drag that paints several hi
 
 test('the song order: a section dragged to a new place, repeats, and the loop region dragged on the ruler', async ({ page }) => {
   await open(page);
+  await inspect(page, 'order');
   const A = (await page.getByTestId('block-A').boundingBox())!, B = (await page.getByTestId('block-B').boundingBox())!;
-  await drag(page, { x: B.x + 12, y: B.y + 8 }, { x: A.x + 4, y: B.y + 8 });
+  await drag(page, { x: B.x + 12, y: B.y + B.height / 2 }, { x: B.x + 12, y: A.y + A.height / 2 - 6 });
   // the loop A..B would now run backwards: it keeps its ends, swapped, in the same entry
   await expect.poll(async () => (await humanGroups(page)).at(-1)).toEqual(['song order demo B A C', 'song loop demo B..A']);
   await expect(page.getByTestId('loop-band')).toHaveAttribute('data-from', 'B');
-  // the loop's end handle dragged to the end of C
-  const to = (await page.getByTestId('loop-to').boundingBox())!, C = (await page.getByTestId('block-C').boundingBox())!;
+  // the loop's end handle dragged to the end of C, on the arrangement's ruler
+  const to = (await page.getByTestId('loop-to').boundingBox())!, C = (await page.getByTestId('marker-C').boundingBox())!;
   await drag(page, { x: to.x + to.width / 2, y: to.y + to.height / 2 }, { x: C.x + C.width - 2, y: to.y + to.height / 2 });
   await expect(page.getByTestId('loop-band')).toHaveAttribute('data-to', 'C');
   expect((await humanGroups(page)).at(-1)).toEqual(['song loop demo B..C']);
   // its start handle to the start of A (A now plays second)
-  const from = (await page.getByTestId('loop-from').boundingBox())!, A2 = (await page.getByTestId('block-A').boundingBox())!;
+  const from = (await page.getByTestId('loop-from').boundingBox())!, A2 = (await page.getByTestId('marker-A').boundingBox())!;
   await drag(page, { x: from.x + from.width / 2, y: from.y + from.height / 2 }, { x: A2.x + 2, y: from.y + from.height / 2 });
   await expect(page.getByTestId('loop-band')).toHaveAttribute('data-from', 'A');
   expect((await humanGroups(page)).at(-1)).toEqual(['song loop demo A..C']);
   // the band dragged as a whole one section left keeps its length
-  const band = (await page.getByTestId('loop-band').boundingBox())!;
-  await drag(page, { x: band.x + band.width / 2, y: band.y + band.height / 2 }, { x: band.x + band.width / 2 - (A.width + 2), y: band.y + band.height / 2 });
+  const band = (await page.getByTestId('loop-band').boundingBox())!, Bm = (await page.getByTestId('marker-B').boundingBox())!;
+  await drag(page, { x: band.x + band.width / 2, y: band.y + band.height / 2 }, { x: band.x + band.width / 2 - (Bm.width + 2), y: band.y + band.height / 2 });
   await expect(page.getByTestId('loop-band')).toHaveAttribute('data-to', 'A');
   expect((await humanGroups(page)).at(-1)).toEqual(['song loop demo B..A']);
   await page.getByTestId('block-more-C').click();
@@ -182,11 +195,13 @@ test('the song order: a section dragged to a new place, repeats, and the loop re
   await page.getByTestId('set-tempo').press('Enter');
   await expect.poll(async () => (await humanGroups(page)).at(-1)).toEqual(['song set demo tempo=200']);
   await page.getByTestId('song-order').screenshot({ path: join(SHOTS, 'music-song-order.png') });
+  await page.getByTestId('arrangement').screenshot({ path: join(SHOTS, 'music-arrangement.png') });
 });
 
 test('a helper: the rows it would write shown first, then applied as the same command', async ({ page }) => {
   await open(page);
-  await page.getByTestId('grid-row-pad').click();
+  await page.getByTestId('track-name-pad').click();
+  await inspect(page, 'helpers');
   await page.getByTestId('helper-chords').click();
   await page.getByTestId('helper-prog').fill('I IV');
   await page.getByTestId('helper-bars').fill('0.5');
@@ -205,8 +220,11 @@ test('a helper: the rows it would write shown first, then applied as the same co
   expect(g[0]).toMatch(/^chords demo verse pad "I IV" bars=0\.5 rhythm=hold .*written=/);
   // the pad now plays what the preview showed
   const padRow = after.split('\n').find((l) => l.trim().startsWith('pad:'))!.trim();
+  await showGrid(page);
   const shown = await page.locator('[data-testid=grid-row-pad] td').evaluateAll((tds) => tds.map((t) => t.textContent));
   expect(shown[0]).toBe(padRow.split(/\s+/)[1]!.replace(/~.*$/, '~'));
+  await page.getByTestId('helper-panel').screenshot({ path: join(SHOTS, 'music-helper.png') });
+  await inspect(page, 'instruments');
   await page.getByTestId('chan-edit-lead').or(page.getByTestId('chan-copy-lead')).first().click();
   await expect(page.getByTestId('inst-editor-demo_lead')).toBeVisible();
   expect((await humanGroups(page)).at(-1)).toEqual(['instrument new demo_lead from=pulse_lead seed=1', 'song channel set demo lead inst=demo_lead']);
@@ -217,7 +235,6 @@ test('a helper: the rows it would write shown first, then applied as the same co
   await expect.poll(async () => (await humanGroups(page)).at(-1)).toEqual(['instrument layer set demo_lead 1 wave=saw']);
   await expect(page.getByTestId('inst-summary-demo_lead')).toContainText('pitch check class');
   await page.getByTestId('instrument-panel').screenshot({ path: join(SHOTS, 'music-instruments.png') });
-  await page.getByTestId('helper-panel').screenshot({ path: join(SHOTS, 'music-helper.png') });
 });
 
 test('playback: the cursor follows across grid, roll and song order; from the cursor; the selection repeating', async ({ page }) => {
@@ -237,8 +254,10 @@ test('playback: the cursor follows across grid, roll and song order; from the cu
   await expect(page.getByTestId('order-cursor')).toBeVisible();
   await page.getByTestId('stop-song').click();
   // the cursor: a click on a step of the grid; play from there
+  await showGrid(page);
   await page.getByTestId('grid-head-4').click();
   await expect(page.getByTestId('cursor-readout')).toContainText('verse step 4');
+  await showRoll(page);
   await expect(page.getByTestId('roll-cursor')).toBeVisible();
   await page.getByTestId('play-cursor').click();
   await expect(page.getByTestId('song-editor')).toHaveAttribute('data-playing', 'true', { timeout: 20_000 });
@@ -320,6 +339,7 @@ test('one note change in a 35 s six-channel song: only that channel renders agai
   expect(ms).toBeLessThan(first);
   await page.getByTestId('stop-song').click();
   await page.screenshot({ path: join(SHOTS, 'music-editor.png'), fullPage: true });
-  await page.getByTestId('pattern-grid').screenshot({ path: join(SHOTS, 'music-grid-six-channels.png') });
   await page.locator('.roll-panel').screenshot({ path: join(SHOTS, 'music-roll-six-channels.png') });
+  await showGrid(page);
+  await page.getByTestId('pattern-grid').screenshot({ path: join(SHOTS, 'music-grid-six-channels.png') });
 });

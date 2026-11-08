@@ -1,6 +1,6 @@
 // Screenshots of the dashboard on an invented example project: a few sounds, a set, a song and
 // requests in different states. Run it after `pnpm build`:
-//   node scripts/screens-studio.ts <name> [sounds|sets]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page)
+//   node scripts/screens-studio.ts <name> [sounds|sets|songs]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page; `songs`: a song's arrangement and split editor, and the mixer)
 // It starts its own server on a temporary project and stops it; nothing is left running.
 
 import { mkdirSync } from 'node:fs';
@@ -221,8 +221,148 @@ async function setShots(): Promise<void> {
   }
 }
 
+// ---- songs: the arrangement with the split editor, and the mixer (`node scripts/screens-studio.ts <name> songs`) ----
+
+const BATTLE = `song new battle_loop tempo=140 key=D:minor
+song set battle_loop gain=0.55
+song channel add battle_loop drums kit=default layer=base gain=0.5
+song channel add battle_loop bass inst=triangle_bass layer=base gain=0.5
+song channel add battle_loop pad inst=saw_pad layer=base gain=0.25
+song channel add battle_loop lead inst=pulse_lead layer=intensity gain=0.8
+song channel add battle_loop arp inst=pulse_lead layer=intensity gain=0.8
+song channel add battle_loop choir inst=fm_bell layer=boss gain=0.5
+song send battle_loop reverb size=0.55
+song send battle_loop delay time=0.21 feedback=0.35
+song channel set battle_loop pad reverb=0.4
+song channel set battle_loop lead reverb=0.2 delay=0.25 pan=-0.15
+song channel set battle_loop choir reverb=0.55
+pattern battle_loop.intro steps=16 tpb=4 bar=8
+  drums: k . . . k . . . | k . . . k . h h
+  pad: D3+F3+A3 - - - - - - - | A#2+D3+F3 - - - - - - -
+pattern battle_loop.verse steps=16 tpb=4 bar=8
+  drums: k . h . s . h . | k . h . s . h h
+  bass: D2 . D2 . D2 . F2 . | A#1 . A#1 . C2 . C2 .
+  pad: D3+F3+A3 - - - - - - - | A#2+D3+F3 - - - - - - -
+  lead: D5 - - - F5 - A5 - | D5 - - - A5 - F5 -
+pattern battle_loop.build steps=16 tpb=4 bar=8
+  drums: k . h k s . h . | k . h k s . h h
+  bass: D2 . D2 . D2 . F2 . | A#1 . A#1 . C2 . C2 .
+  pad: D3+F3+A3 - - - - - - - | A#2+D3+F3 - - - - - - -
+  lead: D5 - - - F5 - A5 - | D5 - - - A5 - F5 -
+pattern battle_loop.boss steps=16 tpb=4 bar=8
+  drums: k . h k s . h k | k . h k s k h h
+  bass: D2 D2 D2 . D2 . F2 F2 | A#1 A#1 A#1 . C2 . C2 C2
+  pad: D3+F3+A3 - - - - - - - | A#2+D3+F3 - - - - - - -
+  lead: D5 - - - F5 - A5 - | D5 - - - A5 - F5 -
+  choir: D5+A5 - - - - - - - | F5+C6 - - - - - - -
+song section add battle_loop intro intro
+song section add battle_loop A verse x4
+song section add battle_loop B build x4
+song section add battle_loop C boss x4
+song intro battle_loop intro
+`;
+// the agent adds an arp that plays under the lead in the build and the boss, and sets its pan and reverb
+const BATTLE_AGENT = `pattern battle_loop.build steps=16 tpb=4 bar=8
+  drums: k . h k s . h . | k . h k s . h h
+  bass: D2 . D2 . D2 . F2 . | A#1 . A#1 . C2 . C2 .
+  pad: D3+F3+A3 - - - - - - - | A#2+D3+F3 - - - - - - -
+  lead: D5 - - - F5 - A5 - | D5 - - - A5 - F5 -
+  arp: D5 F5 A5 F5 D5 F5 A5 F5 | D5 F5 A5 F5 D5 F5 A5 F5
+pattern battle_loop.boss steps=16 tpb=4 bar=8
+  drums: k . h k s . h k | k . h k s k h h
+  bass: D2 D2 D2 . D2 . F2 F2 | A#1 A#1 A#1 . C2 . C2 C2
+  pad: D3+F3+A3 - - - - - - - | A#2+D3+F3 - - - - - - -
+  lead: D5 - - - F5 - A5 - | D5 - - - A5 - F5 -
+  arp: D5 F5 A5 F5 D5 F5 A5 F5 | D5 F5 A5 F5 D5 F5 A5 F5
+  choir: D5+A5 - - - - - - - | F5+C6 - - - - - - -
+song channel set battle_loop arp pan=0.25 reverb=0.2
+`;
+
+async function songShots(): Promise<void> {
+  const a = await startAgent();
+  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const run = async (script: string, by: string) => { const r = await a.cli(['run', a.dir, '-e', script, '--by', by]); if (r.code !== 0) throw new Error(r.err || r.out); };
+  try {
+    await run(BATTLE, 'human:ana');
+    await run(BATTLE_AGENT, 'agent:claude');
+    const shots: { file: string; theme: 'dark' | 'light'; density?: 'compact' | 'comfortable'; hash: string; panels?: Record<string, unknown>; act: (p: Page) => Promise<void> }[] = [];
+    for (const theme of ['dark', 'light'] as const) {
+      // the arrangement with the masking flag, the agent's arp, a selection in the roll and the text lit
+      shots.push({ file: `song-${theme}`, theme, hash: '#/song/battle_loop', act: async (p) => {
+        await p.locator('[data-testid^=flag-label-masking-]').first().waitFor({ timeout: 60_000 });
+        await p.getByTestId('seam-badge').waitFor();
+        await p.locator('[data-testid^=flag-label-masking-]').first().click();
+        await p.getByTestId('roll-tab-lead').click();
+        await p.getByTestId('roll-lead').waitFor();
+        const svg = p.getByTestId('roll-grid-lead');
+        await svg.scrollIntoViewIfNeeded();
+        await p.getByTestId('note-lead-4-F5').click();
+        await p.getByTestId('note-lead-6-A5').click({ modifiers: ['Shift'] });
+        await p.getByTestId('note-lead-12-A5').click({ modifiers: ['Shift'] });
+        await p.getByTestId('tok-sel').first().waitFor();
+        await p.evaluate(() => document.getElementById('page')?.scrollTo(0, 0));
+        await p.mouse.move(2, 2);
+      } });
+      // the same page with the inspector open on the changes
+      shots.push({ file: `song-inspector-${theme}`, theme, hash: '#/song/battle_loop', act: async (p) => {
+        await p.locator('[data-testid^=flag-label-masking-]').first().waitFor({ timeout: 60_000 });
+        await p.getByTestId('inspector-toggle').click();
+        await p.getByTestId('insp-tab-changes').click();
+        await p.getByTestId('changes-pending').waitFor();
+      } });
+      // a bar selection for a request, with the text in an error state
+      shots.push({ file: `song-bars-${theme}`, theme, density: 'comfortable', hash: '#/song/battle_loop', act: async (p) => {
+        await p.locator('[data-testid^=flag-label-masking-]').first().waitFor({ timeout: 60_000 });
+        const r = (await p.getByTestId('bar-ruler').boundingBox())!;
+        await p.mouse.move(r.x + r.width * 0.55, r.y + 40);
+        await p.mouse.down();
+        await p.mouse.move(r.x + r.width * 0.7, r.y + 40, { steps: 6 });
+        await p.mouse.up();
+        await p.getByTestId('tab-boss').click();
+        await p.getByTestId('pattern-text-area').click({ position: { x: 90, y: 60 } });
+        await p.keyboard.type('Q9');
+        await p.getByTestId('pattern-text-error').and(p.locator('[data-error=true]')).waitFor();
+      } });
+      // the mixer during playback
+      shots.push({ file: `mixer-${theme}`, theme, hash: '#/song/battle_loop/mixer', panels: { libOpen: false }, act: async (p) => {
+        await p.locator('[data-testid^=mask-link-]').first().waitFor({ timeout: 60_000 });
+        await p.getByRole('button', { name: /^▶ Play$/ }).click();
+        await p.getByTestId('song-editor').and(p.locator('[data-playing=true]')).waitFor({ timeout: 60_000 });
+        await p.waitForFunction(() => (window as unknown as { soundclaw: { meters: { frames: number } } }).soundclaw.meters.frames > 40, undefined, { timeout: 30_000 });
+        await p.waitForTimeout(3500);
+      } });
+      shots.push({ file: `mixer-bottom-${theme}`, theme, hash: '#/song/battle_loop', panels: { bottomOpen: true, bottomTab: 'mixer', bottomH: 300 }, act: async (p) => {
+        await p.getByTestId('play-song').click();
+        await p.getByTestId('song-editor').and(p.locator('[data-playing=true]')).waitFor({ timeout: 60_000 });
+        await p.waitForFunction(() => (window as unknown as { soundclaw: { meters: { frames: number } } }).soundclaw.meters.frames > 40, undefined, { timeout: 30_000 });
+        await p.waitForTimeout(2500);
+      } });
+    }
+    for (const v of shots.filter((x) => !process.argv[4] || x.file.includes(process.argv[4]))) {
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+      await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p.prefs)); localStorage.setItem('soundclaw.songInspector', '0'); } catch { /* storage off */ } }, { prefs: { theme: v.theme, density: v.density ?? 'compact', panels: { bottomOpen: false, railOpen: false, ...(v.panels ?? {}) } } });
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => console.log('PAGE ERROR', v.file, e.stack));
+      await page.goto(`${a.url}&name=ana${v.hash}`);
+      await page.getByTestId('connection').and(page.locator('[data-status=open]')).waitFor();
+      await page.getByTestId('song-editor').waitFor();
+      await page.waitForTimeout(800);
+      try { await v.act(page); } catch (e) { console.log('FAILED', v.file, await page.getByTestId('error').allTextContents()); await page.screenshot({ path: join(OUT, `${v.file}-failed.png`) }); throw e; }
+      await page.waitForTimeout(500);
+      const file = join(OUT, `${v.file}-1440x900.png`);
+      await page.screenshot({ path: file });
+      console.log(file);
+      await ctx.close();
+    }
+  } finally {
+    await browser.close();
+    await a.close();
+  }
+}
+
 if (process.argv[3] === 'sets') { await setShots(); process.exit(0); }
 if (process.argv[3] === 'sounds') { await soundShots(); process.exit(0); }
+if (process.argv[3] === 'songs') { await songShots(); process.exit(0); }
 
 const agent = await project();
 const browser = await chromium.launch();

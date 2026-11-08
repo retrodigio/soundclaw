@@ -3,13 +3,14 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { restoreCommands, arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { restoreCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { CardInfo, ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
 import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
 import { gridVersions, provenanceMemo, type Provenance, type Version } from './sound/provenance.ts';
 import { loadNew, saveNew } from './studio/prefs.ts';
 import { sameUpToLevel } from './sets/abmath.ts';
+import { MeterHub } from './song/meters.ts';
 
 export interface Measured {
   analysis: Analysis;
@@ -560,10 +561,35 @@ export class Store {
     return g;
   }
 
-  /** The channels that sound, given mute and solo: a solo silences every channel not soloed. */
+  /** Which layers of a layered song play on this page: the base up to the layer at this place (null: all of them). Nothing is written. */
+  readonly songIntensity = new Map<string, number | null>();
+  /** The song meters: computed in a worker while a song plays, read by the mixer every animation frame. */
+  readonly meters = new MeterHub();
+
+  setSongIntensity(id: string, level: number | null): void {
+    this.songIntensity.set(id, level);
+    this.changed();
+    if (this.songPlay?.id === id) void this.playSong(id, this.songPlay.mode, true, this.songPlay.region);
+  }
+
+  /** The channels that sound, given the intensity, mute and solo: a solo silences every channel not soloed. */
   songAudible(song: SongDoc): string[] {
     const g = this.songGroups(song.id);
-    return song.channels.map((c) => c.name).filter((n) => (g.solo.size ? g.solo.has(n) : !g.mute.has(n)));
+    const level = this.songIntensity.get(song.id) ?? null;
+    const layers = level === null ? null : layerOrder(song).slice(0, level + 1);
+    return song.channels.filter((c) => !layers || layers.includes(c.layer)).map((c) => c.name).filter((n) => (g.solo.size ? g.solo.has(n) : !g.mute.has(n)));
+  }
+
+  /** Solo these channels and play the stretch repeating (a masking link in the mixer); the same again clears the solo and stops. */
+  soloAndLoop(id: string, channels: string[], region: { start: number; end: number }): void {
+    const g = this.songGroups(id);
+    const same = g.solo.size === channels.length && channels.every((c) => g.solo.has(c)) && this.songPlay?.id === id;
+    g.solo.clear();
+    g.mute.clear();
+    if (same) { this.stop(); this.changed(); return; }
+    for (const c of channels) g.solo.add(c);
+    this.changed();
+    void this.playSong(id, 'full', true, region);
   }
 
   toggleSongChannel(id: string, channel: string, kind: 'mute' | 'solo'): void {
@@ -611,7 +637,7 @@ export class Store {
       let offset = where !== null ? Math.max(0, Math.min(r.length / 44100 - 0.01, where - r.window.start)) : 0;
       if (region && (offset < region.start - r.window.start || offset >= region.end - r.window.start)) offset = region.start - r.window.start;
       src.onended = () => {
-        if (this.source === src) { this.source = null; this.songPlay = null; this.playing = null; this.changed(); this.wake(); }
+        if (this.source === src) { this.source = null; this.songPlay = null; this.playing = null; this.meters.end(); this.changed(); this.wake(); }
       };
       this.source = src;
       this.playing = `${id}#song-${mode}`;
@@ -619,6 +645,8 @@ export class Store {
       this.songBusy = null;
       src.start(0, offset);
       if (this.editStarted !== null) { this.lastEditToSound = Math.round(performance.now() - this.editStarted); this.editStarted = null; }
+      const playedRegion = mode === 'full' && region ? { a: region.start - r.window.start, len: region.end - region.start } : null;
+      this.meters.begin({ song, render: r, mix: [mix[0], mix[1]], mixKey: all ? 'all' : audible.join(','), wrap: mode === 'loop', audible }, { perf: performance.now(), pos: offset, length: r.length / 44100, mode, region: playedRegion });
       this.changed();
     } catch (e) {
       this.songBusy = null;
@@ -1159,6 +1187,7 @@ export class Store {
     this.clock = null;
     const wasSong = this.songPlay !== null;
     this.songPlay = null;
+    if (wasSong) this.meters.end();
     if (this.playing || wasSong) {
       this.playing = null;
       this.changed();

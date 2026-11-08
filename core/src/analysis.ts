@@ -260,6 +260,25 @@ export function loudnessCurve(input: Samples | readonly Samples[], win = 0.4, ho
   return { t, lufs };
 }
 
+/**
+ * Loudness range in LU (EBU Tech 3342): the spread of the short-term loudness (3 s windows every 0.1 s), 10th to 95th
+ * percentile, after the absolute gate at -70 LUFS and the relative gate 20 LU below the mean. Null when there are too few
+ * windows (a sound under 3 s). Only whole windows count. Measurement only: it feeds no render.
+ */
+export function loudnessRange(input: Samples | readonly Samples[]): number | null {
+  const chans = Array.isArray(input) ? (input as readonly Samples[]) : [input as Samples];
+  const dur = chans[0]!.length / SAMPLE_RATE;
+  const c = loudnessCurve(input, 3, 0.1);
+  const abs: number[] = [];
+  c.t.forEach((t, i) => { const v = c.lufs[i]!; if (t >= 1.5 - 1e-9 && t <= dur - 1.5 + 1e-9 && Number.isFinite(v) && v > -70) abs.push(v); });
+  if (abs.length < 2) return null;
+  const mean = 10 * Math.log10(abs.reduce((s, v) => s + 10 ** (v / 10), 0) / abs.length);
+  const rel = abs.filter((v) => v >= mean - 20).sort((a, b) => a - b);
+  if (rel.length < 2) return null;
+  const at = (q: number): number => rel[Math.min(rel.length - 1, Math.round(q * (rel.length - 1)))]!;
+  return Math.max(0, at(0.95) - at(0.1));
+}
+
 const TP_HALF = 96; // oversampled taps each side of the centre
 let tpFilter: Float64Array | null = null;
 

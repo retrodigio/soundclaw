@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  arrange, builtinInstruments, joinChannels, layerCombinations, integratedLoudness, layerOrder, masterChainForStems, type Memo, renderStems, truePeak, type SongLoudnessRule, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
+  arrange, builtinInstruments, joinChannels, layerCombinations, integratedLoudness, loudnessRange, layerOrder, masterChainForStems, type Memo, renderStems, truePeak, type SongLoudnessRule, samplesHash, encodeWavChannels, floatBytes, floatsFromBytes, instrumentKey, loopView, mixView, notesView, renderSong, sha256Text, songPasses, songReport, songText, songToMidi, specView, waveView, analyze,
   type MusicCheck, type PartStore, type SongDoc, type SongReport, type SongRender, midiToScript, type Instrument,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
@@ -157,6 +157,8 @@ export class AnalysisMemo implements Memo {
 
 export interface SongMeasured {
   report: SongReport;
+  /** The loudness range of the full mix in LU, or null for a piece under 3 s. */
+  range: number | null;
   /** The key of the render the numbers are of. */
   key: string;
 }
@@ -198,7 +200,7 @@ export class SongBench {
       const hasLoop = arrange(song).loop !== null;
       const loop = hasLoop ? this.render(song, { mode: 'loop' }) : null;
       const report = songReport({ song, full, loop, style: this.w.style, instruments: (id) => this.w.lookupInstrument(id), guide: this.w.musicGuide().guide, memo: this.memo });
-      m = { report, key };
+      m = { report, key, range: loudnessRange(full.mix) };
       this.measured.set(key, m);
       if (this.measured.size > 32) this.measured.delete(this.measured.keys().next().value!);
     }
@@ -291,13 +293,14 @@ export function songJsonObject(w: Writer, id: string, o: { hashes?: boolean } = 
   const song = w.song(id);
   const p = playable(w, id);
   if (!p.ok) return { id, playable: false, problem: p.why };
-  const r = w.measureSong(id).report;
+  const meas = w.measureSong(id);
+  const r = meas.report;
   const n = r.numbers;
   return {
     id, playable: true, pass: songPasses(r.checks),
     numbers: {
       length: round(n.length), loopLength: n.loopLength === null ? null : round(n.loopLength), tempo: n.tempo, time: n.time, swing: n.swing, key: n.key, lufs: round(n.lufs), truePeakDb: round(n.truePeakDb),
-      class: n.rule.class, target: n.rule.target, tolerance: n.rule.tolerance, masterReductionDb: round(n.masterReductionDb), layers: n.layers,
+      class: n.rule.class, target: n.rule.target, tolerance: n.rule.tolerance, masterReductionDb: round(n.masterReductionDb), loudnessRange: meas.range === null ? null : round(meas.range, 1), layers: n.layers,
       channels: n.channels.map((c) => ({ name: c.name, layer: c.layer, lufs: round(c.lufs), peakDb: round(c.peakDb), notes: c.notes })),
     },
     checks: r.checks.map((c) => ({ name: c.name, pass: c.pass, advisory: c.advisory, skipped: c.skipped, score: round(c.score, 3), value: c.value, threshold: c.threshold, ranges: c.ranges })),

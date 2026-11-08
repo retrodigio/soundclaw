@@ -37,9 +37,14 @@ export interface RollProps {
   onSelect(keys: Set<string>): void;
   send(cmds: string[]): void;
   onCursor(step: number): void;
+  /** Another channel's notes, drawn faintly behind these (the masking partner). */
+  ghost?: RollNote[];
+  ghostName?: string;
+  /** The channel's colour (a CSS value). */
+  colour?: string;
 }
 
-export function PianoRoll({ store, song, pattern, channel, cursorStep, selected, onSelect, send, onCursor }: RollProps) {
+export function PianoRoll({ store, song, pattern, channel, cursorStep, selected, onSelect, send, onCursor, ghost, ghostName, colour }: RollProps) {
   const row = pattern.channels.find((c) => c.name === channel.name);
   const notes = rollNotes(row);
   const inst = channel.inst ? store.lookupInstrument(channel.inst) : undefined;
@@ -204,7 +209,7 @@ export function PianoRoll({ store, song, pattern, channel, cursorStep, selected,
   };
   const scaleRows = Array.from({ length: rows }, (_, i) => hi - i);
   return (
-    <div className="roll-wrap" data-testid={`roll-${channel.name}`} data-pattern={pattern.name} data-notes={notes.length} data-selected={selNotes.length} data-cursor={cursorStep ?? ''}
+    <div className="roll-wrap" style={colour ? ({ ['--note' as string]: colour } as React.CSSProperties) : undefined} data-ghost={ghost?.length ? ghostName : undefined} data-testid={`roll-${channel.name}`} data-pattern={pattern.name} data-notes={notes.length} data-selected={selNotes.length} data-cursor={cursorStep ?? ''}
       tabIndex={0} onKeyDown={(e) => {
         if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSelected(); }
         if (e.key === 'Escape') onSelect(new Set());
@@ -242,6 +247,9 @@ export function PianoRoll({ store, song, pattern, channel, cursorStep, selected,
           <line key={`s${s}`} x1={KEYW + s * CW} x2={KEYW + s * CW} y1={0} y2={H} className={pattern.bar && s % pattern.bar === 0 ? 'roll-bar' : s % pattern.tpb === 0 ? 'roll-beat' : 'roll-step'} />
         ))}
         {cursorStep !== null && <rect x={KEYW + cursorStep * CW} y={0} width={CW} height={H} className="roll-cursor" data-testid="roll-cursor" />}
+        {ghost?.filter((n) => n.midi !== null && n.midi >= lo && n.midi <= hi).map((n, i) => (
+          <rect key={`g${i}`} x={KEYW + n.step * CW + 1} y={yOf(n.midi!) + 1} width={n.len * CW - 2} height={RH - 2} rx={2} className="roll-ghost" data-testid="roll-ghost-note" />
+        ))}
         {notes.map((n) => {
           const v = shown(n);
           const out = !!key && !inKey(key, v.midi) && !n.accidental;
@@ -269,7 +277,7 @@ export function PianoRoll({ store, song, pattern, channel, cursorStep, selected,
         })}
       </svg>
       {/* the step a note sounding at the cursor started on, for the cursor readout */}
-      <span hidden data-testid="roll-cursor-start">{cursorStep !== null ? startOf(cells, cursorStep) : ''}</span>
+      <span hidden data-testid="roll-cursor-start">{cursorStep !== null && cells[cursorStep] ? startOf(cells, cursorStep) : ''}</span>
     </div>
   );
 }

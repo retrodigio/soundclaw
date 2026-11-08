@@ -158,7 +158,7 @@ function formatEntry(v: number, spec: ValueSpec): string {
 
 function EntryField({ ctl, spec, label, testId }: { ctl: ReturnType<typeof useValueControl>; spec: ValueSpec; label: string; testId?: string }) {
   const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  useEffect(() => { ref.current?.focus({ preventScroll: true }); ref.current?.select(); }, []);
   return (
     <input ref={ref} className="vc-entry mono" defaultValue={ctl.entry ?? ''} aria-label={`${label} value`} aria-invalid={ctl.bad || undefined} data-testid={testId ? `${testId}-entry` : undefined}
       title={`Type a value (${unitHint(spec)}). Enter applies, Esc cancels.`}

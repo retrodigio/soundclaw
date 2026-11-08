@@ -10,6 +10,8 @@ import { Badge, LoudnessTarget, Tabs, type CheckKind } from './controls.tsx';
 import { WaveView, type WaveMarker } from './layout.tsx';
 import { setPanels, usePrefs, type PanelPrefs } from './prefs.ts';
 import { checkOf, lufsText, MINUS, type Focus } from './shellData.ts';
+import { Mixer, MeterModeToggle } from '../song/Mixer.tsx';
+import { useSongReport } from '../song/hooks.tsx';
 
 const num = (v: number | null | undefined, digits: number, unit: string): string => (v === null || v === undefined || !Number.isFinite(v) ? `${MINUS}∞` : `${v.toFixed(digits).replace('-', MINUS)} ${unit}`);
 
@@ -90,18 +92,21 @@ function SongDetail({ store, id }: { store: Store; id: string }) {
   );
 }
 
+/** The focused song's mixer, small: a fader and meter for each channel, the buses and the master. */
+function SongMixer({ store, id }: { store: Store; id: string }) {
+  const song = store.songs.find((x) => x.id === id);
+  const report = useSongReport(store, song);
+  if (!song) return <p className="dim pad">No such song.</p>;
+  return (
+    <div className="mixer-bottom" data-testid="mixer-lite" data-song={id}>
+      <div className="mixer-bottom-head"><MeterModeToggle store={store} /><a className="link-btn small" href={`#/song/${id}/mixer`} data-testid="open-mixer">Open the full mixer</a></div>
+      <Mixer store={store} song={song} report={report} intensity={store.songIntensity.get(id) ?? null} compact />
+    </div>
+  );
+}
+
 function MixerTab({ store, focus }: { store: Store; focus: Focus | null }) {
-  if (focus?.kind === 'song') {
-    const song = store.songs.find((x) => x.id === focus.id);
-    if (!song) return <p className="dim pad">No such song.</p>;
-    return (
-      <div className="mixer-lite" data-testid="mixer-lite">
-        {song.channels.map((c) => (
-          <div key={c.name} className="strip-lite"><b>{c.name}</b><span className="mono dim">{c.inst ?? 'drums'}</span><span className="mono">gain {c.gain}</span><span className="mono">pan {c.pan}</span></div>
-        ))}
-      </div>
-    );
-  }
+  if (focus?.kind === 'song') return <SongMixer store={store} id={focus.id} />;
   if (focus?.kind === 'sound') {
     const sum = store.summary(focus.id);
     const doc = store.doc(focus.id);
