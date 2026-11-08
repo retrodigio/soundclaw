@@ -124,9 +124,25 @@ test('a project of 400 sounds opens at once, loads thumbnails as cards come into
   await page.goto(`${agent.url}&name=ana#/sound/${sampled}`);
   await expect(page.getByTestId('editor')).toBeVisible({ timeout: 60_000 });
   lap('editor open');
-  const editorTask = Math.max(0, ...(await longTasks(page, paint)));
-  console.log(`  longest task while the editor opened: ${editorTask} ms`);
+  const editorTasks = await longTasks(page, paint);
+  const editorTask = Math.max(0, ...editorTasks);
+  const editorTotal = editorTasks.reduce((a, b) => a + b, 0);
+  console.log(`  longest task while the layered editor opened: ${editorTask} ms (all long tasks since the first paint: ${editorTotal} ms in ${editorTasks.length})`);
   expect(editorTask, 'the editor of a 30 s stereo loop opens without freezing the page').toBeLessThan(2000);
+  expect(editorTotal, 'main-thread long tasks while the layered editor opens').toBeLessThan(2000);
+  // a classic editor of the same project opens as lightly (its tick and ghost replay the whole 3,000-command tape once)
+  const classic = await page.evaluate(() => (window as unknown as Window2).soundclaw.index.find((x) => (x as { id: string; voice: string }).voice === 'classic') as { id: string });
+  await page.goto(`${agent.url}&name=ana#/sound/${classic.id}`);
+  await page.reload();
+  await expect(page.getByTestId('editor')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('numbers-strip')).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500);
+  const classicTasks = await longTasks(page, 0);
+  console.log(`  longest task while the classic editor opened (${classic.id}): ${Math.max(0, ...classicTasks)} ms (total ${classicTasks.reduce((a, b) => a + b, 0)} ms in ${classicTasks.length})`);
+  expect(classicTasks.reduce((a, b) => a + b, 0), 'main-thread long tasks while the classic editor opens').toBeLessThan(2000);
+  await page.goto(`${agent.url}&name=ana#/sound/${sampled}`);
+  await page.reload();
+  await expect(page.getByTestId('editor')).toBeVisible({ timeout: 60_000 });
   const before = await page.evaluate((sid) => (window as unknown as Window2).soundclaw.played.filter((p) => p.id === sid).length, sampled);
   // the 30 s sound started from its card is still sounding: stop it, then play from the editor
   await page.evaluate(() => (window as unknown as { soundclaw: { stop(): void } }).soundclaw.stop());

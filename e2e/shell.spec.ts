@@ -421,6 +421,12 @@ test('the needs-attention card: name and voice, one 54 px panel, a badge per fai
   await expect(page.getByTestId('request-r1')).toContainText('seen by');
   expect((await page.getByTestId('request-r1').boundingBox())!.height).toBeLessThan(20);
   expect((await card.boundingBox())!.height).toBe(168);
+  // the state chip is whole inside its line: it is not clipped at the bottom
+  const line = (await card.locator('.nc-reqline').boundingBox())!;
+  const chip = (await card.locator('.nc-req .chip').first().boundingBox())!;
+  expect(chip.y).toBeGreaterThanOrEqual(line.y - 0.5);
+  expect(chip.y + chip.height).toBeLessThanOrEqual(line.y + line.height + 0.5);
+  expect(await card.locator('.nc-reqline').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
   // the exports download
   const dl = page.waitForEvent('download');
   await card.hover();

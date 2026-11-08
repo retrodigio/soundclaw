@@ -2,7 +2,12 @@
 // ("110ms", "0.11", "18%", "−3dB", "C6", "+5st", "1.8k"). Pure functions, no DOM.
 
 export type Unit = 'plain' | 's' | 'hz' | 'pct' | 'db' | 'st' | 'note';
-export interface ValueSpec { unit: Unit; digits?: number }
+export interface ValueSpec {
+  unit: Unit;
+  digits?: number;
+  /** A parameter whose stored number is not what a person reads (the classic voice's 0..1 curves): how to show it, what typed text means, and what the entry field starts with. */
+  custom?: { show(v: number): string; read(text: string): number | null; entry?(v: number): string; hint?: string };
+}
 
 const MINUS = '−';
 const NOTE_RE = /^([A-Ga-g])([#b♯♭]?)(-?\d)$/;
@@ -22,6 +27,7 @@ export const midiToHz = (midi: number): number => 440 * 2 ** ((midi - 69) / 12);
 
 /** The number a typed text means for this unit, or null when it is not a value. */
 export function parseValue(text: string, spec: ValueSpec): number | null {
+  if (spec.custom) return spec.custom.read(text);
   const t = text.trim().replace(/−|–|—/g, '-').replace(/\s+/g, ' ');
   if (!t) return null;
   const note = noteToMidi(t);
@@ -46,6 +52,7 @@ const sign = (n: number, s: string): string => (n < 0 ? MINUS : '') + s.replace(
 
 /** A value as the control shows it. The minus sign is U+2212, as on the boards. */
 export function formatValue(v: number, spec: ValueSpec): string {
+  if (spec.custom) return spec.custom.show(v);
   const d = spec.digits;
   switch (spec.unit) {
     case 's': return v < 0.1 && v > 0 ? `${sign(v, Math.abs(v * 1000).toFixed(d ?? 0))} ms` : `${sign(v, Math.abs(v).toFixed(d ?? 2))} s`;

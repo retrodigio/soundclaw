@@ -1,6 +1,6 @@
 // Screenshots of the dashboard on an invented example project: a few sounds, a set, a song and
 // requests in different states. Run it after `pnpm build`:
-//   node scripts/screens-studio.ts <name>          saves PNGs to .dev/screens/studio/<name>/
+//   node scripts/screens-studio.ts <name> [sounds]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages)
 // It starts its own server on a temporary project and stops it; nothing is left running.
 
 import { mkdirSync } from 'node:fs';
@@ -61,6 +61,103 @@ const VARIANTS: Variant[] = [
   { file: 'shell-dark-compact-760', theme: 'dark', density: 'compact', w: 760, h: 900, select: 'coin_pickup' },
   { file: 'shell-light-compact-760-palette', theme: 'light', density: 'compact', w: 760, h: 900, select: 'coin_pickup', palette: true },
 ];
+
+// ---- the sound pages: the editors and the analysis lenses (`node scripts/screens-studio.ts <name> sounds`) ----
+
+const SOUNDS_ST2 = `sound new laser voice=classic preset=laser seed=3
+sound new coin_pickup voice=classic preset=pickup seed=5
+sound set coin_pickup wave=square volume=0.45 sustain=0.08 decay=0.3 punch=0.32 freq=0.62
+sound new explosion_big voice=layered seed=7
+layer add explosion_big osc wave=brown dur=0.9 gain=0.8
+layer add explosion_big osc wave=white dur=0.5 gain=0.5 offset=0.01
+layer add explosion_big osc wave=sine freq=48 dur=1.2 gain=0.7
+layer add explosion_big fm freq=70 dur=0.14 gain=0.6
+fx add explosion_big layer=1 filter type=lp cutoff=1800 q=1.2
+fx add explosion_big layer=1 distort drive=4
+fx add explosion_big layer=1 compress threshold=-18 ratio=4
+fx add explosion_big layer=2 filter type=bp cutoff=3100 q=1.4
+fx add explosion_big layer=2 reverb size=0.4 mix=0.18
+fx add explosion_big layer=3 filter type=lp cutoff=120
+env explosion_big 1.amp "0:0 0.004:1 0.9:0@exp"
+env explosion_big 3.amp "0:0 0.008:1 1.2:0@exp"
+`;
+
+/** The agent claims a request on `sound`, writes `script`, and says why. */
+async function agentChange(a: Agent, page: Page, sound: string, request: string, script: string, note: string): Promise<void> {
+  await ask(page, sound, request);
+  await a.cli(['work', a.dir, 'claim']);
+  const r = await a.cli(['run', a.dir, '-e', script, '--by', 'agent:claude']);
+  if (r.code !== 0) throw new Error(r.err || r.out);
+  await a.cli(['work', a.dir, 'progress', note]);
+}
+
+async function soundShots(): Promise<void> {
+  const a = await startAgent();
+  const browser = await chromium.launch();
+  try {
+    const r = await a.cli(['run', a.dir, '-e', SOUNDS_ST2]);
+    if (r.code !== 0) throw new Error(r.err || r.out);
+    let first = true;
+    const shots: { file: string; theme: 'dark' | 'light'; density: 'compact' | 'comfortable'; hash: string; lens?: string; wait: string; extra?: (p: Page) => Promise<void> }[] = [];
+    for (const theme of ['dark', 'light'] as const) {
+      shots.push({ file: `home-${theme}`, theme, density: 'compact', hash: '#/', wait: 'home' });
+      shots.push({ file: `classic-${theme}-compact`, theme, density: 'compact', hash: '#/sound/coin_pickup', wait: 'editor' });
+      shots.push({ file: `layered-${theme}-compact`, theme, density: 'compact', hash: '#/sound/explosion_big', wait: 'editor' });
+      for (const [key, lens] of [['1', 'wave'], ['2', 'spec'], ['3', 'pitch'], ['4', 'compare'], ['5', 'nums']] as const) {
+        shots.push({ file: `analysis-${lens}-${theme}`, theme, density: 'compact', hash: '#/sound/laser/analysis', lens: key, wait: 'analysis-page' });
+      }
+    }
+    shots.push({ file: 'classic-dark-comfortable', theme: 'dark', density: 'comfortable', hash: '#/sound/coin_pickup', wait: 'editor' });
+    shots.push({ file: 'layered-dark-comfortable', theme: 'dark', density: 'comfortable', hash: '#/sound/explosion_big', wait: 'editor' });
+    shots.push({ file: 'layered-dark-device-open', theme: 'dark', density: 'compact', hash: '#/sound/explosion_big', wait: 'editor', extra: async (p) => { await p.getByTestId('fx-1-1').click(); await p.waitForTimeout(300); } });
+    for (const v of shots) {
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+      await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p)); } catch { /* storage off */ } }, { theme: v.theme, density: v.density });
+      const page = await ctx.newPage();
+      await page.goto(`${a.url}&name=ana${v.hash}`);
+      await page.getByTestId('connection').and(page.locator('[data-status=open]')).waitFor();
+      if (first) {
+        first = false;
+        // the agent changes a coin parameter, a laser decay (for Compare) and adds a device to the explosion, each answering a request
+        await agentChange(a, page, 'coin_pickup', 'Shorter, so a run of coins does not blur', 'sound set coin_pickup decay=0.22 sustain=0.05', 'shorter, so a run of coins does not blur');
+        await a.cli(['run', a.dir, '-e', 'sound set laser decay=0.3', '--by', 'agent:claude']);
+        await ask(page, 'explosion_big', 'More weight under the crack');
+        await a.cli(['work', a.dir, 'claim']);
+        await a.cli(['run', a.dir, '-e', 'fx add explosion_big layer=3 limit ceiling=-2', '--by', 'agent:claude']);
+        await a.cli(['work', a.dir, 'progress', 'added a limiter so the sub weight does not push the master']);
+        await page.waitForTimeout(600);
+      }
+      await page.waitForTimeout(500);
+      await page.getByTestId(v.wait).first().waitFor();
+      await page.getByTestId('lens-measuring').waitFor({ state: 'detached', timeout: 20_000 }).catch(() => undefined);
+      if (v.lens) {
+        await page.locator('body').click({ position: { x: 4, y: 4 } });
+        // a selection and a cursor, then the lens
+        const box = (await page.getByTestId('lens-surface').boundingBox())!;
+        await page.mouse.move(box.x + box.width * 0.58, box.y + box.height * 0.5);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width * 0.82, box.y + box.height * 0.5, { steps: 8 });
+        await page.mouse.up();
+        await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.4);
+        await page.keyboard.press(v.lens);
+        if (v.lens === '2') await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.55);
+        else await page.mouse.move(box.x + box.width * 0.5, box.y - 80);
+        await page.waitForTimeout(700);
+      }
+      if (v.extra) await v.extra(page);
+      await page.waitForTimeout(700);
+      const file = join(OUT, `${v.file}-1440x900.png`);
+      await page.screenshot({ path: file });
+      console.log(file);
+      await ctx.close();
+    }
+  } finally {
+    await browser.close();
+    await a.close();
+  }
+}
+
+if (process.argv[3] === 'sounds') { await soundShots(); process.exit(0); }
 
 const agent = await project();
 const browser = await chromium.launch();

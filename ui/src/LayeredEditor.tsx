@@ -1,21 +1,28 @@
-// The editor of a layered sound: a list of layers (add, remove, reorder, mute, solo, gain, pan,
-// offset), the selected layer's source controls and filter, an envelope editor (breakpoints drag on
-// a small graph), and the effect chains (the layer's and the master's). Every edit is a command,
-// the very text an agent would write, sent as this person; a drag is held back and written as ONE
-// command when the control is released (or has rested for a moment), exactly as in the classic
-// editor.
+// The editor of a layered sound: the big view (sum by layer, and the analysis lenses), layers as
+// tracks with a device chain each (source, envelope, every effect as a card with its sketch), the
+// master chain, and the cards that open every parameter. Every edit is a command, the very text an
+// agent would write, sent as this person; a drag is held back and written as ONE command when the
+// control is released (or has rested for a moment), exactly as in the classic editor. Dragging a
+// layer by its handle is `layer move`; dragging a device is `fx move`, or one batch (remove, then add
+// with the same parameters) to another layer; Alt-drag copies.
 
-import { LoopPanel } from './LoopPanel.tsx';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   FX_KINDS, FX_SPECS, KeyedCoalescer, LAYER_SPECS, MAX_FX, MAX_LAYERS, RECIPE_NAMES, SOURCE_KINDS, addPoint, envAt, envCommand, flatEnv, fxSetCommand, isLogScale, isStereo, layerLabel, layerSetCommand, layerSpecs,
-  movePoint, peaks, renderParts, roundSpec, sliderPosition, sliderValue, CURVES, type Curve, type Env, type Fx, type FxKind, type Layer, type LayeredSound, type PSpec, type Scheduler, type SourceKind, type Value,
+  movePoint, roundSpec, showValue, sliderPosition, sliderValue, CURVES, type Curve, type Env, type Fx, type FxKind, type Layer, type LayeredSound, type PSpec, type Scheduler, type SourceKind, type Value,
 } from '@soundclaw/core';
 import { download } from './download.ts';
-import { MelSpectrogram } from './Spectrogram.tsx';
+import { LoopPanel } from './LoopPanel.tsx';
 import { LoudnessClass } from './LoudnessClass.tsx';
+import type { StripPeaks } from './render.worker.ts';
+import { AskComposer } from './sound/Inspector.tsx';
+import { LensPanel, type Axis } from './sound/Lenses.tsx';
+import { SH, SW, chainOf, dropDeviceCommands, envSketch, mainValues, sketch, type Scope } from './sound/devices.ts';
+import { agentSet, answeredNote, type Trail } from './sound/provenance.ts';
 import type { RunResult, Store } from './store.ts';
-import { Waveform } from './Waveform.tsx';
+import { Badge, Button, Slider } from './studio/controls.tsx';
+import { Spark } from './studio/icons.tsx';
+import { useActions, type Action } from './studio/registry.ts';
 
 const sched: Scheduler = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
 const PAUSE_MS = 700;
@@ -202,38 +209,8 @@ function EnvEditor({ run, sound, target, onTarget, targets, span }: { run(cmds: 
 
 // ---- the page --------------------------------------------------------------------------------------
 
-function LayerStrips({ store, sound }: { store: Store; sound: LayeredSound }) {
-  const key = store.keyOf(sound);
-  // each layer on its own, rendered in the worker (a long sound's layers take seconds)
-  const [strips, setStrips] = useState<{ key: string; strips: { min: number[]; max: number[] }[] } | null>(null);
-  useEffect(() => {
-    let live = true;
-    store.layerStrips(sound).then((s) => { if (live) setStrips({ key, strips: s }); }, () => undefined);
-    return () => { live = false; };
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const refs = useRef<(HTMLCanvasElement | null)[]>([]);
-  useEffect(() => {
-    if (!strips) return;
-    strips.strips.forEach((p, i) => {
-      const c = refs.current[i];
-      const g = c?.getContext('2d');
-      if (!c || !g) return;
-      g.clearRect(0, 0, c.width, c.height);
-      g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--wave').trim() || '#888';
-      const mid = c.height / 2;
-      for (let x = 0; x < c.width; x++) g.fillRect(x, mid - p.max[x]! * mid, 1, Math.max(1, (p.max[x]! - p.min[x]!) * mid));
-    });
-  }, [strips]);
-  if (!strips || strips.strips.length !== sound.layers.length) return null;
-  return (
-    <div className="strips" data-testid="layer-strips">
-      {strips.strips.map((_, i) => (
-        <div key={sound.layers[i]!.salt} className="strip"><span className="dim">{i + 1} {layerLabel(sound.layers[i]!)}</span>
-          <canvas ref={(el) => { refs.current[i] = el; }} width={360} height={26} data-testid={`strip-${i + 1}`} /></div>
-      ))}
-    </div>
-  );
-}
+type OpenPanel = { kind: 'source'; n: number } | { kind: 'fx'; scope: Scope; k: number } | null;
+type Drag = { type: 'layer'; n: number } | { type: 'fx'; scope: Scope; k: number };
 
 /**
  * Another document with a layered voice edited with these controls: an instrument's template. Its
@@ -247,16 +224,62 @@ export interface VoiceTarget {
   playing: boolean;
 }
 
+/** Each layer rendered alone, as peaks, by the measuring worker (the sum-by-layer bands and the tracks' mini waveforms). */
+function useStrips(store: Store, sound: LayeredSound | undefined): StripPeaks[] | null {
+  const key = sound ? store.keyOf(sound) : '';
+  const [strips, setStrips] = useState<{ key: string; strips: StripPeaks[] } | null>(null);
+  useEffect(() => {
+    if (!sound) return;
+    let live = true;
+    store.layerStrips(sound, 600).then((s) => { if (live) setStrips({ key, strips: s }); }, () => undefined);
+    return () => { live = false; };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  return strips && sound && strips.strips.length === sound.layers.length ? strips.strips : null;
+}
+
+function MiniWave({ peaks: p, n, color }: { peaks: StripPeaks | undefined; n: number; color: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    const g = c?.getContext('2d');
+    if (!c || !g) return;
+    g.clearRect(0, 0, c.width, c.height);
+    if (!p) return;
+    g.fillStyle = color;
+    const mid = c.height / 2, cols = p.max.length;
+    for (let x = 0; x < c.width; x++) {
+      const a = Math.floor((x / c.width) * cols), b = Math.max(a + 1, Math.floor(((x + 1) / c.width) * cols));
+      let hi = -1, lo = 1;
+      for (let i = a; i < b && i < cols; i++) { hi = Math.max(hi, p.max[i]!); lo = Math.min(lo, p.min[i]!); }
+      g.fillRect(x, mid - Math.max(0, hi) * mid, 1, Math.max(1, (Math.max(0, hi) - Math.min(0, lo)) * mid));
+    }
+  }, [p, color]);
+  return <canvas ref={ref} className="mini-wave" width={190} height={26} data-testid={`strip-${n}`} aria-hidden />;
+}
+
+const layerColor = (i: number): string => `var(--layer-${(i % 8) + 1})`;
+
 export function LayeredEditor({ store, id, voice }: { store: Store; id: string; voice?: VoiceTarget }) {
   const found = voice ? voice.sound : store.sounds.find((s) => s.id === id);
   const sound = found?.voice === 'layered' ? found : undefined;
   const runCmd = (cmds: string): Promise<RunResult> => (voice ? voice.run(cmds) : store.run(cmds));
   const [sel, setSel] = useState(1);
+  const [open, setOpen] = useState<OpenPanel>({ kind: 'source', n: 1 });
   const [envTarget, setEnvTarget] = useState('1.amp');
   const [draft, setDraft] = useState<Record<string, Value>>({});
+  const [menu, setMenu] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const [hoverBand, setHoverBand] = useState<number | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askFocus, setAskFocus] = useState(0);
+  const [axis, setAxis] = useState<Axis | null>(null);
+  const dnd = useRef<Drag | null>(null);
+  const suppressClick = useRef(false);
+  const [ghost, setGhost] = useState<{ x: number; y: number; label: string } | null>(null);
   const latest = useRef({ sound, store, id, run: { run: runCmd }, voice });
   latest.current = { sound, store, id, run: { run: runCmd }, voice };
   const release = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dwell = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const co = useMemo(() => new KeyedCoalescer<Value>((edits) => {
     const { sound: cur, run: st, id: sid } = latest.current;
@@ -270,7 +293,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     if (!cmds.length) { clear(); return; }
     void st.run(cmds.join('\n')).then(clear);
   }, sched, PAUSE_MS), []);
-  useEffect(() => () => { co.cancel(); if (release.current) clearTimeout(release.current); }, [co]);
+  useEffect(() => () => { co.cancel(); if (release.current) clearTimeout(release.current); if (dwell.current) clearTimeout(dwell.current); }, [co]);
 
   const key = sound ? store.keyOf(sound) : '';
   const prevKey = useRef(key);
@@ -283,12 +306,11 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || e.repeat) return;
+      if (!latest.current.voice || e.code !== 'Space' || e.repeat) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.tagName === 'BUTTON' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range' && (t as HTMLInputElement).type !== 'checkbox'))) return;
       e.preventDefault();
-      if (latest.current.voice) latest.current.voice.play();
-      else void latest.current.store.play(latest.current.id);
+      latest.current.voice!.play();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -296,6 +318,17 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
 
   // keep the selection inside the list
   useEffect(() => { if (sound && sel > Math.max(1, sound.layers.length)) setSel(Math.max(1, sound.layers.length)); }, [sound?.layers.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const strips = useStrips(store, sound);
+  const prov = store.provenance(id);
+  const samples = store.samples.map((s) => s.name);
+
+  const actions: Action[] = voice ? [] : [
+    { id: 'layer.add', label: 'Add a layer', group: 'Edit', shortcut: '⇧ L', key: 'shift+l', run: () => setMenu('layer'), keywords: 'new source track' },
+    { id: 'panel.inspector', label: 'Toggle the inspector', group: 'Panels', shortcut: '⌥ 2', key: 'alt+2', override: true, run: () => { setAskOpen((o) => !o); setAskFocus((n) => n + 1); } },
+    { id: 'edit.ask', label: 'Ask for changes on the selection', group: 'Edit', shortcut: 'R', key: 'r', override: true, run: () => { setAskOpen(true); setAskFocus((n) => n + 1); }, keywords: 'request agent feedback' },
+  ];
+  useActions(actions);
 
   if (!sound) return <section className="editor"><a href="#/" className="back">← all sounds</a><p className="empty" data-testid="editor-missing">No sound “{id}”.</p></section>;
 
@@ -320,9 +353,9 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
   const measured = store.measure(sound);
   const playing = voice ? voice.playing : store.playing === id;
   const stereo = isStereo(sound);
-  const samples = store.samples.map((s) => s.name);
   const length = store.render(sound).length / 44100;
   const span = layer ? (typeof layer.p.dur === 'number' ? layer.p.dur : length) : length;
+  const data = voice ? null : store.lens(sound);
 
   const controlFor = (ckey: string, spec: PSpec, current: Value | undefined, hasEnv: boolean, onEnv?: () => void) => (
     <Control key={ckey} ckey={ckey} spec={spec} value={val(ckey, current)} samples={samples} hasEnv={hasEnv}
@@ -333,30 +366,238 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     if (!exists) void now(envCommand(id, target, flatEnv(fixed, Math.max(span, 0.1))));
   };
 
-  const fxList = (scope: number | null, fx: Fx[]) => (
-    <div className="fxlist" data-testid={scope === null ? 'fx-master' : 'fx-layer'}>
-      {fx.map((f, i) => {
-        const k = i + 1;
-        const sc = scope === null ? 'M' : String(scope);
-        return (
-          <fieldset key={i} className="group fx" data-testid={`fx-${sc}-${k}`} data-kind={f.kind}>
-            <legend>{k}. {f.kind}</legend>
-            <div className="row">
-              <button className="link" data-testid={`fx-up-${sc}-${k}`} disabled={i === 0} onClick={() => void now(`fx move ${id}${scope === null ? '' : ` layer=${scope}`} ${k} to=${k - 1}`)} title="earlier in the chain">↑</button>
-              <button className="link" data-testid={`fx-down-${sc}-${k}`} disabled={i === fx.length - 1} onClick={() => void now(`fx move ${id}${scope === null ? '' : ` layer=${scope}`} ${k} to=${k + 1}`)} title="later in the chain">↓</button>
-              <button className="link" data-testid={`fx-remove-${sc}-${k}`} onClick={() => void now(`fx remove ${id}${scope === null ? '' : ` layer=${scope}`} ${k}`)} title="remove this effect">× remove</button>
-            </div>
-            {FX_SPECS[f.kind].map((sp) => controlFor(`F:${sc}:${k}:${sp.name}`, sp, f.p[sp.name], !!f.envs[sp.name], sp.env ? toEnv(`${scope === null ? 'master' : scope}.fx${k}.${sp.name}`, f.p[sp.name] as number, !!f.envs[sp.name]) : undefined))}
-          </fieldset>
-        );
-      })}
-      <div className="row wrap">
-        {FX_KINDS.map((kd) => (
-          <button key={kd} data-testid={`fx-add-${scope === null ? 'master' : 'layer'}-${kd}`} disabled={fx.length >= MAX_FX || (scope !== null && !layer)} onClick={() => void now(`fx add ${id}${scope === null ? '' : ` layer=${scope}`} ${kd}`)}>+ {kd}</button>
-        ))}
+  const select = (n: number) => { setSel(n); setOpen({ kind: 'source', n }); setEnvTarget(`${n}.amp`); };
+  const scopeKey = (s: Scope): string => String(s);
+  const chainWhere = (s: Scope): string => (s === 'M' ? '' : ` layer=${s}`);
+
+  // ---- dragging: layers by their handle, devices by their card (pointer events, so it works the same with a mouse, a pen and a test) ----
+  const dropDevice = (to: Scope, at: number, alt: boolean) => {
+    const d = dnd.current;
+    if (d?.type !== 'fx') return;
+    const cmds = dropDeviceCommands(sound, d.scope, d.k, to, at, alt);
+    if (cmds.length) void now(cmds.join('\n'));
+  };
+  const scopeOf = (t: string): Scope => (t === 'M' ? 'M' : Number(t));
+  const dropOn = (target: string, alt: boolean) => {
+    const d = dnd.current;
+    if (!d) return;
+    const [kind, a, b] = target.split(':');
+    if (d.type === 'layer') {
+      const to = kind === 'layer' || kind === 'fx' ? Number(a) : NaN;
+      if (Number.isFinite(to) && to !== d.n && to >= 1 && to <= sound.layers.length) { void now(`layer move ${id} ${d.n} to=${to}`); setSel(to); setOpen({ kind: 'source', n: to }); }
+    } else if (kind === 'fx') dropDevice(scopeOf(a!), Number(b), alt);
+    else if (kind === 'layer') dropDevice(Number(a), chainOf(sound, Number(a)).length + 1, alt);
+    else if (kind === 'master') dropDevice('M', sound.master.length + 1, alt);
+  };
+  const startDrag = (e: React.PointerEvent, drag: Drag, label: string) => {
+    if (e.button !== 0 || voice) return;
+    const sx = e.clientX, sy = e.clientY;
+    let active = false;
+    const pick = (ev: PointerEvent): string | null => (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-drop]')?.dataset.drop ?? null;
+    const move = (ev: PointerEvent) => {
+      if (!active && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+      active = true;
+      dnd.current = drag;
+      setOver(pick(ev));
+      setGhost({ x: ev.clientX, y: ev.clientY, label });
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      if (!active) return;
+      const t = pick(ev);
+      setOver(null); setGhost(null);
+      suppressClick.current = true;
+      setTimeout(() => { suppressClick.current = false; }, 0);
+      if (t) dropOn(t, ev.altKey);
+      dnd.current = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  };
+
+  // ---- hover on a band solos that layer for preview; a click selects it ----
+  const hoverLayer = (n: number | null) => {
+    setHoverBand(n);
+    if (dwell.current) { clearTimeout(dwell.current); dwell.current = null; }
+    if (n === null) { if (store.playing === `${id}#solo`) store.stop(); return; }
+    dwell.current = setTimeout(() => {
+      dwell.current = null;
+      const solo: LayeredSound = { ...sound, layers: sound.layers.map((l, i) => ({ ...l, solo: i === n - 1, mute: false })) };
+      void store.playDoc(`${id}#solo`, solo, id, undefined, true);
+    }, 350);
+  };
+
+  const trailNote = (t: Trail | undefined): string | null => (t ? answeredNote(store.requests, id, t.by, t.at) : null);
+
+  const device = (scope: Scope, k: number, f: Fx, salt: number | 'M') => {
+    const trail = prov.devices.get(`${salt}:${k - 1}`);
+    const byAgent = agentSet(prov, trail);
+    const note = byAgent ? trailNote(trail) : null;
+    const sc = scopeKey(scope);
+    const isOpen = open?.kind === 'fx' && open.scope === scope && open.k === k;
+    const chain = chainOf(sound, scope);
+    const vals = mainValues(f.kind, f.p);
+    const prevKind = byAgent && trail && typeof trail.prev === 'object' && !('salt' in trail.prev) ? (trail.prev as Fx) : null;
+    return (
+      <div key={`${sc}-${k}`} className="dev-wrap">
+        <div className={`device${isOpen ? ' open' : ''}${byAgent ? ' by-agent' : ''}${over === `fx:${sc}:${k}` ? ' drop' : ''}`} data-testid={`fx-${sc}-${k}`} data-kind={f.kind} data-agent={byAgent || undefined}
+          tabIndex={0} role="button" aria-expanded={isOpen} aria-label={`${f.kind} effect ${k}${byAgent ? ', changed by the agent' : ''}. Enter opens its parameters.`} data-drop={`fx:${sc}:${k}`}
+          onPointerDown={(e) => startDrag(e, { type: 'fx', scope, k }, `${f.kind}`)}
+          onClick={() => { if (suppressClick.current) return; if (scope !== 'M') { setSel(scope); setEnvTarget(`${scope}.fx${k}.${FX_SPECS[f.kind].find((x) => x.env)?.name ?? 'mix'}`); } setOpen(isOpen ? null : { kind: 'fx', scope, k }); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } }}>
+          <div className="dev-title"><span className="dev-name">{f.kind}</span>{byAgent && <Spark size={11} />}<span className="spacer" /><span className="dev-n mono">{k}</span></div>
+          <svg className="dev-sketch" viewBox={`0 0 ${SW} ${SH}`} preserveAspectRatio="none" width="100%" height="26" aria-hidden><path d={sketch(f.kind, f.p)} /></svg>
+          <div className="dev-vals">{vals.map((v) => <div key={v.k}><span className="dev-k">{v.k}</span><span className="mono dev-v" data-by={byAgent && prevKind && prevKind.p[v.k] !== f.p[v.k] ? 'agent' : undefined}>{v.v}</span></div>)}</div>
+          {note && <span className="dev-note" data-testid={`fx-note-${sc}-${k}`}>{note}</span>}
+          {byAgent && !note && <span className="dev-note dim">changed by the agent</span>}
+        </div>
+        {k < chain.length && <svg className="dev-arrow" width="18" height="10" viewBox="0 0 18 10" aria-hidden><path d="M2 5 H14 M11 2 L14 5 L11 8" /></svg>}
       </div>
-    </div>
-  );
+    );
+  };
+
+  const addMenu = (scope: Scope) => {
+    const chain = chainOf(sound, scope);
+    const mk = scope === 'M' ? 'master' : `L${scope}`;
+    return (
+      <div className="dev-add" key="add">
+        <button type="button" className="dev-plus" aria-label={scope === 'M' ? 'Add a master effect' : `Add an effect to layer ${scope}`} aria-haspopup="menu" aria-expanded={menu === `fx-${scope}`} data-testid={`device-add-${scope}`} disabled={chain.length >= MAX_FX}
+          onClick={() => setMenu(menu === `fx-${scope}` ? null : `fx-${scope}`)}>+</button>
+        {menu === `fx-${scope}` && (
+          <div className="dev-menu" role="menu" data-testid={`device-menu-${scope}`}>
+            {FX_KINDS.map((kd) => (
+              <button key={kd} type="button" role="menuitem" data-testid={`fx-add-${mk}-${kd}`} onClick={() => { setMenu(null); void now(`fx add ${id}${chainWhere(scope)} ${kd}`).then(() => setOpen({ kind: 'fx', scope, k: chain.length + 1 })); if (scope !== 'M') setSel(scope); }}>{kd}</button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /** The open card: every parameter of a device, or of the layer's source, and the envelope graph. */
+  const panel = (which: NonNullable<OpenPanel>) => {
+    if (which.kind === 'source') {
+      const l = sound.layers[which.n - 1];
+      if (!l) return null;
+      const n = which.n;
+      const ps = LAYER_SPECS.find((x) => x.name === 'pan')!;
+      const pk = `L:${n}:pan`, ok = `L:${n}:offset`;
+      return (
+        <div className="track-panel" data-testid="layer-panel" data-layer={n}>
+          <fieldset className="group" data-testid="layer-source">
+            <legend>Layer {n}: {layerLabel(l)}</legend>
+            <div className="slider">
+              <label htmlFor="c-source">source</label>
+              <select id="c-source" data-testid="ctl-source" value={l.kind} onChange={(e) => void now(`layer set ${id} ${n} source=${e.target.value}`)}>
+                {SOURCE_KINDS.map((k) => <option key={k} value={k} disabled={k === 'sample' && !samples.length}>{k}</option>)}
+              </select>
+              <span /><span /><span />
+            </div>
+            {layerSpecs(l.kind).filter((sp) => !['offset', 'gain', 'pan', 'seed'].includes(sp.name) && !(['filter', 'cutoff', 'q'].includes(sp.name))).map((sp) =>
+              controlFor(`L:${n}:${sp.name}`, sp, l.p[sp.name], !!l.envs[sp.name], sp.env ? toEnv(`${n}.${sp.name}`, l.p[sp.name] as number, !!l.envs[sp.name]) : undefined))}
+            <div className="slider"><label>amplitude</label>
+              <span className="dim" data-testid="amp-state">{l.amp ? `envelope, ${l.amp.length} points` : l.kind === 'classic' ? 'the classic voice\'s own envelope' : '2 ms fade in and out'}</span>
+              <span /><button className={`link env-btn${l.amp ? ' on' : ''}`} data-testid="env-btn-amp" onClick={toEnv(`${n}.amp`, 1, !!l.amp)}>{l.amp ? '∿ env' : '∿'}</button><span /></div>
+            {layerSpecs(l.kind).filter((sp) => ['filter', 'cutoff', 'q'].includes(sp.name)).map((sp) =>
+              controlFor(`L:${n}:${sp.name}`, sp, l.p[sp.name], !!l.envs[sp.name], sp.env ? toEnv(`${n}.${sp.name}`, l.p[sp.name] as number, !!l.envs[sp.name]) : undefined))}
+            {controlFor(`L:${n}:seed`, { ...LAYER_SPECS.find((x) => x.name === 'seed')!, default: 0 }, l.p.seed ?? 0, false)}
+            <div className="slider" data-testid={`row-L-${n}-pan`}><label title="pan: -1 left, 1 right">pan</label>
+              <input type="range" min={0} max={1000} value={Math.round(sliderPosition(ps, val(pk, l.p.pan) as number) * 1000)} data-testid={`layer-pan-${n}`} disabled={!!l.envs.pan}
+                onChange={(e) => move(pk, sliderValue(ps, Number(e.target.value) / 1000))} onPointerDown={() => window.addEventListener('pointerup', releaseFor(pk), { once: true })} onKeyUp={releaseFor(pk)} onBlur={releaseFor(pk)} />
+              <output>{val(pk, l.p.pan)}</output><span /><span /></div>
+            <div className="slider"><label title="start offset, seconds">offset</label>
+              <input type="number" min={0} max={10} step={0.01} data-testid={`layer-offset-${n}`} value={String(val(ok, l.p.offset))}
+                onChange={(e) => setDraft((d) => ({ ...d, [ok]: Number(e.target.value) }))} onBlur={() => { if (draft[ok] !== undefined) { co.push(ok, draft[ok]!); co.flush(); } }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+              <span /><span /><span /></div>
+          </fieldset>
+          {layer && <EnvEditor run={runCmd} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
+        </div>
+      );
+    }
+    const chain = chainOf(sound, which.scope);
+    const f = chain[which.k - 1];
+    if (!f) return null;
+    const sc = scopeKey(which.scope), k = which.k;
+    const wh = chainWhere(which.scope);
+    return (
+      <div className="track-panel" data-testid={which.scope === 'M' ? 'fx-master' : 'fx-layer'}>
+        <fieldset className="group fx" data-testid={`fx-panel-${sc}-${k}`} data-kind={f.kind}>
+          <legend>{which.scope === 'M' ? 'Master' : `Layer ${which.scope}`} · {k}. {f.kind}</legend>
+          <div className="row">
+            <button className="link" data-testid={`fx-up-${sc}-${k}`} disabled={k === 1} onClick={() => void now(`fx move ${id}${wh} ${k} to=${k - 1}`).then(() => setOpen({ kind: 'fx', scope: which.scope, k: k - 1 }))} title="earlier in the chain">← earlier</button>
+            <button className="link" data-testid={`fx-down-${sc}-${k}`} disabled={k === chain.length} onClick={() => void now(`fx move ${id}${wh} ${k} to=${k + 1}`).then(() => setOpen({ kind: 'fx', scope: which.scope, k: k + 1 }))} title="later in the chain">later →</button>
+            <button className="link" data-testid={`fx-remove-${sc}-${k}`} onClick={() => { void now(`fx remove ${id}${wh} ${k}`); setOpen(null); }} title="remove this effect">× remove</button>
+          </div>
+          {FX_SPECS[f.kind].map((sp) => controlFor(`F:${which.scope === 'M' ? 'M' : which.scope}:${k}:${sp.name}`, sp, f.p[sp.name], !!f.envs[sp.name], sp.env ? toEnv(`${which.scope === 'M' ? 'master' : which.scope}.fx${k}.${sp.name}`, f.p[sp.name] as number, !!f.envs[sp.name]) : undefined))}
+        </fieldset>
+        {layer && <EnvEditor run={runCmd} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
+      </div>
+    );
+  };
+
+  const gs = LAYER_SPECS.find((x) => x.name === 'gain')!;
+  const gainWarp = { to: (v: number) => sliderPosition(gs, v), from: (f: number) => sliderValue(gs, f) };
+
+  const track = (l: Layer, i: number) => {
+    const n = i + 1;
+    const gk = `L:${n}:gain`;
+    const color = layerColor(i);
+    const byAgentLayer = agentSet(prov, prov.layers.get(l.salt));
+    const srcOpen = open?.kind === 'source' && open.n === n;
+    const env = l.amp;
+    return (
+      <div key={l.salt} className={`track${n === sel ? ' sel' : ''}${l.mute ? ' muted' : ''}${over === `layer:${n}` ? ' drop' : ''}${byAgentLayer ? ' by-agent' : ''}`} data-testid={`layer-row-${n}`} data-kind={l.kind} data-drop={`layer:${n}`} style={{ '--lc': color } as CSSProperties}>
+        <div className="track-main">
+          <div className="track-head">
+            <div className="track-title">
+              <span className="drag-handle" role="img" aria-label="Drag to reorder" title="Drag to reorder (layer move)" data-testid={`layer-handle-${n}`} onPointerDown={(e) => startDrag(e, { type: 'layer', n }, `Layer ${n}`)}>
+                <svg width="10" height="14" viewBox="0 0 10 14" aria-hidden>{[3, 7, 11].flatMap((y) => [3, 7].map((x) => <circle key={`${x}${y}`} cx={x} cy={y} r="1.2" />))}</svg>
+              </span>
+              <button className="layer-name" data-testid={`layer-select-${n}`} aria-pressed={n === sel} onClick={() => select(n)}>Layer {n}</button>
+              {byAgentLayer && <Spark size={11} />}
+              <span className="spacer" />
+              <button className={`letter-btn${l.solo ? ' on' : ''}`} aria-pressed={l.solo} data-testid={`layer-solo-${n}`} title="solo" aria-label={`Solo layer ${n}`} onClick={() => void now(`layer solo ${id} ${n} ${l.solo ? 'off' : 'on'}`)}>S</button>
+              <button className={`letter-btn${l.mute ? ' on' : ''}`} aria-pressed={l.mute} data-testid={`layer-mute-${n}`} title="mute" aria-label={`Mute layer ${n}`} onClick={() => void now(`layer mute ${id} ${n} ${l.mute ? 'off' : 'on'}`)}>M</button>
+            </div>
+            <span className="mono track-src" data-testid={`layer-src-${n}`}>{layerLabel(l)}</span>
+            <MiniWave peaks={strips?.[i]} n={n} color={color} />
+            <div className="track-gain"><Slider label="Gain" testId={`layer-gain-${n}`} value={val(gk, l.p.gain) as number} min={gs.min} max={gs.max} def={gs.default as number} warp={gainWarp} disabled={!!l.envs.gain} spec={{ unit: 'plain', digits: 2 }} step={0.02}
+              onDraft={(v) => setDraft((d) => ({ ...d, [gk]: roundSpec(gs, v) }))} onCommit={(v) => { move(gk, roundSpec(gs, v)); doRelease(); }} />
+              <span className="track-btns">
+                <button className="link" data-testid={`layer-up-${n}`} disabled={i === 0} title="move up" aria-label={`Move layer ${n} up`} onClick={() => { void now(`layer move ${id} ${n} to=${n - 1}`); setSel(n - 1); }}>↑</button>
+                <button className="link" data-testid={`layer-down-${n}`} disabled={i === sound.layers.length - 1} title="move down" aria-label={`Move layer ${n} down`} onClick={() => { void now(`layer move ${id} ${n} to=${n + 1}`); setSel(n + 1); }}>↓</button>
+                <button className="link" data-testid={`layer-remove-${n}`} title="remove this layer" aria-label={`Remove layer ${n}`} onClick={() => void now(`layer remove ${id} ${n}`)}>×</button>
+              </span>
+            </div>
+          </div>
+          <div className="chain" data-testid={`chain-${n}`}>
+            <div className="dev-wrap">
+              <div className={`device source${srcOpen ? ' open' : ''}`} data-testid={`source-open-${n}`} tabIndex={0} role="button" aria-expanded={srcOpen} aria-label={`Layer ${n} source: ${layerLabel(l)}. Enter opens its parameters.`}
+                onClick={() => select(n)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); select(n); } }}>
+                <div className="dev-title"><span className="dev-name">{l.kind === 'ks' ? 'pluck' : l.kind}</span><span className="spacer" /><span className="dev-n mono">src</span></div>
+                <div className="dev-vals">{layerSpecs(l.kind).filter((sp) => ['wave', 'freq', 'dur', 'sample', 'ops', 'pitch'].includes(sp.name)).slice(0, 3).map((sp) => <div key={sp.name}><span className="dev-k">{sp.name}</span><span className="mono dev-v">{String(showValue(l.kind, sp.name, l.p[sp.name] ?? sp.default))}</span></div>)}</div>
+              </div>
+              <svg className="dev-arrow" width="18" height="10" viewBox="0 0 18 10" aria-hidden><path d="M2 5 H14 M11 2 L14 5 L11 8" /></svg>
+            </div>
+            <div className="dev-wrap">
+              <div className={`device envelope${l.amp ? '' : ' none'}`} data-testid={`env-open-${n}`} tabIndex={0} role="button" aria-label={`Layer ${n} amplitude envelope. Enter opens it.`}
+                onClick={() => { select(n); setEnvTarget(`${n}.amp`); }} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); select(n); setEnvTarget(`${n}.amp`); } }}>
+                <div className="dev-title"><span className="dev-name">envelope</span><span className="spacer" /><span className="dev-n mono">amp</span></div>
+                <svg className="dev-sketch" viewBox={`0 0 ${SW} ${SH}`} preserveAspectRatio="none" width="100%" height="26" aria-hidden><path d={envSketch(env)} /></svg>
+                <div className="dev-vals">{env ? <><div><span className="dev-k">points</span><span className="mono dev-v">{env.length}</span></div><div><span className="dev-k">length</span><span className="mono dev-v">{env[env.length - 1]!.t.toFixed(2)} s</span></div></> : <div><span className="dev-k">none</span><span className="mono dev-v">2 ms fade</span></div>}</div>
+              </div>
+              {l.fx.length > 0 && <svg className="dev-arrow" width="18" height="10" viewBox="0 0 18 10" aria-hidden><path d="M2 5 H14 M11 2 L14 5 L11 8" /></svg>}
+            </div>
+            {l.fx.map((f, k) => device(n, k + 1, f, l.salt))}
+            {addMenu(n)}
+          </div>
+        </div>
+        {open && ((open.kind === 'source' && open.n === n) || (open.kind === 'fx' && open.scope === n)) && panel(open)}
+      </div>
+    );
+  };
+
+  const layersLens = voice ? undefined : { strips, names: sound.layers.map((_, i) => `Layer ${i + 1}`), selected: sel, hover: hoverBand, onSelect: select, onHover: hoverLayer };
 
   return (
     <section className={`editor layered${voice ? ' voice' : ''}`} data-testid={voice ? 'voice-editor' : 'editor'} data-sound={id} data-voice="layered">
@@ -364,11 +605,15 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
         {!voice && <a href="#/" className="back" data-testid="back">← all sounds</a>}
         <h2>{voice ? `voice of ${sound.id}` : sound.id}</h2>
         {!voice && <span className={`chip status-${sound.status}`}>{sound.status}</span>}
+        <span className="chip voice-chip">layered voice · {sound.layers.length} layer{sound.layers.length === 1 ? '' : 's'}</span>
+        {(data?.checks ?? []).filter((c) => !c.pass).map((c) => <Badge key={c.name} kind="fail" testId={`check-${c.name}`}>{` ${c.name}`}</Badge>)}
+        {data && data.checks.every((c) => c.pass) && <Badge kind="pass" testId="check-all">all checks</Badge>}
         <span className="dim" data-testid="editor-numbers">
           {measured.pending ? 'measuring…' : `${measured.analysis.duration.toFixed(2)} s · ${Number.isFinite(measured.analysis.lufs) ? measured.analysis.lufs.toFixed(1) : '−∞'} LUFS · centroid ${measured.analysis.centroid.mean.toFixed(0)} Hz`}{stereo ? ' · stereo' : ''}
         </span>
         {!voice && <LoudnessClass store={store} sound={sound} />}
         <span className="spacer" />
+        {!voice && <a className="link-btn" href={`#/sound/${id}/analysis`} data-testid="open-analysis">Analysis ↗</a>}
         <button className="play" data-testid="editor-play" data-playing={playing} onClick={() => (voice ? voice.play() : void store.play(id))}>{playing ? '■ Stop' : '▶ Play'} <span className="dim">space</span></button>
         <button data-testid="editor-stop" onClick={() => store.stop()} disabled={!store.playing}>■ Stop</button>
         <label className="toggle"><input type="checkbox" data-testid="play-on-change" checked={store.playOnChange} onChange={(e) => { store.playOnChange = e.target.checked; store.changed(); }} /> play on change</label>
@@ -376,124 +621,81 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
         <button data-testid="editor-redo" disabled={!store.canRedo()} onClick={() => void store.redo()}>Redo</button>
       </header>
 
-      <div className="editor-grid">
-        <div className="params-col layers-col">
-          <section className="panel" data-testid="layers" aria-label="Layers">
-            <h3>Layers <span className="dim">{sound.layers.length} of {MAX_LAYERS}</span></h3>
-            {sound.layers.length === 0 && <p className="dim" data-testid="no-layers">No layers yet: add one below, or start from a recipe.</p>}
-            {sound.layers.map((l, i) => {
-              const n = i + 1;
-              const gk = `L:${n}:gain`, pk = `L:${n}:pan`, ok = `L:${n}:offset`;
-              const gs = LAYER_SPECS.find((x) => x.name === 'gain')!, ps = LAYER_SPECS.find((x) => x.name === 'pan')!;
-              return (
-                <div key={l.salt} className={`layer-row${n === sel ? ' sel' : ''}${l.mute ? ' muted' : ''}`} data-testid={`layer-row-${n}`} data-kind={l.kind} onClick={() => setSel(n)}>
-                  <button className="layer-name" data-testid={`layer-select-${n}`} aria-pressed={n === sel} onClick={() => setSel(n)}>{n}. {layerLabel(l)}</button>
-                  <button className={l.mute ? 'on' : ''} aria-pressed={l.mute} data-testid={`layer-mute-${n}`} title="mute" onClick={(e) => { e.stopPropagation(); void now(`layer mute ${id} ${n} ${l.mute ? 'off' : 'on'}`); }}>M</button>
-                  <button className={l.solo ? 'on' : ''} aria-pressed={l.solo} data-testid={`layer-solo-${n}`} title="solo" onClick={(e) => { e.stopPropagation(); void now(`layer solo ${id} ${n} ${l.solo ? 'off' : 'on'}`); }}>S</button>
-                  <div className="layer-ctls">
-                  <label title="gain">gain
-                    <input type="range" min={0} max={1000} value={Math.round(sliderPosition(gs, val(gk, l.p.gain) as number) * 1000)} data-testid={`layer-gain-${n}`} disabled={!!l.envs.gain}
-                      onChange={(e) => move(gk, sliderValue(gs, Number(e.target.value) / 1000))} onPointerDown={() => window.addEventListener('pointerup', releaseFor(gk), { once: true })} onKeyUp={releaseFor(gk)} onBlur={releaseFor(gk)} />
-                    <output>{val(gk, l.p.gain)}</output></label>
-                  <label title="pan: -1 left, 1 right">pan
-                    <input type="range" min={0} max={1000} value={Math.round(sliderPosition(ps, val(pk, l.p.pan) as number) * 1000)} data-testid={`layer-pan-${n}`} disabled={!!l.envs.pan}
-                      onChange={(e) => move(pk, sliderValue(ps, Number(e.target.value) / 1000))} onPointerDown={() => window.addEventListener('pointerup', releaseFor(pk), { once: true })} onKeyUp={releaseFor(pk)} onBlur={releaseFor(pk)} />
-                    <output>{val(pk, l.p.pan)}</output></label>
-                  <label title="start offset, seconds">offset
-                    <input type="number" min={0} max={10} step={0.01} data-testid={`layer-offset-${n}`} value={String(val(ok, l.p.offset))}
-                      onChange={(e) => setDraft((d) => ({ ...d, [ok]: Number(e.target.value) }))} onBlur={() => { if (draft[ok] !== undefined) { co.push(ok, draft[ok]!); co.flush(); } }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></label>
-                  </div>
-                  <button className="link" data-testid={`layer-up-${n}`} disabled={i === 0} title="move up" onClick={(e) => { e.stopPropagation(); void now(`layer move ${id} ${n} to=${n - 1}`); setSel(n - 1); }}>↑</button>
-                  <button className="link" data-testid={`layer-down-${n}`} disabled={i === sound.layers.length - 1} title="move down" onClick={(e) => { e.stopPropagation(); void now(`layer move ${id} ${n} to=${n + 1}`); setSel(n + 1); }}>↓</button>
-                  <button className="link" data-testid={`layer-remove-${n}`} title="remove this layer" onClick={(e) => { e.stopPropagation(); void now(`layer remove ${id} ${n}`); }}>×</button>
-                </div>
-              );
-            })}
-            <div className="row wrap">
-              <span className="dim">Add a layer:</span>
-              {SOURCE_KINDS.map((k) => (
-                <button key={k} data-testid={`add-layer-${k}`} disabled={sound.layers.length >= MAX_LAYERS || (k === 'sample' && !samples.length)} title={k === 'sample' && !samples.length ? 'import a sample first: soundclaw sample import <project> <file.wav>' : undefined}
-                  onClick={() => { void now(`layer add ${id} ${k}${k === 'sample' ? ` sample=${samples[0]}` : ''}`).then(() => setSel(sound.layers.length + 1)); }}>+ {k}</button>
-              ))}
-            </div>
-          </section>
-
-          {layer && (
-            <fieldset className="group" data-testid="layer-panel" data-layer={sel}>
-              <legend>Layer {sel}: {layerLabel(layer)}</legend>
-              <div className="slider">
-                <label htmlFor="c-source">source</label>
-                <select id="c-source" data-testid="ctl-source" value={layer.kind} onChange={(e) => void now(`layer set ${id} ${sel} source=${e.target.value}`)}>
-                  {SOURCE_KINDS.map((k) => <option key={k} value={k} disabled={k === 'sample' && !samples.length}>{k}</option>)}
-                </select>
-                <span /><span /><span />
+      {!voice && (
+        <div className="lay-actions">
+          <div className="dev-add">
+            <button type="button" className="btn btn-secondary" data-testid="add-layer-menu" aria-haspopup="menu" aria-expanded={menu === 'layer'} onClick={() => setMenu(menu === 'layer' ? null : 'layer')}>+ Layer <kbd className="kbd">⇧L</kbd></button>
+            {menu === 'layer' && (
+              <div className="dev-menu" role="menu" data-testid="layer-menu">
+                {SOURCE_KINDS.map((k) => (
+                  <button key={k} type="button" role="menuitem" data-testid={`add-layer-${k}`} disabled={sound.layers.length >= MAX_LAYERS || (k === 'sample' && !samples.length)} title={k === 'sample' && !samples.length ? 'import a sample first: soundclaw sample import <project> <file.wav>' : undefined}
+                    onClick={() => { setMenu(null); void now(`layer add ${id} ${k}${k === 'sample' ? ` sample=${samples[0]}` : ''}`).then(() => select(sound.layers.length + 1)); }}>{k}</button>
+                ))}
               </div>
-              {layerSpecs(layer.kind).filter((sp) => !['offset', 'gain', 'pan', 'seed'].includes(sp.name) && !(['filter', 'cutoff', 'q'].includes(sp.name))).map((sp) =>
-                controlFor(`L:${sel}:${sp.name}`, sp, layer.p[sp.name], !!layer.envs[sp.name], sp.env ? toEnv(`${sel}.${sp.name}`, layer.p[sp.name] as number, !!layer.envs[sp.name]) : undefined))}
-              <div className="slider"><label>amplitude</label>
-                <span className="dim" data-testid="amp-state">{layer.amp ? `envelope, ${layer.amp.length} points` : layer.kind === 'classic' ? 'the classic voice\'s own envelope' : '2 ms fade in and out'}</span>
-                <span /><button className={`link env-btn${layer.amp ? ' on' : ''}`} data-testid="env-btn-amp" onClick={toEnv(`${sel}.amp`, 1, !!layer.amp)}>{layer.amp ? '∿ env' : '∿'}</button><span /></div>
-              {layerSpecs(layer.kind).filter((sp) => ['filter', 'cutoff', 'q'].includes(sp.name)).map((sp) =>
-                controlFor(`L:${sel}:${sp.name}`, sp, layer.p[sp.name], !!layer.envs[sp.name], sp.env ? toEnv(`${sel}.${sp.name}`, layer.p[sp.name] as number, !!layer.envs[sp.name]) : undefined))}
-              {controlFor(`L:${sel}:seed`, { ...LAYER_SPECS.find((x) => x.name === 'seed')!, default: 0 }, layer.p.seed ?? 0, false)}
-            </fieldset>
-          )}
-
-          {layer && (
-            <fieldset className="group" data-testid="layer-fx">
-              <legend>Effects on layer {sel}</legend>
-              {fxList(sel, layer.fx)}
-            </fieldset>
-          )}
-
-          <fieldset className="group" data-testid="master-fx">
-            <legend>Master effects</legend>
-            {fxList(null, sound.master)}
-          </fieldset>
+            )}
+          </div>
+          <span className="dim small">{sound.layers.length} of {MAX_LAYERS} layers</span>
+          <span className="spacer" />
+          <Button kind="agent" testId="ask-toggle" pressed={askOpen} onClick={() => { setAskOpen((o) => !o); setAskFocus((n) => n + 1); }}>Ask for changes <kbd className="kbd">R</kbd></Button>
+          <Button kind="primary" testId="insp-approve" onClick={() => void store.approve(id)}>Approve</Button>
         </div>
+      )}
+      {!voice && askOpen && <div className="ask-bar"><AskComposer store={store} id={id} selection={axis?.sel ?? null} focusToken={askFocus} onClose={() => setAskOpen(false)} /></div>}
 
-        <div className="side-col">
-          <section className="panel" aria-label="Sound">
-            <Waveform samples={store.render(sound)} id={id} />
-            {!measured.pending && <MelSpectrogram spec={measured.spec} id={id} />}
-            <LayerStrips store={store} sound={sound} />
-            <div className="dim hash">samples {store.hashOf(sound).slice(0, 12)}</div>
-          </section>
+      {!voice && <LensPanel store={store} sound={sound} height={190} prov={prov} outline={prov.beforeAgent} previous={prov.before} layersLens={layersLens} onAxis={setAxis} />}
 
-          {layer && <EnvEditor run={runCmd} sound={sound} target={effTarget} onTarget={setEnvTarget} targets={targets} span={span} />}
-
-          {!voice && <>
-          <section className="panel" data-testid="sound-settings" aria-label="Sound settings">
-            <h3>Sound</h3>
-            <div className="row">
-              <label className="toggle"><input type="checkbox" data-testid="duration-auto" checked={sound.duration === null} onChange={(e) => void now(e.target.checked ? `sound set ${id} duration=auto` : `sound set ${id} duration=${Number(length.toFixed(3))}`)} /> length follows the layers</label>
-              {sound.duration !== null && <input type="number" min={0.01} max={10} step={0.01} data-testid="duration" defaultValue={sound.duration} key={sound.duration} onBlur={(e) => { const v = Number(e.target.value); if (v >= 0.01 && v <= 10 && v !== sound.duration) void now(`sound set ${id} duration=${v}`); }} />}
-            </div>
-            {controlFor('S:gain', { name: 'gain', min: 0, max: 4, default: 1, unit: '', help: 'master level', env: false }, sound.gain, false)}
-            <div className="row">
-              <label className="seed" title="the sound's noise seed; layers derive theirs from it">seed
-                <input type="number" min={0} step={1} data-testid="sound-seed" defaultValue={sound.seed} key={sound.seed} onBlur={(e) => { const v = Math.floor(Number(e.target.value)); if (v >= 0 && v !== sound.seed) void now(`sound set ${id} seed=${v}`); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></label>
-            </div>
-          </section>
-
-          <LoopPanel store={store} sound={sound} />
-
-          <section className="panel" data-testid="generators" aria-label="Generators">
-            <h3>Start from</h3>
-            <div className="row wrap">
-              {RECIPE_NAMES.map((c) => <button key={c} data-testid={`gen-${c}`} onClick={() => void now(`sound generate ${id} ${c} seed=${randomSeed()}`)}>{c}</button>)}
-            </div>
-            <p className="dim">A recipe replaces the layers with a seeded sound; Undo brings the old ones back.</p>
-          </section>
-
-          <section className="panel" data-testid="export" aria-label="Export">
-            <h3>Export</h3>
-            <div className="row wrap"><button data-testid="export-wav" onClick={() => download(`${id}.wav`, store.wavOf(sound), 'audio/wav')}>WAV</button></div>
-            <p className="dim">A layered sound exports as a WAV only ({stereo ? 'stereo' : 'mono'}, 16-bit, 44,100 Hz, through a limiter at {store.style.truePeakMax} dBTP); a synth.csv row or patch text cannot hold layers.</p>
-          </section>
-          </>}
+      <section className="tracks" data-testid="layers" aria-label="Layers" data-count={sound.layers.length}>
+        {sound.layers.length === 0 && <p className="dim" data-testid="no-layers">No layers yet: add one with + Layer, or start from a recipe.</p>}
+        <div data-testid="layer-strips" className="tracks-list">
+          {sound.layers.map((l, i) => track(l, i))}
         </div>
-      </div>
+        <div className={`track master${over === 'master' ? ' drop' : ''}`} data-testid="master-fx" data-drop="master">
+          <div className="track-main">
+            <div className="track-head"><div className="track-title"><span className="layer-name static">Master</span></div><span className="mono track-src">after every layer</span></div>
+            <div className="chain" data-testid="chain-M">
+              {sound.master.map((f, k) => device('M', k + 1, f, 'M'))}
+              {addMenu('M')}
+            </div>
+          </div>
+          {open?.kind === 'fx' && open.scope === 'M' && panel(open)}
+        </div>
+        <div className="lay-hints"><span>Drag a device onto another layer to move it · ⌥ drag copies</span><span>Enter opens a device · Tab moves along the chain</span><span>Drag the handle to reorder layers</span></div>
+      </section>
+
+      {!voice && (
+        <details className="sound-more" open>
+          <summary className="cap">Sound settings, recipes, loop and export</summary>
+          <div className="sound-more-grid">
+            <section className="panel" data-testid="sound-settings" aria-label="Sound settings">
+              <h3>Sound</h3>
+              <div className="row">
+                <label className="toggle"><input type="checkbox" data-testid="duration-auto" checked={sound.duration === null} onChange={(e) => void now(e.target.checked ? `sound set ${id} duration=auto` : `sound set ${id} duration=${Number(length.toFixed(3))}`)} /> length follows the layers</label>
+                {sound.duration !== null && <input type="number" min={0.01} max={10} step={0.01} data-testid="duration" defaultValue={sound.duration} key={sound.duration} onBlur={(e) => { const v = Number(e.target.value); if (v >= 0.01 && v <= 10 && v !== sound.duration) void now(`sound set ${id} duration=${v}`); }} />}
+              </div>
+              {controlFor('S:gain', { name: 'gain', min: 0, max: 4, default: 1, unit: '', help: 'master level', env: false }, sound.gain, false)}
+              <div className="row">
+                <label className="seed" title="the sound's noise seed; layers derive theirs from it">seed
+                  <input type="number" min={0} step={1} data-testid="sound-seed" defaultValue={sound.seed} key={sound.seed} onBlur={(e) => { const v = Math.floor(Number(e.target.value)); if (v >= 0 && v !== sound.seed) void now(`sound set ${id} seed=${v}`); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></label>
+              </div>
+            </section>
+            <LoopPanel store={store} sound={sound} />
+            <section className="panel" data-testid="generators" aria-label="Generators">
+              <h3>Start from</h3>
+              <div className="row wrap">
+                {RECIPE_NAMES.map((c) => <button key={c} data-testid={`gen-${c}`} onClick={() => void now(`sound generate ${id} ${c} seed=${randomSeed()}`)}>{c}</button>)}
+              </div>
+              <p className="dim">A recipe replaces the layers with a seeded sound; Undo brings the old ones back.</p>
+            </section>
+            <section className="panel" data-testid="export" aria-label="Export">
+              <h3>Export</h3>
+              <div className="row wrap"><button data-testid="export-wav" onClick={() => download(`${id}.wav`, store.wavOf(sound), 'audio/wav')}>WAV</button></div>
+              <p className="dim">A layered sound exports as a WAV only ({stereo ? 'stereo' : 'mono'}, 16-bit, 44,100 Hz, through a limiter at {store.style.truePeakMax} dBTP); a synth.csv row or patch text cannot hold layers.</p>
+            </section>
+          </div>
+        </details>
+      )}
+      {ghost && <div className="drag-ghost" style={{ left: ghost.x + 10, top: ghost.y + 10 }} aria-hidden>{ghost.label}{store.playing === null ? '' : ''}</div>}
+      <div className="dim hash" data-testid="layered-hash">samples {store.hashOf(sound).slice(0, 12)}</div>
     </section>
   );
 }

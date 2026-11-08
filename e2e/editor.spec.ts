@@ -16,15 +16,19 @@ type Played = { id: string; slot?: string; hash: string };
 const played = (page: Page): Promise<Played[]> => page.evaluate(() => (window as unknown as { soundclaw: { played: Played[] } }).soundclaw.played);
 const rows = (page: Page) => page.locator('[data-testid=cmd-row]').evaluateAll((rs) => rs.map((r) => ({ by: (r as HTMLElement).dataset.by!, text: r.querySelector('code')!.textContent!, undone: r.classList.contains('undone') })));
 
-/** Drag a slider's thumb from one fraction of its track to another, in small steps. */
-async function drag(page: Page, name: string, from: number, to: number): Promise<void> {
-  const box = (await page.getByTestId(`slider-${name}`).boundingBox())!;
-  const y = box.y + box.height / 2;
-  await page.mouse.move(box.x + 8 + (box.width - 16) * from, y);
+/** Drag a knob vertically: up by `up` pixels (negative: down), in small steps, and let go. */
+async function drag(page: Page, name: string, up: number): Promise<void> {
+  const dial = page.getByTestId(`knob-${name}`);
+  await dial.scrollIntoViewIfNeeded();
+  const box = (await dial.boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(box.x + 8 + (box.width - 16) * to, y, { steps: 25 });
+  await page.mouse.move(x, y - up, { steps: 25 });
   await page.mouse.up();
 }
+
+const valueNow = (page: Page, name: string) => page.getByTestId(`knob-${name}`);
 
 async function open(page: Page, extra = ''): Promise<void> {
   agent = await startAgent();
@@ -39,7 +43,7 @@ async function cliHash(name = 'beep'): Promise<string> {
   return /hash ([0-9a-f]{12})/.exec((await agent.cli(['render', agent.dir, name])).out)![1]!;
 }
 
-test('the editor has all 25 parameters in sfxr\'s groups, each with its value and range, and a card opens it', async ({ page }) => {
+test('the editor has all 25 parameters in seven modules, each with its value in units, and a card opens it', async ({ page }) => {
   agent = await startAgent();
   await agent.cli(['run', agent.dir, '-e', SETUP]);
   await page.goto(`${agent.url}&name=ana`);
@@ -47,16 +51,20 @@ test('the editor has all 25 parameters in sfxr\'s groups, each with its value an
   await page.getByTestId('edit-beep').click();
   await expect(page.getByTestId('editor')).toHaveAttribute('data-sound', 'beep');
   expect(new URL(page.url()).hash).toBe('#/sound/beep');
-  const groups = await page.locator('[data-testid^=group-]').evaluateAll((g) => g.map((x) => (x as HTMLElement).dataset.testid));
-  expect(groups).toEqual(['wave', 'envelope', 'frequency', 'vibrato', 'change', 'duty', 'repeat', 'phaser', 'filters', 'volume'].map((g) => `group-${g}`));
-  await expect(page.locator('[data-testid^=slider-]')).toHaveCount(24); // 25 parameters; the wave has buttons
+  const modules = await page.locator('[data-testid^=module-]').evaluateAll((g) => g.map((x) => (x as HTMLElement).dataset.testid));
+  expect(modules).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `module-${n}`));
+  await expect(page.locator('[role=slider][data-testid^=knob-]')).toHaveCount(24); // 25 parameters; the wave is a segmented control
   for (const w of ['square', 'saw', 'sine', 'noise']) await expect(page.getByTestId(`wave-${w}`)).toBeVisible();
-  await expect(page.getByTestId('wave-sine')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('range-freq')).toHaveText('0 … 1');
-  await expect(page.getByTestId('range-slide')).toHaveText('-1 … 1');
-  await expect(page.getByTestId('range-sustain')).toHaveText('0.01 … 1');
-  await expect(page.getByTestId('value-volume')).toHaveText('0.15');
-  await expect(page.getByTestId('value-lowPass')).toHaveText('1');
+  await expect(page.getByTestId('wave-sine')).toHaveAttribute('aria-checked', 'true');
+  // values read in units: volume 0.15 is -16.5 dB, a low-pass at 1 is open, and the stored number is on the control
+  await expect(page.getByTestId('knob-volume-value')).toHaveText('−16.5 dB');
+  await expect(page.getByTestId('knob-lowPass-value')).toHaveText('open');
+  await expect(page.getByTestId('knob-volume')).toHaveAttribute('aria-valuenow', '0.15');
+  await expect(page.getByTestId('knob-slide')).toHaveAttribute('aria-valuemin', '-1');
+  await expect(page.getByTestId('knob-sustain')).toHaveAttribute('aria-valuemin', '0.01');
+  // modules whose parameters all rest are off
+  await expect(page.getByTestId('module-4')).toHaveAttribute('data-off', 'true');
+  await expect(page.getByTestId('module-1')).not.toHaveAttribute('data-off', 'true');
   await page.screenshot({ path: join(import.meta.dirname, '..', '.dev', 'screens', 'editor.png') });
   await page.getByTestId('back').click();
   await expect(page.getByTestId('card-beep')).toBeVisible();
@@ -67,7 +75,7 @@ test('a drag changes the sound, writes ONE history entry as the person, and repl
   const before = await rows(page);
   const hashBefore = await cliHash();
   const playsBefore = (await played(page)).length;
-  await drag(page, 'freq', 0.2, 0.8);
+  await drag(page, 'freq', 60);
   await expect.poll(async () => (await rows(page)).length).toBe(before.length + 1);
   const entry = (await rows(page))[0]!;
   expect(entry.by).toBe('human:ana');
@@ -77,7 +85,7 @@ test('a drag changes the sound, writes ONE history entry as the person, and repl
   expect(await rows(page)).toHaveLength(before.length + 1);
   // The sound is what the command says, as the server and the agent see it.
   const value = entry.text.split('=')[1]!;
-  await expect(page.getByTestId('value-freq')).toHaveText(value);
+  await expect(valueNow(page, 'freq')).toHaveAttribute('aria-valuenow', value);
   const hashAfter = await cliHash();
   expect(hashAfter).not.toBe(hashBefore);
   expect((await agent.cli(['list', agent.dir])).out).toContain(`freq=${value}`);
@@ -87,7 +95,7 @@ test('a drag changes the sound, writes ONE history entry as the person, and repl
   const last = (await played(page)).at(-1)!;
   expect(last.hash.slice(0, 12)).toBe(hashAfter);
   // A second drag, on another slider, is a second entry (not one per pixel).
-  await drag(page, 'decay', 0.6, 0.1);
+  await drag(page, 'decay', -12);
   await expect.poll(async () => (await rows(page)).length).toBe(before.length + 2);
   await page.waitForTimeout(1000);
   expect(await rows(page)).toHaveLength(before.length + 2);
@@ -109,28 +117,27 @@ test('a drag changes the sound, writes ONE history entry as the person, and repl
 test('undo and redo from the page use the history; double-click returns a parameter to its default', async ({ page }) => {
   await open(page);
   const hash0 = await cliHash();
-  await drag(page, 'punch', 0.1, 0.7);
+  await drag(page, 'punch', 70);
   await expect.poll(async () => (await rows(page))[0]!.text).toMatch(/^sound set beep punch=/);
   const hash1 = await cliHash();
   const n = (await rows(page)).length;
   await page.getByTestId('editor-undo').click();
   await expect.poll(async () => (await rows(page))[0]!.text).toMatch(/^undo group=g\d+$/);
   expect((await rows(page))[0]!.by).toBe('human:ana');
-  await expect(page.getByTestId('value-punch')).toHaveText('0.312');
+  await expect(valueNow(page, 'punch')).toHaveAttribute('aria-valuenow', '0.312');
   expect(await cliHash()).toBe(hash0);
   await page.getByTestId('editor-redo').click();
   await expect.poll(async () => (await rows(page))[0]!.text).toMatch(/^redo group=g\d+$/);
   expect(await cliHash()).toBe(hash1);
   expect(await rows(page)).toHaveLength(n + 2);
   // Double-click resets: one command, to the default.
-  await page.getByTestId('slider-volume').dblclick();
+  await page.getByTestId('knob-volume').dblclick();
   await expect.poll(async () => (await rows(page))[0]!.text).toBe('sound set beep volume=0.5');
-  await expect(page.getByTestId('value-volume')).toHaveText('0.5');
+  await expect(valueNow(page, 'volume')).toHaveAttribute('aria-valuenow', '0.5');
   await page.waitForTimeout(800);
   expect(await rows(page)).toHaveLength(n + 3);
-  // And the reset control does the same for another parameter.
-  await expect(page.getByTestId('reset-punch')).toBeEnabled();
-  await page.getByTestId('reset-punch').click();
+  // And so does a double-click on another knob.
+  await page.getByTestId('knob-punch').dblclick();
   await expect.poll(async () => (await rows(page))[0]!.text).toBe('sound set beep punch=0');
 });
 
@@ -186,7 +193,7 @@ test('A/B: pin A, change B, switch playback, and Keep A restores A as one comman
   const hashA = await cliHash();
   await page.getByTestId('pin-a').click();
   await expect(page.getByTestId('ab-table')).toBeVisible();
-  await drag(page, 'slide', 0.5, 0.15);
+  await drag(page, 'slide', -30);
   await expect.poll(async () => (await rows(page))[0]!.text).toMatch(/^sound set beep slide=-?0\.\d+$/);
   const hashB = await cliHash();
   expect(hashB).not.toBe(hashA);

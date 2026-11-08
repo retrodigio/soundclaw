@@ -3,7 +3,7 @@
 
 import type { Sound, Style } from '@soundclaw/core';
 import type { SampleInfo } from '@soundclaw/server/protocol';
-import type { MeasureReply, RenderReply, RenderRequest, StripPeaks } from './render.worker.ts';
+import type { DiffReply, LensReply, MeasureReply, RenderReply, RenderRequest, StripPeaks } from './render.worker.ts';
 
 export interface Rendered { key: string; channels: Float32Array[]; hash: string; ms: number }
 
@@ -21,7 +21,7 @@ type Lane = 'play' | 'work';
 export class Renderer {
   private workers: Record<Lane, Worker | null> = { play: null, work: null };
   private n = 0;
-  private waiting = new Map<number, { resolve(r: Rendered | MeasureReply | StripPeaks[]): void; reject(e: Error): void }>();
+  private waiting = new Map<number, { resolve(r: Rendered | MeasureReply | StripPeaks[] | LensReply | DiffReply): void; reject(e: Error): void }>();
 
   private start(lane: Lane): Worker {
     if (this.workers[lane]) return this.workers[lane]!;
@@ -31,7 +31,7 @@ export class Renderer {
       const f = this.waiting.get(m.id);
       this.waiting.delete(m.id);
       if (!f) return;
-      if (m.ok) f.resolve('measure' in m ? m.measure : 'strips' in m ? m.strips : { key: m.key, channels: m.channels, hash: m.hash, ms: m.ms });
+      if (m.ok) f.resolve('measure' in m ? m.measure : 'lens' in m ? m.lens : 'diff' in m ? m.diff : 'strips' in m ? m.strips : { key: m.key, channels: m.channels, hash: m.hash, ms: m.ms });
       else f.reject(new Error(m.error));
     };
     w.onerror = (e) => {
@@ -43,11 +43,11 @@ export class Renderer {
     return w;
   }
 
-  private ask(lane: Lane, q: Omit<RenderRequest, 'id' | 'samples'>, samples: readonly SampleInfo[]): Promise<Rendered | MeasureReply | StripPeaks[]> {
+  private ask(lane: Lane, q: Omit<RenderRequest, 'id' | 'samples' | 'refSamples'>, samples: readonly SampleInfo[]): Promise<Rendered | MeasureReply | StripPeaks[] | LensReply | DiffReply> {
     const id = ++this.n;
     return new Promise((resolve, reject) => {
       this.waiting.set(id, { resolve, reject });
-      this.start(lane).postMessage({ ...q, id, samples: samplesNamed(q.sound, samples).map((x) => ({ name: x.name, sha256: x.sha256 })) } satisfies RenderRequest);
+      this.start(lane).postMessage({ ...q, id, samples: samplesNamed(q.sound, samples).map((x) => ({ name: x.name, sha256: x.sha256 })), ...(q.ref ? { refSamples: samplesNamed(q.ref, samples).map((x) => ({ name: x.name, sha256: x.sha256 })) } : {}) } satisfies RenderRequest);
     });
   }
 
@@ -56,8 +56,18 @@ export class Renderer {
   }
 
   /** Each layer of a layered sound on its own, as peaks (the editor's layer strips). */
-  strips(sound: Sound, samples: readonly SampleInfo[], token: string): Promise<StripPeaks[]> {
-    return this.ask('work', { sound, token, op: 'strips' }, samples) as Promise<StripPeaks[]>;
+  strips(sound: Sound, samples: readonly SampleInfo[], token: string, cols = 360): Promise<StripPeaks[]> {
+    return this.ask('work', { sound, token, op: 'strips', cols }, samples) as Promise<StripPeaks[]>;
+  }
+
+  /** Everything the analysis lenses draw (peaks, loudness over time, spectrogram, pitch, the numbers and checks), from the measuring worker. */
+  lens(sound: Sound, samples: readonly SampleInfo[], token: string, style: Style, basis: string): Promise<LensReply> {
+    return this.ask('work', { sound, token, op: 'lens', style, basis }, samples) as Promise<LensReply>;
+  }
+
+  /** The difference spectrogram of `sound` against `ref`. */
+  diff(sound: Sound, ref: Sound, samples: readonly SampleInfo[], token: string): Promise<DiffReply> {
+    return this.ask('work', { sound, token, op: 'diff', ref }, samples) as Promise<DiffReply>;
   }
 
   /** The numbers, checks and spectrogram of a sound, worked out in the worker (a long sound takes seconds). */

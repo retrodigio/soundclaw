@@ -3,9 +3,11 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { CardInfo, ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
+import type { DiffReply, LensReply } from './render.worker.ts';
+import { provenanceMemo, type Provenance } from './sound/provenance.ts';
 import { loadNew, saveNew } from './studio/prefs.ts';
 
 export interface Measured {
@@ -32,6 +34,8 @@ export interface Played {
   slot?: 'A' | 'B';
   /** Played as a loop (repeating until stopped). */
   loop?: boolean;
+  /** Only this part of the sound (seconds from, to) was played. */
+  region?: [number, number];
   /** Hash of the samples played; the CLI and MCP print its first 12 digits. */
   hash: string;
   samples: number;
@@ -785,9 +789,73 @@ export class Store {
   private measuring = new Set<string>();
 
   /** Each layer of a layered sound on its own, as peaks, rendered in the worker. */
-  layerStrips(s: Sound): ReturnType<Renderer['strips']> {
-    return this.renderer.strips(s, this.samples, this.token);
+  layerStrips(s: Sound, cols = 360): ReturnType<Renderer['strips']> {
+    return this.renderer.strips(s, this.samples, this.token, cols);
   }
+
+  private lenses = new Map<string, LensReply>();
+  private lensing = new Set<string>();
+  /** What the analysis lenses draw for a sound, from the measuring worker (null until it arrives). The key is the sound's content and the rule it is held to. */
+  lens(s: Sound): LensReply | null {
+    const style = soundStyle(s, this.sets, this.style);
+    const rule = loudnessFor(s, this.sets, this.style);
+    const loop = s.voice === 'layered' && !!s.loop;
+    const key = `${this.keyOf(s)}|${JSON.stringify(style)}|${rule.basis}|${loop ? 'loop' : ''}`;
+    const have = this.lenses.get(key);
+    if (have) return have;
+    if (this.ready(s) && !this.lensing.has(key)) {
+      this.lensing.add(key);
+      void this.renderer.lens(s, this.samples, this.token, style, rule.basis)
+        .then((r) => { this.lenses.set(key, r); this.hashes.set(this.keyOf(s), r.hash); if (this.lenses.size > 12) this.lenses.delete(this.lenses.keys().next().value!); })
+        .catch(() => undefined)
+        .finally(() => { this.lensing.delete(key); this.changed(); });
+    }
+    return null;
+  }
+
+  private outlines = new Map<string, { min: Float32Array; max: Float32Array; duration: number }>();
+  /** The peaks of a short sound as it was (the dashed outline of the sound before an agent's change), rendered here: it is one short sound, and null for a long one. */
+  lensOutline(s: Sound): { min: ArrayLike<number>; max: ArrayLike<number>; duration: number } | null {
+    const key = this.keyOf(s);
+    let o = this.outlines.get(key);
+    if (!o) {
+      if (!this.ready(s)) return null;
+      const ch = this.channels(s);
+      if (ch[0]!.length > BIG) return null;
+      const pk = peaks(this.render(s), 900);
+      o = { min: pk.min, max: pk.max, duration: ch[0]!.length / 44100 };
+      this.outlines.set(key, o);
+      if (this.outlines.size > 8) this.outlines.delete(this.outlines.keys().next().value!);
+    }
+    return o;
+  }
+
+  private diffs = new Map<string, DiffReply>();
+  private diffing = new Set<string>();
+  /** The difference spectrogram of a sound against another (null until the worker has it). */
+  lensDiff(s: Sound, ref: Sound): DiffReply | null {
+    const key = `${this.keyOf(s)}|${this.keyOf(ref)}`;
+    const have = this.diffs.get(key);
+    if (have) return have;
+    if (this.ready(s) && this.ready(ref) && !this.diffing.has(key)) {
+      this.diffing.add(key);
+      void this.renderer.diff(s, ref, this.samples, this.token)
+        .then((r) => { this.diffs.set(key, r); if (this.diffs.size > 12) this.diffs.delete(this.diffs.keys().next().value!); })
+        .catch(() => undefined)
+        .finally(() => { this.diffing.delete(key); this.changed(); });
+    }
+    return null;
+  }
+
+  /** Who set what on a sound, from the tape (the whole tape is fetched first in a lean project). */
+  provenance(id: string): Provenance {
+    if (this.lean && this.tape.length < this.tapeTotal && !this.loadingTape) {
+      this.loadingTape = true;
+      void (async () => { while (this.tape.length < this.tapeTotal) { const n = this.tape.length; await this.loadEarlier(); if (this.tape.length === n) break; } })().finally(() => { this.loadingTape = false; });
+    }
+    return provenanceMemo(this.tape, id);
+  }
+  private loadingTape = false;
 
   private setMeasures = new Map<string, { key: string; m: SetMeasure | null }>();
   private setFetching = new Set<string>();
@@ -915,6 +983,7 @@ export class Store {
       // already stopped
     }
     this.source = null;
+    this.clock = null;
     const wasSong = this.songPlay !== null;
     this.songPlay = null;
     if (this.playing || wasSong) {
@@ -922,6 +991,35 @@ export class Store {
       this.changed();
     }
     this.wake();
+  }
+
+  /** When the sound now playing began (page clock), where in the sound that was, and whether it repeats: the playhead of the lenses reads it. */
+  clock: { at: number; from: number; len: number; loop: boolean } | null = null;
+
+  /** Where the playhead is in the sound now playing (seconds), or null when it is not playing. */
+  playPosition(key: string): number | null {
+    const c = this.clock;
+    if (!c || this.playing !== key) return null;
+    const el = (performance.now() - c.at) / 1000;
+    return c.from + (c.loop ? el % c.len : Math.min(el, c.len));
+  }
+
+  /** Play part of a sound repeating until stopped (the selection of a lens). */
+  async playRegion(id: string, from: number, to: number): Promise<void> {
+    const s = await this.docNow(id);
+    if (s) await this.playDoc(`${id}#loop`, s, id, undefined, true, true, [from, to]);
+  }
+
+  /** Play one document, then another (hear the sound before a change, then as it is now); stopped by anything else that plays. */
+  async playPair(id: string, first: Sound, second: Sound): Promise<void> {
+    const token = ++this.seqToken;
+    this.stop();
+    await this.playDoc(`${id}#A`, first, id, 'A', true);
+    await this.idle();
+    if (token !== this.seqToken) return;
+    await new Promise((r) => setTimeout(r, 250));
+    if (token !== this.seqToken) return;
+    await this.playDoc(id, second, id, 'B', true);
   }
 
   private wake(): void {
@@ -986,7 +1084,7 @@ export class Store {
   }
 
   /** Play a sound document under a playing key (a toggle: playing it again stops it). It is rendered in the worker, so the page never waits for it. */
-  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false, loop = false): Promise<void> {
+  async playDoc(key: string, s: Sound, id = s.id, slot?: 'A' | 'B', restart = false, loop = false, region?: [number, number]): Promise<void> {
     if (this.playing === key && !restart) { this.stop(); return; }
     this.stop();
     const token = ++this.playToken;
@@ -997,9 +1095,15 @@ export class Store {
       const r = await this.renderer.render(s, this.samples, this.token);
       if (token !== this.playToken) return;
       this.rendering = null;
-      const chans = r.channels;
+      let chans = r.channels;
+      if (region) {
+        // only a part: the selection of a lens, looped
+        const a = Math.max(0, Math.floor(region[0] * 44100)), b = Math.min(chans[0]!.length, Math.ceil(region[1] * 44100));
+        if (b - a >= 64) chans = chans.map((c) => c.slice(a, b));
+        else region = undefined;
+      }
       const samples = chans[0]!;
-      this.played.push({ id, ...(slot ? { slot } : {}), ...(loop ? { loop: true } : {}), hash: r.hash, samples: samples.length, key: this.keyOf(s) });
+      this.played.push({ id, ...(slot ? { slot } : {}), ...(loop ? { loop: true } : {}), ...(region ? { region } : {}), hash: r.hash, samples: samples.length, key: this.keyOf(s) });
       this.ctx ??= new AudioContext({ sampleRate: 44100 });
       if (this.ctx.state === 'suspended') await this.ctx.resume();
       if (token !== this.playToken) return;
@@ -1018,6 +1122,7 @@ export class Store {
         }
       };
       this.source = src;
+      this.clock = { at: performance.now(), from: region?.[0] ?? 0, len: samples.length / 44100, loop };
       src.start();
     } catch (e) {
       if (token !== this.playToken) return;

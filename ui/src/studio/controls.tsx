@@ -152,6 +152,7 @@ function useValueControl(p: ValueProps, axis: 'x' | 'y', pxFull = DRAG_PX) {
 
 /** What the typed-entry field starts with: the value without its unit word, easy to retype. */
 function formatEntry(v: number, spec: ValueSpec): string {
+  if (spec.custom) return spec.custom.entry ? spec.custom.entry(v) : spec.custom.show(v);
   return formatValue(v, spec).replace(/−/g, '-').replace(/ ?(kHz|Hz|dB|st|ms|s)$/, '').trim();
 }
 
@@ -165,7 +166,7 @@ function EntryField({ ctl, spec, label, testId }: { ctl: ReturnType<typeof useVa
       onBlur={() => ctl.setEntry(null)} />
   );
 }
-const unitHint = (s: ValueSpec): string => ({ s: 'e.g. 110ms or 0.11', hz: 'e.g. 1.8k or C6', pct: 'e.g. 18%', db: 'e.g. −3dB', st: 'e.g. +5st', note: 'e.g. C6', plain: 'a number, 18% or 1.8k' }[s.unit]);
+const unitHint = (s: ValueSpec): string => s.custom?.hint ?? ({ s: 'e.g. 110ms or 0.11', hz: 'e.g. 1.8k or C6', pct: 'e.g. 18%', db: 'e.g. −3dB', st: 'e.g. +5st', note: 'e.g. C6', plain: 'a number, 18% or 1.8k' }[s.unit]);
 
 const ariaOf = (p: ValueProps, shown: number, spec: ValueSpec) => ({
   role: 'slider' as const,

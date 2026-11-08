@@ -218,7 +218,8 @@ body { overflow: hidden; background: var(--ground); color: var(--text); font: 40
 .sounds.need { display: block; }
 .need-grid-wrap { position: relative; }
 .need-grid { display: grid; will-change: transform; }
-.nc { position: relative; height: 168px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; cursor: default; }
+.nc { position: relative; height: 168px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 5px; min-width: 0; cursor: default; }
+.nc > .nc-head, .nc > .nc-badges, .nc > .nc-author, .nc > .nc-reqline { flex: none; }
 .nc:hover { border-color: var(--line2); }
 .nc[data-selected] { border-color: var(--ember); box-shadow: 0 0 0 1px var(--ember); }
 .nc[data-playing] .nc-actions { opacity: 1; }
@@ -241,9 +242,10 @@ body { overflow: hidden; background: var(--ground); color: var(--text); font: 40
 .nc-badges { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; height: 20px; align-items: center; }
 .nc-badges .badge { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .nc-author { display: flex; align-items: center; gap: 6px; font-size: var(--fs-11); color: var(--text3); height: 14px; }
-.nc-reqline { height: 16px; overflow: hidden; font-size: var(--fs-11); }
+.nc-reqline { height: 16px; overflow: hidden; font-size: var(--fs-11); display: flex; align-items: center; }
 .nc-req { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
-.nc-req .chip { font-size: 10px; padding: 0 6px; flex: none; }
+.nc-req { min-width: 0; max-width: 100%; }
+.nc-req .chip { font-size: 10px; line-height: 14px; height: 16px; box-sizing: border-box; padding: 0 6px; flex: none; display: inline-flex; align-items: center; }
 .nc-req-note { overflow: hidden; text-overflow: ellipsis; }
 .nc-pop { position: absolute; left: -1px; right: -1px; top: calc(100% - 4px); z-index: 12; background: var(--raised); border: 1px solid var(--line2); border-radius: 8px; box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
 .menu { display: flex; flex-direction: column; min-width: 160px; }

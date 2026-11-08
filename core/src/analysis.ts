@@ -234,6 +234,32 @@ export function integratedLoudness(input: Samples | readonly Samples[]): number 
   return lufs(mean(rel.length ? rel : abs));
 }
 
+/**
+ * Loudness over time, LUFS: the K-weighted mean square in `win`-second windows (400 ms is BS.1770's
+ * momentary loudness) every `hop` seconds, centred on `t`. Silence is −Infinity. A measurement for the
+ * analysis views; it feeds no check.
+ */
+export function loudnessCurve(input: Samples | readonly Samples[], win = 0.4, hop = 0.025): { t: number[]; lufs: number[] } {
+  const chans = Array.isArray(input) ? (input as readonly Samples[]) : [input as Samples];
+  const n = chans[0]!.length;
+  if (!n) return { t: [], lufs: [] };
+  const [s1, s2] = kWeighting(SAMPLE_RATE);
+  const ys = chans.map((x) => filter(filter(x, s1), s2));
+  // running sum of squares across channels, so each window is two lookups
+  const cum = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) { let v = 0; for (const y of ys) v += y[i]! * y[i]!; cum[i + 1] = cum[i]! + v; }
+  const w = Math.max(1, Math.round(win * SAMPLE_RATE));
+  const step = Math.max(1, Math.round(hop * SAMPLE_RATE));
+  const t: number[] = [], lufs: number[] = [];
+  for (let c = 0; c <= n; c += step) {
+    const a = Math.max(0, c - (w >> 1)), b = Math.min(n, a + w);
+    const ms = (cum[b]! - cum[a]!) / Math.max(1, b - a);
+    t.push(c / SAMPLE_RATE);
+    lufs.push(ms > 0 ? -0.691 + (10 * Math.log(ms)) / LN10 : -Infinity);
+  }
+  return { t, lufs };
+}
+
 const TP_HALF = 96; // oversampled taps each side of the centre
 let tpFilter: Float64Array | null = null;
 

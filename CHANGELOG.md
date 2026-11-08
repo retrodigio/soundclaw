@@ -23,6 +23,24 @@ All notable changes to SoundClaw are listed here. The format follows
   and when (`issues`). Spectrograms use the theme's ember ramp instead of a heat map.
 - **The agent's changes** pulse once in the library and keep a "new" dot until you play or open them.
 
+### The sound pages
+- **Analysis lenses.** Waveform with loudness over time, mel spectrogram with note and Hz rulers and a hover readout, pitch over a note grid,
+  compare (a difference spectrogram against the version before the latest change, or another sound, with a sentence about it) and numbers, on one time
+  axis. 1 to 5 switch lenses; the cursor, selection and zoom stay put; the numbers strip is always shown; a flag (a failing check's time range) jumps
+  to it and loops it. The data comes from the measuring worker and is the same as `soundclaw measure --json`. They are a page, `#/sound/<id>/analysis`,
+  and the big view inside both editors.
+- **Classic editor.** Seven modules in signal order with knobs that show units (seconds, Hz, %, semitones, dB) and take them when typed, a drawn
+  envelope whose corners are draggable, "off" modules, a check's likely module marked, and an inspector (⌥2) with the selected control's value, the
+  value before, who set it, the agent's note, Hear before, Revert, the numbers, this sound's history, Ask for changes and Approve.
+- **The agent's tick and ghost.** A parameter, layer or device the agent changed last, with no approval by a person since, is marked (violet arc,
+  rim dot, dashed ghost at the value before, a dashed outline of the waveform before the change), worked out from the tape.
+- **Layered editor.** A sum-by-layer view (hover a band to hear the layer alone, click to select it), layers as tracks with a drag handle, S and M, a
+  mini waveform and a gain slider, and device chains: source, envelope and every effect as a card with a sketch and its main values. Drag a layer to
+  reorder it, a device to reorder or move it to another layer (one batch), ⌥-drag to copy; "+" adds an effect, "+ Layer" a layer; Enter opens all of a
+  card's parameters. The agent's note sits on the device it touched.
+- **New in core's measuring code:** `loudnessCurve` (loudness over time). No render changed; the golden hashes are as they were.
+- **Fixed:** the request line on a needs-attention card clipped the bottom of its state chip.
+
 ### The dashboard on large projects
 - **A project of 400 sounds, 100 samples and 3,000 commands opens at once.** The page used to fetch every sample and render and measure
   every sound on its own thread before it listed anything (a 60-sound slice took 88 s and froze the tab; the whole project never finished).

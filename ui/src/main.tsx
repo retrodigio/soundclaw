@@ -6,6 +6,7 @@ import './studio/tokens.css';
 import './styles.css';
 import './studio/studio.css';
 import './studio/shell.css';
+import './sound/sound.css';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const store = new Store();

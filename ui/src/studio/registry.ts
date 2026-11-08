@@ -22,6 +22,8 @@ export interface Action {
   run(): void | Promise<void>;
   /** Extra words the search matches. */
   keywords?: string;
+  /** A page's version of a shell action (same id): it wins while the page is open, whatever the order they registered in. */
+  override?: boolean;
 }
 
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -47,7 +49,7 @@ export function registerActions(list: Action[]): () => void {
 }
 export const allActions = (): Action[] => {
   const seen = new Map<string, Action>();
-  for (const a of actions) seen.set(a.id, a);
+  for (const a of actions) { const prev = seen.get(a.id); if (!prev || a.override || !prev.override) seen.set(a.id, a); }
   return [...seen.values()];
 };
 export function useActionList(): Action[] {

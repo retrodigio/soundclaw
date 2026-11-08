@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { AuditionPage } from '../AuditionPage.tsx';
 import { Editor } from '../Editor.tsx';
+import { AnalysisPage } from '../sound/AnalysisPage.tsx';
 import { SetPage } from '../SetPage.tsx';
 import { SongEditor } from '../SongEditor.tsx';
 import type { Store } from '../store.ts';
@@ -14,7 +15,7 @@ import { RequestRow } from '../SoundCard.tsx';
 import { requestState } from './shellData.ts';
 
 /** An editor's page: the sound's document (asked for in a lean project) and the samples it names are fetched first, then the editor opens. */
-function EditorGate({ store, id }: { store: Store; id: string }) {
+function EditorGate({ store, id, view }: { store: Store; id: string; view?: 'analysis' }) {
   const doc = store.doc(id);
   const [ready, setReady] = useState(false);
   useEffect(() => { store.markSeen(id); }, [store, id]);
@@ -26,7 +27,7 @@ function EditorGate({ store, id }: { store: Store; id: string }) {
   }, [doc, ready, store]);
   if (!doc && store.index.some((x) => x.id === id)) return <section className="editor"><a href="#/" className="back">{'←'} all sounds</a><p className="dim" data-testid="editor-loading">Loading {id}{'…'}</p></section>;
   if (doc && !ready && !store.samplesReadyFor(store.samples.filter((x) => JSON.stringify(doc).includes(`"${x.name}"`)).map((x) => x.name))) return <section className="editor"><a href="#/" className="back">{'←'} all sounds</a><p className="dim" data-testid="editor-loading">Loading the samples of {id}{'…'}</p></section>;
-  return <Editor store={store} id={id} />;
+  return view === 'analysis' ? <AnalysisPage store={store} id={id} /> : <Editor store={store} id={id} />;
 }
 
 /** The session: every request and where it stands, with the live feed. The lanes and the working-on card grow in later work. */
@@ -85,7 +86,7 @@ function Review({ store, id }: { store: Store; id: string }) {
 export function Page({ store, onPlay, onOpen }: { store: Store; onPlay(id: string): void; onOpen(id: string): void }) {
   const r = store.route;
   switch (r.kind) {
-    case 'sound': return <EditorGate key={r.id} store={store} id={r.id} />;
+    case 'sound': return <EditorGate key={`${r.id}/${r.view ?? ''}`} store={store} id={r.id} {...(r.view ? { view: r.view } : {})} />;
     case 'song': return <SongEditor key={r.id} store={store} id={r.id} />;
     case 'audition': return <AuditionPage key={r.set ?? 'all'} store={store} setId={r.set} />;
     case 'set': {

@@ -40,6 +40,7 @@
   --scrim: rgba(5, 6, 9, 0.55);
   --knob-cap: #181B22;
   /* the layer palette (eight colours, each at least 3:1 on the ground) */
+  --cool: #4FA8FF;
   --layer-1: #6EA8FF; --layer-2: #FF9E5E; --layer-3: #5FD3B0; --layer-4: #E58BD6; --layer-5: #D9C95A; --layer-6: #8FA0FF; --layer-7: #F07E7E; --layer-8: #7CCB6A;
 }
 
@@ -60,6 +61,7 @@
   --shadow: 0 24px 64px rgba(20, 22, 28, 0.25);
   --scrim: rgba(20, 22, 28, 0.22);
   --knob-cap: #F6F7F9;
+  --cool: #2F6FD6;
   --layer-1: #2F6FD6; --layer-2: #C4580F; --layer-3: #14876A; --layer-4: #B03C9C; --layer-5: #8A7A00; --layer-6: #4F5FD0; --layer-7: #C23A3A; --layer-8: #3C8A2A;
 }
 

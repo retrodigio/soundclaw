@@ -29,6 +29,12 @@ async function open(page: Page, setup: string, name = 'impact'): Promise<void> {
   await page.getByTestId('play-on-change').uncheck();
 }
 
+/** Add a layer from the "+ Layer" menu. */
+async function addLayer(page: Page, kind: string): Promise<void> {
+  await page.getByTestId('add-layer-menu').click();
+  await page.getByTestId(`add-layer-${kind}`).click();
+}
+
 /** Set a range input to a position (0 to 1000) and wait for the command that follows. */
 async function fillRange(page: Page, testid: string, pos: number): Promise<void> {
   await page.getByTestId(testid).fill(String(pos));
@@ -39,7 +45,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await expect(page.getByTestId('no-layers')).toBeVisible();
 
   // layer 1: a sine thump at 60 Hz
-  await page.getByTestId('add-layer-osc').click();
+  await addLayer(page, 'osc');
   await expect(page.getByTestId('layer-row-1')).toBeVisible();
   await fillRange(page, 'ctl-L-1-freq', 159); // 20 * 1000^0.159 = 60 Hz
   await fillRange(page, 'ctl-L-1-dur', 392); // 0.4 s (log scale, 0.01 to 123 s)
@@ -47,7 +53,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await expect.poll(async () => (await texts(page)).filter((t) => /^layer set impact 1 freq=\d+(\.\d+)? dur=0\.\d+$/.test(t)).length, { timeout: 8000 }).toBe(1);
 
   // layer 2: a burst of white noise, low-passed
-  await page.getByTestId('add-layer-osc').click();
+  await addLayer(page, 'osc');
   await expect(page.getByTestId('layer-row-2')).toBeVisible();
   await page.getByTestId('ctl-L-2-wave').selectOption('white');
   await page.getByTestId('ctl-L-2-filter').selectOption('lp');
@@ -55,7 +61,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await expect.poll(async () => (await texts(page)).some((t) => /^layer set impact 2 .*filter=lp/.test(t))).toBe(true);
 
   // layer 3: a short square click
-  await page.getByTestId('add-layer-osc').click();
+  await addLayer(page, 'osc');
   await page.getByTestId('ctl-L-3-wave').selectOption('square');
   await fillRange(page, 'ctl-L-3-dur', 74); // about 0.02 s
   await expect.poll(async () => (await texts(page)).some((t) => /^layer set impact 3 .*wave=square/.test(t))).toBe(true);
@@ -72,6 +78,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   const before = await texts(page);
   const pt = page.getByTestId('env-point-1');
   const t0 = Number(await pt.getAttribute('data-t')), v0 = Number(await pt.getAttribute('data-v'));
+  await pt.scrollIntoViewIfNeeded();
   const box = (await pt.boundingBox())!;
   const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
   await page.mouse.move(cx, cy);
@@ -92,8 +99,10 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   await page.getByTestId('env-point-1').click();
   await page.getByTestId('env-curve').selectOption('exp');
   await expect.poll(async () => (await texts(page))[0]).toMatch(/^env impact 1\.freq ".*@exp"$/);
-  await page.getByTestId('fx-add-layer-reverb').click();
+  await page.getByTestId('device-add-1').click();
+  await page.getByTestId('fx-add-L1-reverb').click();
   await expect.poll(async () => (await texts(page))[0]).toBe('fx add impact layer=1 reverb');
+  await page.getByTestId('device-add-M').click();
   await page.getByTestId('fx-add-master-distort').click();
   await expect.poll(async () => (await texts(page))[0]).toBe('fx add impact distort');
   await expect(page.getByTestId('fx-1-1')).toHaveAttribute('data-kind', 'reverb');
@@ -133,6 +142,7 @@ test('the layer list: mute, solo, reorder, gain and remove are one command each'
   await expect.poll(async () => (await texts(page))[0]).toBe('layer move impact 1 to=2');
   await expect(page.getByTestId('layer-row-2')).toHaveAttribute('data-kind', 'osc');
   // a drag on a gain slider writes one command
+  await page.getByTestId('layer-gain-1').scrollIntoViewIfNeeded();
   const box = (await page.getByTestId('layer-gain-1').boundingBox())!;
   const y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width * 0.5, y);

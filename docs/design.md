@@ -219,7 +219,7 @@ ghost tick at the value before (props for now; the tape feeds them later). Meter
 
 **The shell** (`Shell.tsx`). A 52 px transport on top; the library on the left (288 px, 220 to 420); tabs over the page; the agent rail on the
 right (320 px); the bottom panel under the page (220 px). Sizes and collapsed panels are kept per browser. ⌥1 to ⌥4 toggle the library, the
-page's inspector (none yet), the rail and the bottom panel (browsers keep ⌘1 to ⌘9 for their own tabs). Below 1180 px the rail is a 44 px strip
+page's inspector (a sound's page has one), the rail and the bottom panel (browsers keep ⌘1 to ⌘9 for their own tabs). Below 1180 px the rail is a 44 px strip
 that opens over the page, below 900 px the library is an overlay, and there is no horizontal scroll down to 360 px.
 
 - **Routes and tabs.** `#/` (Needs attention), `#/sound/<id>`, `#/set/<id>`, `#/song/<id>`, `#/audition[/<set>]`, `#/session`, `#/review/<request>`,
@@ -245,6 +245,55 @@ that opens over the page, below 900 px the library is an overlay, and there is n
   text field has focus, except Esc and ⌘K. Typed text that has two or more words and matches no action becomes "Ask the agent: … on <focused item>",
   which writes a change request.
 
+## The sound pages
+
+A sound's page (`#/sound/<id>`) is the classic or the layered editor; `#/sound/<id>/analysis` is the five lenses on a page of their own. Code:
+`ui/src/sound/` (the lenses, the classic editor, the inspector, the provenance and device helpers) and `ui/src/LayeredEditor.tsx`.
+
+**The lenses.** Waveform, mel spectrogram, pitch, compare and numbers share one time axis: the cursor (a click), the selection (a drag; ⇧-drag
+extends it; a double-click clears it) and the zoom (⌥-scroll zooms time around the pointer, ⇧-scroll zooms the waveform's level, a plain scroll pans
+a zoomed view) live in the panel, so they stay when the lens changes (1 to 5, or the tabs; the layered editor adds a sixth, the sum by layer). The
+data comes from the measuring worker (`op: 'lens'` in `render.worker.ts`): peaks, the loudness over time (400 ms windows, `loudnessCurve` in
+core's measuring code), the mel spectrogram (96 bands, at most 480 frames, as bytes over the 80 dB below the loudest cell), the pitch frames, and
+`analyze` and `runChecks` themselves, so the figures are the ones `soundclaw measure <project> <id> --json` prints (a test compares them). Compare
+is a second worker op: both sounds' spectrograms on the same frames, the difference as signed bytes (full scale 30 dB), and one sentence about the
+quarters of the sound and three bands that moved by 3 dB or more. It compares with the state before the sound's latest group by default, or
+another sound. The numbers strip under the lens is always there. A *flag* is a failing check's time range as a marker on every lens; clicking it
+puts the cursor on it, selects a little around it and loops that part (`Store.playRegion`). The playhead is read from the player's clock each
+frame and moved directly, so React is not updated at frame rate. Only a draft being dragged is drawn on the page's thread (the waveform of a
+sound the person is editing); everything else comes from the worker.
+
+**Who set what** (`sound/provenance.ts`). The tape is replayed once, group by group, and one sound's document is compared before and after each
+group. The latest group to change a classic parameter (or a layer, or a layered device) is that control's *trail*: who, when and the value before.
+A control is *set by the agent* when its trail is an agent's and no person has marked the sound approved since; then it draws the violet arc, the
+dot on the rim and the ghost tick at the value before (knob), the dashed violet envelope (drawn envelope), the dashed outline of the waveform
+from before the change (the lens) and a violet border and spark (a layered device). The agent's note on a control is the done or progress text
+of the request the agent had claimed when it wrote the change (`answeredNote`: the claim comes before the change and the done, blocked or cancel
+after it). In a lean project the page fetches the rest of the tape first, because a replay needs the sound's creation.
+
+**The classic editor.** The header (checks as badges, the generators, Mutate with its amount (M), the seed), the lens panel, and seven modules in
+signal order: envelope (with a drawn envelope whose four corners are handles: end of the attack, punch, end of the sustain, end of the decay),
+pitch, slide, vibrato, tone (the wave as a segmented control, duty), repeat and phaser, filters and output. The knobs show units (`classicUnits.ts`:
+lengths are `a² · 10⁵` samples, frequency is `8 · 44100 · (f² + 0.001) / 100` Hz, the pitch step is semitones, volume is dB); typed text takes
+the same units and is turned back into the stored 0..1 number, rounded to three decimals, which is what the command carries. A module whose
+parameters all rest is dimmed and says "off"; a module that holds a failing check's likely cause takes its colour (click and harsh: the filters; a
+long tail: the envelope). The inspector (⌥2) shows the selected control, the value before, who set it and when, the agent's note, Hear before
+(plays the sound with the old value, then now; ⌥-click a knob does the same), Revert (a `sound set` of the value before, by the person), the
+numbers, this sound's history, Ask for changes (R; the note carries the selected region) and Approve, and below them A/B, the loop controls and the
+exports. A knob's drag is a local draft written once, at the end, by the same `Coalescer`; keys, the wheel and typed values go through it too, and
+a burst of key presses is one command.
+
+**The layered editor.** The big view is the lens panel, opening on *sum by layer*: each layer's absolute level over time, stacked in the layer
+palette (worked out in the worker from per-layer renders); hovering a band for a moment plays that layer alone (a page preview, nothing is
+written), clicking it selects the layer. Under it each layer is a track: a handle (drag to reorder: `layer move`), the name, the source summary,
+S and M, a mini waveform, a gain slider, and the layer's chain left to right: the source, the amplitude envelope, then each effect as a card with a
+sketch of what it does (filter response, drive curve, echoes, reverb tail, compressor line…) and its first values (`devices.ts`). Enter, or a
+click, opens a card with every parameter (and the envelope graph); the source card opens the layer's source parameters, pan and offset. Dragging a
+card within a chain is one `fx move`; dragging it onto another layer or the master chain is one batch (an `fx add` with the same parameters and
+envelopes, then an `fx remove`), and ⌥-drag leaves the original. Dragging uses pointer events, not the browser's drag and drop, so it works the
+same everywhere and is testable. "+" at the end of a chain adds an effect; "+ Layer" adds a layer. A layered effect has no enabled flag, so there is
+no bypass toggle.
+
 ## Requests, await and presence
 
 People talk to the agent through **requests**. A request is a record in `requests.jsonl`
@@ -268,7 +317,7 @@ listening (open waits, agents that called a tool lately), and a card says plainl
 ## The editor and human edits
 
 A classic sound's page (`#/sound/<id>`, opened from its card) is the editor: the 25 parameters as
-sliders in sfxr's groups (`EDITOR_GROUPS` in core), wave buttons, the category and `random`
+knobs in seven modules (see *The sound pages*), the wave, the category and `random`
 generators, mutate with an amount, A/B and exports. The page renders with the same core as the
 agent's renders, so what plays is what `render` measures.
 

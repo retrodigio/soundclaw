@@ -152,6 +152,7 @@ function ShellInner({ store }: { store: Store }) {
     { id: 'nav.close', label: 'Close the palette or a dialog', group: 'Navigate', shortcut: 'Esc', local: true, noPalette: true, run: () => setOverlay(null) },
     { id: 'nav.home', label: 'Go to Needs attention', group: 'Navigate', run: () => { location.hash = '#/'; }, keywords: 'home sounds list cards rows' },
     { id: 'nav.audition', label: 'Open the audition page', group: 'Navigate', run: () => { location.hash = '#/audition'; }, keywords: 'listen compare play all' },
+    { id: 'nav.analysis', label: 'Open the analysis lenses for the focused sound', group: 'Navigate', run: () => { if (focus?.kind === 'sound') location.hash = `#/sound/${focus.id}/analysis`; }, enabled: () => focus?.kind === 'sound', keywords: 'waveform spectrogram pitch compare numbers lens' },
     { id: 'nav.session', label: 'Open the agent session', group: 'Navigate', run: () => { location.hash = '#/session'; }, keywords: 'requests live feed' },
     { id: 'nav.closeTab', label: 'Close the current tab', group: 'Navigate', run: () => closeTab(tabOf(hash)?.hash ?? ''), enabled: () => !!tabOf(hash) },
     { id: 'nav.library.sounds', label: 'Library: show sounds', group: 'Library', run: () => setPrefs({ libTab: 'sounds' }) },
