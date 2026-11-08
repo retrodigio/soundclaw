@@ -2,7 +2,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { Store } from './store.ts';
+import './studio/tokens.css';
 import './styles.css';
+import './studio/studio.css';
+import './studio/shell.css';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const store = new Store();

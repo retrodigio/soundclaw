@@ -3,7 +3,8 @@
 // cards come into view, nothing blocks the page, playing matches the Node render, the editor opens
 // a sample-layer sound, and the audition page is usable at once.
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures.ts';
 import { samplesHash, floatsFromBytes } from '../core/src/index.ts';
 import { execFileSync } from 'node:child_process';
 import { cpSync, readdirSync } from 'node:fs';
@@ -51,7 +52,7 @@ test('a project of 400 sounds opens at once, loads thumbnails as cards come into
   // 1. the list, from the state alone
   const t0 = Date.now();
   await page.goto(`${agent.url}&name=ana`);
-  await expect(page.getByTestId('card-cl_000')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-testid^="card-"]').first()).toBeVisible({ timeout: 10_000 });
   const toList = Date.now() - t0;
   await expect(page.getByTestId('sounds-count')).toContainText('400 of 400 sounds');
   expect(await page.locator('[data-testid^="card-"]').count()).toBe(48);
@@ -62,8 +63,20 @@ test('a project of 400 sounds opens at once, loads thumbnails as cards come into
   expect(await page.locator('[data-testid="cmd-row"]').count()).toBeLessThanOrEqual(200);
   expect(toList, `time to the list: ${toList} ms`).toBeLessThan(2000);
 
+  // the library (a windowed list) and the centre list paint at once on a second visit, with the server warm
+  await page.reload();
+  const w0 = Date.now();
+  await expect(page.locator('[data-testid^="lib-row-"]').first()).toBeVisible({ timeout: 10_000 });
+  const firstCard = page.locator('[data-testid^="card-"]').first();
+  await expect(firstCard).toBeVisible({ timeout: 10_000 });
+  const firstId = (await firstCard.getAttribute('data-testid'))!.replace(/^card-/, '');
+  const warm = Date.now() - w0;
+  console.log(`large project: library and list painted ${warm} ms after a reload (warm)`);
+  expect(warm, `warm paint: ${warm} ms`).toBeLessThan(1000);
+  expect(await page.locator('[data-testid^="lib-row-"]').count(), 'the library is windowed').toBeLessThan(60);
+
   // 2. thumbnails from the server, for the cards in view
-  await expect(page.getByTestId('wave-cl_000')).toHaveAttribute('data-peak', /^0\./, { timeout: 20_000 });
+  await expect(page.getByTestId(`wave-${firstId}`)).toHaveAttribute('data-peak', /^0\./, { timeout: 20_000 });
   const toThumb = Date.now() - t0;
   const fetchedAtFirst = await page.evaluate(() => (window as unknown as Window2).soundclaw.cardStats.fetched);
   expect(fetchedAtFirst).toBeLessThan(60);
@@ -81,6 +94,16 @@ test('a project of 400 sounds opens at once, loads thumbnails as cards come into
   expect(longest, `long tasks after first paint: ${tasks.join(', ')} ms`).toBeLessThan(200);
   // cards far down were not asked for before they came near: fewer cards fetched than sounds
   expect(await page.evaluate(() => (window as unknown as Window2).soundclaw.cardStats.fetched)).toBeLessThanOrEqual(400);
+
+  // 3b. scrolling the library's 400 rows: no long task over 100 ms
+  const libBox = (await page.getByTestId('lib-list').boundingBox())!;
+  await page.mouse.move(libBox.x + libBox.width / 2, libBox.y + libBox.height / 2);
+  const libFrom = await page.evaluate(() => performance.now());
+  for (let i = 0; i < 30; i++) { await page.mouse.wheel(0, 500); await page.waitForTimeout(40); }
+  const libTasks = await longTasks(page, libFrom);
+  console.log(`large project: longest task while scrolling the library ${Math.max(0, ...libTasks)} ms`);
+  expect(Math.max(0, ...libTasks), `long tasks while scrolling the library: ${libTasks.join(', ')} ms`).toBeLessThan(100);
+  expect(await page.getByTestId('lib-list').evaluate((e) => e.scrollTop), 'the library scrolled').toBeGreaterThan(1000);
 
   // 4. playing: rendered in the worker, the Node render's samples (a classic sound, a layered one with a sample, and a stereo 30 s loop of a stereo sample)
   await page.evaluate(() => window.scrollTo(0, 0));

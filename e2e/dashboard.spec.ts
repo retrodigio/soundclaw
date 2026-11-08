@@ -1,7 +1,8 @@
 // The dashboard in a browser: sound cards with play buttons and waveforms, the history, Approve and
 // Ask for changes reaching a waiting agent, and what plays being what the agent rendered.
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures.ts';
 import { floatBytes, newSound, renderSound, samplesHash } from '../core/src/index.ts';
 import { startAgent, type Agent } from './helpers.ts';
 

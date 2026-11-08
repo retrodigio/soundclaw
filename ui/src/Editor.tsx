@@ -144,18 +144,7 @@ function ClassicEditor({ store, id }: { store: Store; id: string }) {
     if (sound && store.playOnChange) void store.playDoc(id, sound, id, undefined, true);
   }, [key, sound, store, id]);
 
-  // Space plays (and stops) the sound as it stands, unless a text field has the keys.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || e.repeat) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range' && (t as HTMLInputElement).type !== 'checkbox'))) return;
-      e.preventDefault();
-      void latest.current.store.play(latest.current.id);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // Space plays and stops the sound: the shell's one keyboard handler does that for the open sound.
 
   if (!sound) {
     return <section className="editor"><a href="#/" className="back">← all sounds</a><p className="empty" data-testid="editor-missing">No sound “{id}”.</p></section>;

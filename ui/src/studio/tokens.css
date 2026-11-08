@@ -1,0 +1,86 @@
+/* Design tokens: every colour, type size, space, radius, density and motion value of the dashboard.
+   Components read these custom properties; raw colour values appear only in this file.
+   `data-theme` (dark | light) and `data-density` (compact | comfortable) sit on <html>. */
+
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 300 700; font-display: swap; src: url('./fonts/space-grotesk.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap; src: url('./fonts/jetbrains-mono.woff2') format('woff2'); }
+
+:root {
+  /* type */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-title: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-15: 15px; --fs-18: 18px; --fs-22: 22px; --fs-28: 28px;
+  --label-spacing: 0.08em;
+  /* space */
+  --sp-2: 2px; --sp-4: 4px; --sp-6: 6px; --sp-8: 8px; --sp-12: 12px; --sp-16: 16px; --sp-24: 24px; --sp-32: 32px;
+  /* radii */
+  --r-control: 4px; --r-cell: 6px; --r-panel: 10px; --r-overlay: 12px; --r-chip: 999px;
+  /* motion */
+  --t-fast: 120ms; --t-panel: 200ms; --ease: ease-out; --pulse: 900ms;
+  /* layout */
+  --transport-h: 52px;
+  color-scheme: dark;
+}
+
+:root, :root[data-theme='dark'] {
+  --ground: #0B0C10; --panel: #121419; --raised: #181B22; --control: #20242D;
+  --line: #2A2F3A; --line2: #3A4050;
+  --text: #ECEEF3; --text2: #A9AFBD; --text3: #858C9C;
+  --ember: #FF7A2F; --ember-text: #FF8A47; --on-ember: #0B0C10;
+  --agent: #9F8BFF; --agent-text: #C9BEFF;
+  --you: #4FD1C5; --you-text: #8FE6DD;
+  --pass: #43D18A; --warn: #F5B83D; --fail: #FF5D6E;
+  --pass-text: #43D18A; --warn-text: #F5B83D; --fail-text: #FF5D6E;
+  --wave: #C7CCD8;
+  --sel: rgba(255, 122, 47, 0.14);
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --scrim: rgba(5, 6, 9, 0.55);
+  --knob-cap: #181B22;
+  /* the layer palette (eight colours, each at least 3:1 on the ground) */
+  --layer-1: #6EA8FF; --layer-2: #FF9E5E; --layer-3: #5FD3B0; --layer-4: #E58BD6; --layer-5: #D9C95A; --layer-6: #8FA0FF; --layer-7: #F07E7E; --layer-8: #7CCB6A;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --ground: #E9EBF0; --panel: #F6F7F9; --raised: #FFFFFF; --control: #EEF0F4;
+  --line: #D5D9E1; --line2: #C3C8D2;
+  --text: #14161C; --text2: #4A5162; --text3: #5A6172;
+  --ember: #E2560F; --ember-text: #B9440A; --on-ember: #14161C;
+  --agent: #6B54E8; --agent-text: #4E37C9;
+  --you: #0E8F83; --you-text: #0B6F66;
+  --pass: #138A55; --warn: #A86A00; --fail: #D22F43;
+  /* the light theme's badge text is darker than the role colour so it reaches 4.5:1 on its tinted background */
+  --pass-text: #0E6B42; --warn-text: #7A4D00; --fail-text: #A8202F;
+  --wave: #2B2F3A;
+  --sel: rgba(226, 86, 15, 0.14);
+  --shadow: 0 24px 64px rgba(20, 22, 28, 0.25);
+  --scrim: rgba(20, 22, 28, 0.22);
+  --knob-cap: #F6F7F9;
+  --layer-1: #2F6FD6; --layer-2: #C4580F; --layer-3: #14876A; --layer-4: #B03C9C; --layer-5: #8A7A00; --layer-6: #4F5FD0; --layer-7: #C23A3A; --layer-8: #3C8A2A;
+}
+
+/* density: compact is the default */
+:root, :root[data-density='compact'] { --row-h: 24px; --ctl-h: 28px; --row-gap: 6px; }
+:root[data-density='comfortable'] { --row-h: 32px; --ctl-h: 32px; --row-gap: 8px; }
+
+/* badge and chip backgrounds are the role colour at 14 % */
+:root {
+  --pass-bg: color-mix(in srgb, var(--pass) 14%, transparent);
+  --warn-bg: color-mix(in srgb, var(--warn) 14%, transparent);
+  --fail-bg: color-mix(in srgb, var(--fail) 14%, transparent);
+  --agent-bg: color-mix(in srgb, var(--agent) 14%, transparent);
+  --you-bg: color-mix(in srgb, var(--you) 14%, transparent);
+  --ember-bg: color-mix(in srgb, var(--ember) 14%, transparent);
+  --agent-line: color-mix(in srgb, var(--agent) 45%, transparent);
+  /* the older pages' names, kept so they follow the theme */
+  --bg: var(--ground); --dim: var(--text3); --accent: var(--ember); --bad: var(--fail); --good: var(--pass);
+}
+
+/* motion: reduced motion turns every animation and transition into an instant change */
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-panel: 0ms; --pulse: 0ms; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+:root[data-motion='reduced'] *, :root[data-motion='reduced'] *::before, :root[data-motion='reduced'] *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }

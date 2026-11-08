@@ -6,7 +6,8 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;

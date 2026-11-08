@@ -6,6 +6,7 @@
 import { arrange, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { CardInfo, ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
+import { loadNew, saveNew } from './studio/prefs.ts';
 
 export interface Measured {
   analysis: Analysis;
@@ -40,23 +41,36 @@ export interface Played {
 /** What a sound's A side is: a snapshot of its parameters, or another sound (followed as it changes). */
 export type Pin = { kind: 'snapshot'; sound: Sound; label: string } | { kind: 'sound'; id: string };
 
-/** The sound the page's route names (#/sound/<id>), or null for the list of cards. */
+/** The sound the page's route names (#/sound/<id>, or its analysis view), or null. */
 export function routeSound(hash: string): string | null {
-  return /^#\/sound\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash)?.[1] ?? null;
+  return /^#\/sound\/([A-Za-z][A-Za-z0-9_-]*)(?:\/analysis)?$/.exec(hash)?.[1] ?? null;
 }
 
-/** Where the address points: the cards, a sound's editor, a set's page, or the audition page (all sounds, or one set's). */
-export type Route = { kind: 'cards' } | { kind: 'sound'; id: string } | { kind: 'set'; id: string } | { kind: 'song'; id: string } | { kind: 'audition'; set: string | null };
+/** Where the address points. Old links keep working: #/, #/sound/<id>, #/set/<id>, #/song/<id>, #/audition[/<set>]; and the session, a review, a sound's analysis, a song's mixer and the hidden #/kit. */
+export type Route =
+  | { kind: 'cards' }
+  | { kind: 'sound'; id: string; view?: 'analysis' }
+  | { kind: 'set'; id: string }
+  | { kind: 'song'; id: string; view?: 'mixer' }
+  | { kind: 'audition'; set: string | null }
+  | { kind: 'session' }
+  | { kind: 'review'; id: string }
+  | { kind: 'kit' };
 
+const ID = '([A-Za-z][A-Za-z0-9_-]*)';
 export function parseRoute(hash: string): Route {
-  let m = /^#\/sound\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
-  if (m) return { kind: 'sound', id: m[1]! };
-  m = /^#\/set\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
+  let m = new RegExp(`^#/sound/${ID}(?:/(analysis))?$`).exec(hash);
+  if (m) return { kind: 'sound', id: m[1]!, ...(m[2] ? { view: 'analysis' as const } : {}) };
+  m = new RegExp(`^#/set/${ID}$`).exec(hash);
   if (m) return { kind: 'set', id: m[1]! };
-  m = /^#\/song\/([A-Za-z][A-Za-z0-9_-]*)$/.exec(hash);
-  if (m) return { kind: 'song', id: m[1]! };
-  m = /^#\/audition(?:\/([A-Za-z][A-Za-z0-9_-]*))?$/.exec(hash);
+  m = new RegExp(`^#/song/${ID}(?:/(mixer))?$`).exec(hash);
+  if (m) return { kind: 'song', id: m[1]!, ...(m[2] ? { view: 'mixer' as const } : {}) };
+  m = new RegExp(`^#/audition(?:/${ID})?$`).exec(hash);
   if (m) return { kind: 'audition', set: m[1] ?? null };
+  m = new RegExp(`^#/review/${ID}$`).exec(hash);
+  if (m) return { kind: 'review', id: m[1]! };
+  if (hash === '#/session') return { kind: 'session' };
+  if (hash === '#/kit') return { kind: 'kit' };
   return { kind: 'cards' };
 }
 
@@ -96,6 +110,10 @@ export class Store {
   requests: WorkRequest[] = [];
   presence: Presence | null = null;
   me: string = initialAuthor();
+  /** Sounds the agent changed that this browser has not played or opened since (the library's "new" dot), kept per browser. */
+  agentNew = new Set<string>();
+  /** When (ms) the agent last changed each sound: a row pulses once for 900 ms after. */
+  pulses = new Map<string, number>();
   error: string | null = null;
   /** The sound playing now (its id; `<id>#A` for the A side of a comparison). */
   playing: string | null = null;
@@ -138,6 +156,11 @@ export class Store {
     return () => this.listeners.delete(fn);
   };
   getVersion = (): number => this.version;
+  /** The list's numbers moved on (the server worked out cards): the library redraws on this even while an editor is open. */
+  cardsVersion = 0;
+  private cardListeners = new Set<() => void>();
+  subscribeCards2 = (fn: () => void): (() => void) => { this.cardListeners.add(fn); return () => this.cardListeners.delete(fn); };
+  getCardsVersion = (): number => this.cardsVersion;
   changed(): void {
     this.version++;
     for (const fn of [...this.listeners]) fn();
@@ -167,6 +190,7 @@ export class Store {
     switch (m.type) {
       case 'hello':
         this.project = m.snapshot.project;
+        this.agentNew = loadNew(m.snapshot.project.name);
         this.lean = m.snapshot.lean;
         this.cardStats.helloAt ??= Math.round(performance.now());
         this.docs = new Map(m.snapshot.sounds.map((x) => [x.id, x]));
@@ -188,7 +212,9 @@ export class Store {
           for (const x of m.sounds) this.docs.set(x.id, x);
           for (const id of m.removed) this.docs.delete(id);
         } else this.docs = new Map(m.sounds.map((x) => [x.id, x]));
+        const prevKeys = new Map(this.index.map((x) => [x.id, x.key]));
         this.setIndex(m.index);
+        if (!m.by.startsWith('human:')) this.noteAgentChange(m.index.filter((x) => prevKeys.get(x.id) !== x.key).map((x) => x.id));
         this.historyFlags = m.history;
         this.tapeTotal += m.entries.length;
         this.sets = m.sets ?? this.sets;
@@ -218,6 +244,8 @@ export class Store {
           return c && c.key === x.key ? { ...x, info: c.info } : x;
         });
         // an editor shows nothing of the list: leave it alone (the server's quiet work must not make it redraw)
+        this.cardsVersion++;
+        for (const f of [...this.cardListeners]) f();
         if (this.route.kind === 'sound' || this.route.kind === 'song') return;
         break;
       }
@@ -241,6 +269,21 @@ export class Store {
       case 'pong':
         break;
     }
+    this.changed();
+  }
+
+  /** The agent changed these sounds: they pulse once and carry a "new" dot until played or opened here. */
+  private noteAgentChange(ids: string[]): void {
+    if (!ids.length) return;
+    const now = Date.now();
+    for (const id of ids) { this.agentNew.add(id); this.pulses.set(id, now); }
+    if (this.project) saveNew(this.project.name, this.agentNew);
+  }
+
+  /** The person played or opened a sound: its "new" dot goes. */
+  markSeen(id: string): void {
+    if (!this.agentNew.delete(id)) return;
+    if (this.project) saveNew(this.project.name, this.agentNew);
     this.changed();
   }
 
@@ -548,7 +591,7 @@ export class Store {
       src.buffer = buf;
       src.loop = mode === 'loop' || region !== null;
       if (region && mode === 'full') { src.loopStart = region.start - r.window.start; src.loopEnd = region.end - r.window.start; }
-      src.connect(this.ctx.destination);
+      src.connect(this.out());
       let offset = where !== null ? Math.max(0, Math.min(r.length / 44100 - 0.01, where - r.window.start)) : 0;
       if (region && (offset < region.start - r.window.start || offset >= region.end - r.window.start)) offset = region.start - r.window.start;
       src.onended = () => {
@@ -568,6 +611,36 @@ export class Store {
       this.error = `could not play: ${(e as Error).message}`;
       this.changed();
     }
+  }
+
+  private master: { input: GainNode; analysers: AnalyserNode[]; bufs: Float32Array<ArrayBuffer>[] } | null = null;
+
+  /** Where every source plays to: the master gain, which feeds the speakers and the two analysers behind the master meter. */
+  out(): AudioNode {
+    const ctx = this.ctx!;
+    if (!this.master) {
+      const input = ctx.createGain();
+      const split = ctx.createChannelSplitter(2);
+      const analysers = [ctx.createAnalyser(), ctx.createAnalyser()];
+      for (const a of analysers) a.fftSize = 1024;
+      input.connect(ctx.destination);
+      input.connect(split);
+      analysers.forEach((a, i) => split.connect(a, i));
+      this.master = { input, analysers, bufs: analysers.map(() => new Float32Array(new ArrayBuffer(4 * 1024))) };
+    }
+    return this.master.input;
+  }
+
+  /** The master meter's peaks (dBFS, left and right) right now, or null when nothing has played yet. Read every animation frame; it never touches React state. */
+  readLevels(): number[] | null {
+    const m = this.master;
+    if (!m) return null;
+    return m.analysers.map((a, i) => {
+      a.getFloatTimeDomainData(m.bufs[i]!);
+      let p = 0;
+      for (const v of m.bufs[i]!) { const x = Math.abs(v); if (x > p) p = x; }
+      return p > 0 ? 20 * Math.log10(p) : -120;
+    });
   }
 
   /** Where the playing song is, in seconds of the song's own timeline (a loop repeats within its region), or null when it is not playing. */
@@ -612,7 +685,7 @@ export class Store {
       chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
-      src.connect(this.ctx.destination);
+      src.connect(this.out());
       src.onended = () => { if (this.source === src) { this.source = null; this.playing = null; this.changed(); this.wake(); } };
       this.source = src;
       src.start();
@@ -763,6 +836,7 @@ export class Store {
 
   /** A card is in view: fetch its thumbnails if the held ones are not for the sound as it stands. */
   wantCard(id: string): void {
+    this.cardRefs.set(id, (this.cardRefs.get(id) ?? 0) + 1);
     const sum = this.summary(id);
     if (!sum || this.cardData.get(id)?.key === sum.key || this.cardActive.has(`${id}|${sum.key}`)) return;
     if (Date.now() - (this.cardFailed.get(id) ?? 0) < 3000) return;
@@ -773,8 +847,13 @@ export class Store {
 
   /** The card scrolled out of view before its turn. */
   unwantCard(id: string): void {
+    // a library row and a card may both want the same card: it is dropped from the queue only when nobody does
+    const n = (this.cardRefs.get(id) ?? 1) - 1;
+    if (n > 0) { this.cardRefs.set(id, n); return; }
+    this.cardRefs.delete(id);
     this.cardWanted.delete(id);
   }
+  private cardRefs = new Map<string, number>();
 
   private pumpCards(): void {
     // four at a time, the newest request first (what is in view now)
@@ -896,6 +975,7 @@ export class Store {
   /** Play a sound: rendered here with core, handed to Web Audio at the renderer's own rate. */
   async play(id: string): Promise<void> {
     const s = await this.docNow(id);
+    this.markSeen(id);
     if (s) await this.playDoc(id, s);
   }
 
@@ -928,7 +1008,7 @@ export class Store {
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = loop;
-      src.connect(this.ctx.destination);
+      src.connect(this.out());
       src.onended = () => {
         if (this.source === src) {
           this.source = null;

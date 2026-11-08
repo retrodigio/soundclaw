@@ -3,7 +3,7 @@
 // view (ui/dist, from `vite build`), the licence, and the licences of everything bundled.
 //   node scripts/build.ts        (pnpm build runs the UI build first)
 
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, sep } from 'node:path';
 import { build } from 'esbuild';
@@ -65,7 +65,10 @@ for (const dir of [...pkgDirs].sort()) {
   const file = ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'license', 'LICENCE'].map((f) => join(dir, f)).find(existsSync);
   notices.push(`${pkg.name}@${pkg.version} (${pkg.license ?? 'see below'})\n\n${file ? readFileSync(file, 'utf8').trim() : `licence: ${pkg.license}`}\n`);
 }
-writeFileSync(join(OUT, 'THIRD_PARTY_LICENSES.txt'), `SoundClaw bundles the following packages.\n\n${notices.join('\n' + '-'.repeat(72) + '\n\n')}`);
+// The dashboard's fonts (SIL Open Font License), bundled as woff2 in ui/: their licence texts sit next to the files.
+const FONTS = join(REPO, 'ui', 'src', 'studio', 'fonts');
+for (const f of readdirSync(FONTS).filter((x) => x.startsWith('OFL-')).sort()) notices.push(`font ${f.replace(/^OFL-|\.txt$/g, '')} (OFL-1.1)\n\n${readFileSync(join(FONTS, f), 'utf8').trim()}\n`);
+writeFileSync(join(OUT, 'THIRD_PARTY_LICENSES.txt'), `SoundClaw bundles the following packages and fonts.\n\n${notices.join('\n' + '-'.repeat(72) + '\n\n')}`);
 
 const kb = (f: string) => Math.round(readFileSync(f).length / 1024);
 console.log(`built ${relative(REPO, OUT)}${sep}soundclaw.js (${kb(join(OUT, 'soundclaw.js'))} KB, ${pkgDirs.size} third-party packages) and ui/`);

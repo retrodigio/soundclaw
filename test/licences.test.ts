@@ -26,3 +26,16 @@ it('every installed package has a permissive licence', () => {
   expect(n).toBeGreaterThan(20);
   expect(bad).toEqual([]);
 });
+
+// The dashboard bundles three fonts as woff2 in ui/. They are under the SIL Open Font License, which is not one of the
+// code licences above (nothing in node_modules is a font), so each font file must have its licence text next to it.
+it('every bundled font has the SIL OFL text next to it', () => {
+  const dir = join(import.meta.dirname, '..', 'ui', 'src', 'studio', 'fonts');
+  const fonts = readdirSync(dir).filter((f) => f.endsWith('.woff2'));
+  expect(fonts.sort()).toEqual(['inter.woff2', 'jetbrains-mono.woff2', 'space-grotesk.woff2']);
+  for (const f of fonts) {
+    const text = readFileSync(join(dir, `OFL-${f.replace(/\.woff2$/, '')}.txt`), 'utf8');
+    expect(text, f).toMatch(/SIL OPEN FONT LICENSE Version 1\.1/);
+    expect(text, f).toMatch(/Copyright/);
+  }
+});

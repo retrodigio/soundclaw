@@ -195,6 +195,52 @@ commands on the tape opens at once, because the page never does the work of a li
 - Samples are looked at by name, size and time stamp, and what was worked out about them (their
   hashes) is kept in `.cache/samples.json`, so starting on a hundred samples does not read them.
 
+## The dashboard: tokens, components and the shell
+
+The dashboard is one React page (`ui/src/studio/` holds the design system and the shell; the editors, set page, audition page and song editor
+it hosts are in `ui/src/`).
+
+**Tokens.** All colour, type, spacing, radius, density and motion values are CSS custom properties in `tokens.css`; no component carries a raw
+colour. `data-theme` (`dark`, the default, or `light`) and `data-density` (`compact`, 24 px rows and 28 px controls, or `comfortable`, 32 px) sit
+on `<html>`. Both are kept per browser in `localStorage` (wrapped in try/catch); with no saved theme the page follows `prefers-color-scheme`.
+`prefers-reduced-motion` turns every animation and transition into an instant change. Fonts are Inter, Space Grotesk and JetBrains Mono (SIL
+OFL), bundled as woff2 in `ui/src/studio/fonts/` with their licence texts, so the page works offline. Colour has roles: *ember* marks time and
+focus (playhead, selection, armed, primary), *violet* is the agent and *teal* is you (always with a shape and a word: agent marks are round with
+a spark, yours square with a person), and ✓ / ! / × / … are checks (a glyph, a word and a colour, never colour alone). In the light theme the
+badge text colours are darker than the role colours so they reach 4.5:1 on their tint.
+
+**Components** (`controls.tsx`, `layout.tsx`), each built once with its states and shown on the hidden `#/kit` page: knob, slider and fader (drag,
+Shift for tenths, double-click to reset, the wheel, ↑↓ and Home/End, click to type a value with units — `110ms`, `1.8k`, `C6`, `−3dB`, `+5st`,
+`18%` — see `values.ts`; `role="slider"` with `aria-valuetext`; a drag is a local draft and one commit), meter and loudness target, badge, author
+mark and chip, buttons, segmented control, toggle, tabs, chip, keycap, tooltip, popover, toast (polite, never takes focus), banner, resizable panel
+edge, the windowed list and the waveform view with check markers. A knob the agent set last shows a violet arc, a dot on the rim and a dashed
+ghost tick at the value before (props for now; the tape feeds them later). Meters and the playhead are drawn from `requestAnimationFrame`
+(the master meter reads an analyser on the page's output), never through React state.
+
+**The shell** (`Shell.tsx`). A 52 px transport on top; the library on the left (288 px, 220 to 420); tabs over the page; the agent rail on the
+right (320 px); the bottom panel under the page (220 px). Sizes and collapsed panels are kept per browser. ⌥1 to ⌥4 toggle the library, the
+page's inspector (none yet), the rail and the bottom panel (browsers keep ⌘1 to ⌘9 for their own tabs). Below 1180 px the rail is a 44 px strip
+that opens over the page, below 900 px the library is an overlay, and there is no horizontal scroll down to 360 px.
+
+- **Routes and tabs.** `#/` (Needs attention), `#/sound/<id>`, `#/set/<id>`, `#/song/<id>`, `#/audition[/<set>]`, `#/session`, `#/review/<request>`,
+  `#/sound/<id>/analysis`, `#/song/<id>/mixer` and the hidden `#/kit`. Opening an item opens or focuses its tab (× or a middle click closes it); the
+  tab list is kept per browser and project. Old links work.
+- **Library.** Tabs with counts (Sounds, Sets, Songs, Instruments, Samples), a filter field (`/`), chips, and a windowed list that holds only the rows
+  in view. The default order is needs attention (failing first, then not yet checked, then passing; most recently changed first within each); it is
+  worked out again when the list or the tape changes, and once the numbers have been still for a moment, so rows never jump as checks stream in.
+  Rows show a violet dot for sounds the agent changed that you have not played or opened (per browser; the row pulses once), the name, a mini
+  waveform from the server's card, integrated LUFS and the check glyph. ↑↓ moves the selection and previews it (off in the palette), Enter opens it,
+  Space plays it, R asks for changes.
+- **Centre page.** Needs attention as cards or rows; "Show all" brings back every sound, the sets and the songs.
+- **Agent rail.** Presence, the claimed request ("working on"), your requests with their state (sent, seen, claimed, working, blocked, ready for
+  review), the live feed built from the tape and the request events (a play button where a sound changed), and the ask field.
+- **Bottom panel.** Detail (the selected sound's waveform with check markers and its numbers), Mixer (a sound's loudness, a song's channels) and
+  History (the tape, for the focused item).
+- **Palette and shortcuts.** Every action is registered once (`registry.ts`) with an id, a label, a group and a shortcut; the palette (⌘K) searches
+  them and the project's items, `?` shows the shortcut sheet built from the registry, and one keyboard handler runs them. Shortcuts never fire while a
+  text field has focus, except Esc and ⌘K. Typed text that has two or more words and matches no action becomes "Ask the agent: … on <focused item>",
+  which writes a change request.
+
 ## Requests, await and presence
 
 People talk to the agent through **requests**. A request is a record in `requests.jsonl`

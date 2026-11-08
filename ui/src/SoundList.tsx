@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SoundSummary } from '@soundclaw/server/protocol';
 import { SoundCard } from './SoundCard.tsx';
+import { checkOf, useAttentionOrder } from './studio/shellData.ts';
 import type { Store } from './store.ts';
 
 export const PAGE = 48;
@@ -69,7 +70,7 @@ export function FilterBar({ filters, set, tags, prefix }: { filters: Filters; se
   );
 }
 
-export function SoundList({ store }: { store: Store }) {
+export function SoundList({ store, attentionOnly = false }: { store: Store; attentionOnly?: boolean }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const tagMap = useMemo(() => {
     const m = new Map<string, Set<string>>();
@@ -77,7 +78,8 @@ export function SoundList({ store }: { store: Store }) {
     return m;
   }, [store.requests]);
   const allTags = useMemo(() => [...new Set([...tagMap.values()].flatMap((x) => [...x]))].sort(), [tagMap]);
-  const filtered = store.index.filter((s) => matches(s, filters, (id) => [...(tagMap.get(id) ?? [])]));
+  const ordered = useAttentionOrder(store);
+  const filtered = ordered.filter((s) => (!attentionOnly || checkOf(s) === 'fail') && matches(s, filters, (id) => [...(tagMap.get(id) ?? [])]));
   const { shown, sentinel, more } = useMore(filtered.length, JSON.stringify(filters));
   const mineBy = useMemo(() => {
     const m = new Map<string, typeof store.requests>();
@@ -90,10 +92,10 @@ export function SoundList({ store }: { store: Store }) {
   const none: typeof store.requests = [];
   return (
     <>
-      {store.index.length > PAGE / 2 && (
+      {(store.index.length > PAGE / 2 || attentionOnly) && (
         <>
-          <FilterBar filters={filters} set={setFilters} tags={allTags} prefix="sounds" />
-          <div className="dim" data-testid="sounds-count">{filtered.length} of {store.index.length} sounds{store.index.some((s) => !s.info) ? ` · ${store.index.filter((s) => !s.info).length} not checked yet` : ''}</div>
+          {!attentionOnly && <FilterBar filters={filters} set={setFilters} tags={allTags} prefix="sounds" />}
+          <div className="dim" data-testid="sounds-count">{filtered.length} of {store.index.length} sounds{attentionOnly ? ' need attention' : ''}{store.index.some((s) => !s.info) ? ` · ${store.index.filter((s) => !s.info).length} not checked yet` : ''}</div>
         </>
       )}
       <section className="sounds" data-testid="sounds" aria-label="Sounds" data-count={filtered.length}>

@@ -219,7 +219,7 @@ function LayerStrips({ store, sound }: { store: Store; sound: LayeredSound }) {
       const g = c?.getContext('2d');
       if (!c || !g) return;
       g.clearRect(0, 0, c.width, c.height);
-      g.fillStyle = '#58c4a6';
+      g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--wave').trim() || '#888';
       const mid = c.height / 2;
       for (let x = 0; x < c.width; x++) g.fillRect(x, mid - p.max[x]! * mid, 1, Math.max(1, (p.max[x]! - p.min[x]!) * mid));
     });

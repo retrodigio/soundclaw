@@ -2,7 +2,8 @@
 // mute and solo for listening (nothing written), and the browser's samples equal to Node's.
 
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;

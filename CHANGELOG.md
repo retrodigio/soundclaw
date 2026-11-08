@@ -6,6 +6,20 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### The dashboard shell
+- **A new look and layout.** Design tokens (dark and light themes, compact and comfortable densities, reduced motion) and bundled fonts (Inter, Space
+  Grotesk and JetBrains Mono under the SIL OFL, with their licence texts), a component set (knob, slider, fader, meters, badges, authorship marks,
+  buttons, tabs, chips, popover, toast, banner, a windowed list, a waveform view), and a hidden `#/kit` page that shows every component in every state.
+- **The shell.** A transport bar, a library (tabs with counts, a filter, chips, needs-attention order, mini waveforms, loudness and the check glyph;
+  ↑↓ previews, Enter opens), tabs for open items with routes (old links still work), an agent rail (presence, your requests with their state, a live
+  feed), and a bottom panel (Detail, Mixer, History). Panels resize and collapse (⌥1 to ⌥4) and are kept per browser; narrow windows degrade without
+  horizontal scroll.
+- **Palette and shortcuts.** ⌘K opens a palette of every action and item; a sentence typed there becomes a change request on the focused item. `?` lists
+  the shortcuts. Shortcuts stay out of text fields. ⌘. switches the density; the palette switches the theme.
+- **Needs attention** is the home page, as cards or rows; "Show all" brings back every sound, the sets and the songs. The editors, set page,
+  audition page and song editor sit inside the shell, restyled with the tokens.
+- **The agent's changes** pulse once in the library and keep a "new" dot until you play or open them.
+
 ### The dashboard on large projects
 - **A project of 400 sounds, 100 samples and 3,000 commands opens at once.** The page used to fetch every sample and render and measure
   every sound on its own thread before it listed anything (a 60-sound slice took 88 s and froze the tab; the whole project never finished).

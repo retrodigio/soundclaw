@@ -2,7 +2,8 @@
 // the check badge following the class, and the CLI's measure and normalize agreeing with what the page shows.
 
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;

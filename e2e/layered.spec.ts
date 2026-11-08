@@ -5,7 +5,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures.ts';
 import { encodeWav, floatsFromBytes, samplesHash } from '../core/src/index.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
@@ -136,7 +137,7 @@ test('the layer list: mute, solo, reorder, gain and remove are one command each'
   const y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width * 0.5, y);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.2, y, { steps: 15 });
+  await page.mouse.move(box.x + box.width * 0.35, y, { steps: 15 });
   await page.mouse.up();
   await expect.poll(async () => (await texts(page)).length).toBe(base + 4);
   expect((await texts(page))[0]).toMatch(/^layer set impact 1 gain=0\.\d+$/);
