@@ -256,7 +256,7 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
   const revert = () => { if (selected && selPrev !== null) void now1(setCommand(id, { [selected]: selPrev } as Edits)); };
 
   return (
-    <section className="editor classic" data-testid="editor" data-sound={id} data-voice="classic">
+    <section className="editor classic" data-testid="editor" data-sound={id} data-voice="classic" data-draft={hasDraft} data-measured={!!data && !store.measure(sound).pending}>
       <header className="editor-head">
         <a href="#/" className="back" data-testid="back">← all sounds</a>
         <h2>{sound.id}</h2>

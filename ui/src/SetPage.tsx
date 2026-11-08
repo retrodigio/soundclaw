@@ -195,20 +195,19 @@ export function SetPage({ store, set }: { store: Store; set: SetDoc }) {
     <section className="setpage studio-page" data-testid="set-page" data-set={set.id}>
       <header className="set-head">
         <a href="#/" className="back" data-testid="back">← all sounds</a>
-        <h1 className="set-title">{set.id}</h1>
+        <h1 className="set-title" title={set.id}>{set.id.replace(/_/g, ' ')}</h1>
         <span className="set-chip" data-testid="set-info">set · {set.members.length} members{set.from ? ` from ${set.from}` : ''} · {set.target !== null ? `target ${lufsText(set.target)} LUFS` : set.class ? `loudness class "${set.class}" ${lufsText(target)} LUFS` : 'no loudness target'} · seed <b data-testid="set-seed">{set.seed}</b></span>
         {spread !== null && <Badge kind={spreadKind} testId="set-spread" title="How far apart the members' loudness is, against twice the class tolerance">spread {spread.toFixed(1)} LU, max {spreadMax}</Badge>}
         {measure && <span className="badge" data-kind={measure.result.pass ? 'pass' : 'fail'} data-testid="set-check" data-pass={measure.result.pass}><span className="mono" aria-hidden>{measure.result.pass ? '✓' : '×'}</span>set-spread</span>}
       </header>
-      <div className="set-tools">
+      <div className="set-tools" role="group" aria-label="Play and regenerate the set" data-testid="set-toolbar">
+        <Button testId="set-play-row" disabled={!members.length} onClick={() => { const r = grid.findIndex((x) => x.cells.some((c) => c?.key === at)); playRow(r + 1 || 1); }}>Play row <span className="kbd">1–{Math.min(9, members.length) || 1}</span></Button>
+        <Button testId="set-play-col" disabled={!members.length} onClick={() => { const r = grid.find((x) => x.cells.some((c) => c?.key === at)); playCol((r?.cells.findIndex((c) => c?.key === at) ?? 0) + 1); }}>Play column <span className="kbd">⇧1–{Math.min(9, cols.length)}</span></Button>
         <label className="dim small">gap <input type="number" min={0} max={5000} step={50} value={gap} data-testid="set-gap" className="num-input" onChange={(e) => setGap(Math.max(0, Number(e.target.value)))} /> ms</label>
         <button type="button" className="btn btn-primary" data-testid="set-play-all" data-playing={sequencing} disabled={!members.length} onClick={() => void (sequencing ? store.stopSequence() : store.playSequence(members.map((m) => m.s.id), gap))}>{sequencing ? '■ Stop' : '▶ Play in sequence'}</button>
         <Button testId="set-regen" disabled={!set.generated.length || !set.from} title="Make the generated members again from the source with a new seed" onClick={() => void store.run(`set regen ${set.id} seed=${randomSeed()}`)}>Regen with a new seed</Button>
         <a className="btn btn-secondary" href={`#/audition/${set.id}`} data-testid="set-audition">Audition</a>
         {message && <span className={`small ${message.error ? 'error' : 'dim'}`} role="status" data-testid="set-message">{message.text}</span>}
-        <span className="spacer" />
-        <Button testId="set-play-row" disabled={!members.length} onClick={() => { const r = grid.findIndex((x) => x.cells.some((c) => c?.key === at)); playRow(r + 1 || 1); }}>Play row <span className="kbd">1–{Math.min(9, members.length) || 1}</span></Button>
-        <Button testId="set-play-col" disabled={!members.length} onClick={() => { const r = grid.find((x) => x.cells.some((c) => c?.key === at)); playCol((r?.cells.findIndex((c) => c?.key === at) ?? 0) + 1); }}>Play column <span className="kbd">⇧1–{Math.min(9, cols.length)}</span></Button>
       </div>
       {!members.length && <p className="dim">This set has no members.</p>}
       {members.length > 0 && (

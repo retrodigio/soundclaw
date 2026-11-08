@@ -36,6 +36,32 @@ async function dragBy(page: Page, testid: string, dx: number, dy: number): Promi
   await page.mouse.up();
 }
 
+/**
+ * Drag an envelope corner by (dx, dy) in twenty explicit pointer steps. The editor measures the sound after every change, and the
+ * numbers and badges it shows when they arrive move the modules down; so the drag starts only once the editor has measured the
+ * sound as it now stands and the corner is the element under the pointer, and the button is released only once the corner's
+ * draft value has followed the pointer.
+ */
+async function dragCorner(page: Page, testid: string, dx: number, dy: number): Promise<void> {
+  await expect(page.getByTestId('editor')).toHaveAttribute('data-measured', 'true');
+  const el = page.getByTestId(testid);
+  await el.scrollIntoViewIfNeeded();
+  const before = await el.getAttribute('aria-valuenow');
+  let x = 0, y = 0;
+  await expect.poll(async () => {
+    const b = await el.boundingBox();
+    if (!b) return false;
+    x = b.x + b.width / 2;
+    y = b.y + b.height / 2;
+    return page.evaluate(([px, py, id]) => document.elementFromPoint(px as number, py as number)?.getAttribute('data-testid') === id, [x, y, testid]);
+  }).toBe(true);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) await page.mouse.move(x + (dx * i) / 20, y + (dy * i) / 20);
+  await expect(el).not.toHaveAttribute('aria-valuenow', before!);
+  await page.mouse.up();
+}
+
 test('a knob writes one sound set; a typed value takes its unit; the stored number is on the control', async ({ page }) => {
   await open(page);
   const n = (await rows(page)).length;
@@ -68,7 +94,7 @@ test('the drawn envelope writes the envelope parameters, one command per corner 
   await open(page);
   const n = (await rows(page)).length;
   const sustain0 = Number(await page.getByTestId('knob-sustain').getAttribute('aria-valuenow'));
-  await dragBy(page, 'env-corner-sustain', 40, 0);
+  await dragCorner(page, 'env-corner-sustain', 40, 0);
   await expect.poll(async () => (await rows(page)).length).toBe(n + 1);
   const first = (await rows(page))[0]!;
   expect(first.by).toBe('human:ana');
@@ -77,18 +103,19 @@ test('the drawn envelope writes the envelope parameters, one command per corner 
   await expect(page.getByTestId('knob-sustain')).toHaveAttribute('aria-valuenow', first.text.split('=')[1]!);
   // the punch corner moves up and down
   const punch0 = Number(await page.getByTestId('knob-punch').getAttribute('aria-valuenow'));
-  await dragBy(page, 'env-corner-punch', 0, -14);
+  await dragCorner(page, 'env-corner-punch', 0, -14);
   await expect.poll(async () => (await rows(page)).length).toBe(n + 2);
   expect((await rows(page))[0]!.text).toMatch(/^sound set beep punch=0\.\d+$/);
   expect(Number((await rows(page))[0]!.text.split('=')[1])).toBeGreaterThan(punch0);
   // the end of the decay and the end of the attack
-  await dragBy(page, 'env-corner-decay', -30, 0);
+  await dragCorner(page, 'env-corner-decay', -30, 0);
   await expect.poll(async () => (await rows(page)).length).toBe(n + 3);
   expect((await rows(page))[0]!.text).toMatch(/^sound set beep decay=0\.\d+$/);
-  await dragBy(page, 'env-corner-attack', 10, 0);
+  await dragCorner(page, 'env-corner-attack', 10, 0);
   await expect.poll(async () => (await rows(page)).length).toBe(n + 4);
   expect((await rows(page))[0]!.text).toMatch(/^sound set beep attack=0\.\d+$/);
-  await page.waitForTimeout(1000);
+  // nothing else is waiting to be written: no draft is left, and the history holds exactly the four commands
+  await expect(page.getByTestId('editor')).toHaveAttribute('data-draft', 'false');
   expect(await rows(page)).toHaveLength(n + 4);
 });
 
