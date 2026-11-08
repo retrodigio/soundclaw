@@ -357,6 +357,169 @@ test('the bottom panel: Detail shows the selected sound with its numbers, Histor
   await expect(page.getByTestId('mixer-lite')).toBeVisible();
 });
 
+test('the needs-attention card: name and voice, one 54 px panel, a badge per failing check, who changed it; actions on hover; an overflow menu', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, '', `${SETUP}; sound new zap voice=classic preset=laser seed=1`);
+  const card = page.getByTestId('card-zap');
+  await expect(card).toBeVisible();
+  await expect(page.getByTestId('check-zap')).toHaveAttribute('data-pass', 'false', { timeout: 20_000 });
+  // four columns at 1440 with both rails open; every card is one height
+  await expect(page.getByTestId('need-grid')).toHaveAttribute('data-cols', '4');
+  expect((await card.boundingBox())!.height).toBe(168);
+  await expect(card.locator('.nc-name')).toHaveText('zap');
+  await expect(card.locator('.nc-voice')).toHaveText('classic');
+  // one panel of 54 px holds the spectrogram and the waveform drawn over it
+  const panel = (await card.locator('.nc-panel').boundingBox())!;
+  expect(panel.height).toBe(54);
+  for (const id of ['spec-zap', 'wave-zap']) {
+    const b = (await card.getByTestId(id).boundingBox())!;
+    expect(Math.abs(b.x - panel.x)).toBeLessThan(1);
+    expect(Math.abs(b.width - panel.width)).toBeLessThan(1);
+    expect(Math.abs(b.height - 54)).toBeLessThan(1);
+  }
+  // no parameter dump, no two-row button block
+  await expect(card.locator('[data-testid^="param"]')).toHaveCount(0);
+  // a badge per failing check (at most two), a time only where the check reports one
+  const failing = (await page.getByTestId('check-zap').getAttribute('data-failing'))!.split(',');
+  await expect(page.getByTestId('check-zap').locator('.badge')).toHaveCount(Math.min(2, failing.length));
+  const marks = await card.locator('.nc-mark').count();
+  const timed = await page.getByTestId('check-zap').locator('.badge', { hasText: /\d\.\d\d s/ }).count();
+  expect(marks).toBe(timed);
+  // who changed it last
+  await expect(card.locator('.nc-author')).toContainText('agent');
+  await expect(card.locator('.nc-author .author-mark[data-by=agent]')).toBeVisible();
+  // actions: hidden at rest, shown on hover and on keyboard focus
+  const opacity = () => card.locator('.nc-actions').evaluate((e) => getComputedStyle(e).opacity);
+  await page.mouse.move(5, 5);
+  expect(await opacity()).toBe('0');
+  await card.hover();
+  await expect.poll(opacity).toBe('1');
+  await page.mouse.move(5, 5);
+  await expect.poll(opacity).toBe('0');
+  await card.getByTestId('play-zap').focus();
+  await expect.poll(opacity).toBe('1');
+  // the selected card has the ember border
+  await card.click({ position: { x: 20, y: 30 } });
+  await expect(card).toHaveAttribute('data-selected', 'true');
+  const ember = await page.evaluate(() => { const d = document.createElement('i'); d.style.color = 'var(--ember)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; });
+  expect(await card.evaluate((e) => getComputedStyle(e).borderColor)).toBe(ember);
+  await expect(page.getByTestId('detail')).toHaveAttribute('data-sound', 'zap');
+  // the overflow menu holds Feedback, Edit and the exports
+  await card.hover();
+  await card.getByTestId('more-zap').click();
+  for (const id of ['feedback-toggle-zap', 'edit-zap', 'export-wav-zap', 'export-patch-zap', 'export-csv-zap']) await expect(page.getByTestId(id)).toBeVisible();
+  await expect(page.getByTestId('edit-zap')).toHaveAttribute('href', '#/sound/zap');
+  await page.getByTestId('feedback-toggle-zap').click();
+  await expect(page.getByTestId('feedback-zap')).toBeVisible();
+  // the request line is one line, and the card keeps its height
+  await card.getByTestId('reject-zap').click();
+  await page.getByTestId('reject-text-zap').fill('shorter please');
+  await page.getByTestId('reject-send-zap').click();
+  await expect(page.getByTestId('request-r1')).toContainText('shorter please');
+  // (nobody is listening yet, so the card says so under itself; an agent that has seen it turns that into the one line)
+  await agent.cli(['work', agent.dir, 'list']);
+  await expect(page.getByTestId('request-r1')).toContainText('seen by');
+  expect((await page.getByTestId('request-r1').boundingBox())!.height).toBeLessThan(20);
+  expect((await card.boundingBox())!.height).toBe(168);
+  // the exports download
+  const dl = page.waitForEvent('download');
+  await card.hover();
+  await card.getByTestId('more-zap').click();
+  await page.getByTestId('export-wav-zap').click();
+  expect((await dl).suggestedFilename()).toBe('zap.wav');
+});
+
+test('the spectrogram is the token ramp (ground, ember at rising opacity, a pale highlight) in both themes, not the heat map', async ({ page }) => {
+  await open(page, '', `${SETUP}; sound new zap voice=classic preset=laser seed=1`);
+  const sample = async () => page.getByTestId('spec-zap').evaluate((c: HTMLCanvasElement) => {
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    const set = new Set<number>();
+    for (let i = 0; i < d.length; i += 4) set.add((d[i]! << 16) | (d[i + 1]! << 8) | d[i + 2]!);
+    return [...set].map((v) => [v >> 16, (v >> 8) & 255, v & 255]);
+  });
+  const token = (n: string) => page.evaluate((k) => { const c = document.createElement('canvas'); c.width = c.height = 1; const g = c.getContext('2d')!; g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue(k).trim(); g.fillRect(0, 0, 1, 1); return Array.from(g.getImageData(0, 0, 1, 1).data.slice(0, 3)); }, n);
+  await expect(page.getByTestId('spec-zap')).toHaveAttribute('data-frames', /\d+/, { timeout: 20_000 });
+  for (const theme of ['dark', 'light'] as const) {
+    if (theme === 'light') {
+      await page.keyboard.press('Control+k');
+      await page.getByTestId('palette-input').fill('theme');
+      await page.keyboard.press('Enter');
+    }
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+    const ground = await token('--ground');
+    const ember = await token('--ember');
+    const dist = (a: number[], b: number[]) => Math.hypot(...a.map((v, i) => v - b[i]!));
+    await expect.poll(async () => {
+      const px = await sample();
+      const span = dist(ground, ember);
+      // some cells sit near the ground, and the ramp rises towards the ember
+      return Math.min(...px.map((p) => dist(p, ground))) < span * 0.4 && Math.max(...px.map((p) => dist(p, ground))) > span * 0.5;
+    }, { message: `${theme}: the ramp runs from the ground to the ember` }).toBe(true);
+  }
+  // the heat map's purple and yellow are gone: every colour lies on the ember ramp (red at least as high as blue, blue never above green by much)
+  await page.keyboard.press('Control+k');
+  await page.getByTestId('palette-input').fill('theme');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark');
+  await page.waitForTimeout(200);
+  const hue = await page.getByTestId('spec-zap').evaluate((c: HTMLCanvasElement) => {
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    let off = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 2]! > d[i]! + 12) off++;
+    return off;
+  });
+  expect(hue).toBe(0);
+});
+
+test('the presence pill: the author mark, the agent name and the state, then the request text, at most 260 px; your name is a chip', async ({ page }) => {
+  await open(page);
+  await page.getByTestId('lib-row-soft').click();
+  await page.getByTestId('ask-input').fill('make the footsteps a great deal softer and much less samey, please');
+  await page.getByTestId('ask-input').press('Enter');
+  await agent.cli(['work', agent.dir, 'claim', 'r1']);
+  const pill = page.getByTestId('listener-chip');
+  await expect(pill).toHaveAttribute('data-state', 'working');
+  await expect(pill.locator('.author-mark[data-by=agent]')).toBeVisible();
+  await expect(pill).toContainText('claude');
+  await expect(pill).toContainText('working');
+  await expect(pill).not.toContainText('agent:claude');
+  await expect(pill).not.toContainText('agent \u00B7');
+  expect((await pill.boundingBox())!.width).toBeLessThanOrEqual(262);
+  await expect(pill).toHaveAttribute('title', /make the footsteps a great deal softer/);
+  // your name: a chip, a field after a click
+  await expect(page.getByTestId('author')).toHaveCount(0);
+  await expect(page.getByTestId('author-chip')).toContainText('ana');
+  expect((await page.getByTestId('author-chip').boundingBox())!.height).toBeLessThanOrEqual(26);
+  await page.getByTestId('author-chip').click();
+  await expect(page.getByTestId('author')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('author-chip')).toBeVisible();
+});
+
+test('check markers: only the checks that report a time are drawn on the waveform; clip and loudness are badges only', async ({ page }) => {
+  await open(page, '', `${SETUP}; sound new zap voice=classic preset=laser seed=1`);
+  await expect(page.getByTestId('lib-row-zap')).toHaveAttribute('data-check', 'fail', { timeout: 20_000 });
+  await page.getByTestId('lib-row-zap').click();
+  await expect(page.getByTestId('detail')).toHaveAttribute('data-sound', 'zap');
+  const failing = (await page.getByTestId('lib-row-zap').evaluate(() => (window as unknown as { soundclaw: { summary(id: string): { info?: { failing: string[] } } } }).soundclaw.summary('zap').info!.failing));
+  expect(failing.some((n) => ['clip', 'loudness'].includes(n))).toBe(true);
+  await expect(page.getByTestId('detail-wave')).toHaveAttribute('aria-label', /Waveform of zap/);
+  await expect.poll(async () => (await page.getByTestId('detail-wave').getAttribute('aria-label')) ?? '').not.toMatch(/\b(clip|loudness|dc)\b/);
+  const label = (await page.getByTestId('detail-wave').getAttribute('aria-label'))!;
+  const flags = await page.getByTestId('detail-wave').locator('.wv-flag').allTextContents();
+  for (const f of flags) expect(f).toMatch(/^[\u00D7!] (click|tail|harsh) \d/);
+  expect(label.includes('at 0.000 s') && !/click|tail|harsh/.test(label)).toBe(false);
+  // the failing checks still show as badges in the title row
+  await expect(page.getByTestId('detail').locator('.badge').first()).toContainText(/clip|loudness|click|tail|harsh|dc/);
+});
+
+test('a library row shows the id (a sound has no title yet) with what it is made of as the tooltip', async ({ page }) => {
+  await open(page);
+  const row = page.getByTestId('lib-row-soft').locator('.lib-name');
+  await expect(row).toHaveText('soft');
+  await expect(row).toHaveAttribute('title', /^soft: .*layer/);
+});
+
 for (const [w, h] of [[1024, 768], [760, 900]] as const) {
   test(`narrow window ${w}: no horizontal scroll, and the panels degrade`, async ({ page }) => {
     await page.setViewportSize({ width: w, height: h });

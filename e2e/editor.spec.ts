@@ -43,6 +43,7 @@ test('the editor has all 25 parameters in sfxr\'s groups, each with its value an
   agent = await startAgent();
   await agent.cli(['run', agent.dir, '-e', SETUP]);
   await page.goto(`${agent.url}&name=ana`);
+  await page.getByTestId('more-beep').click();
   await page.getByTestId('edit-beep').click();
   await expect(page.getByTestId('editor')).toHaveAttribute('data-sound', 'beep');
   expect(new URL(page.url()).hash).toBe('#/sound/beep');
@@ -219,6 +220,7 @@ test('feedback tags become a request with the tags, shown on the card and delive
   await page.goto(`${agent.url}&name=ana`);
   const wait = agent.background(['await', agent.dir, '--timeout', '30']);
   await expect(page.getByTestId('listener-chip')).toHaveAttribute('data-listening', 'true');
+  await page.getByTestId('more-beep').click();
   await page.getByTestId('feedback-toggle-beep').click();
   await page.getByTestId('tag-beep-too-loud').click();
   await page.getByTestId('tag-beep-too-harsh').click();
@@ -238,6 +240,7 @@ test('feedback tags become a request with the tags, shown on the card and delive
   const got = await second.done;
   expect(got.out).toMatch(/request r2 \(beep\) from human:ana at \S+ \[too similar to another sound\]: "too similar to boop"/);
   await expect(page.getByTestId('request-other-r2')).toHaveText('like boop');
+  await page.getByTestId('more-boop').click();
   await page.getByTestId('feedback-toggle-boop').click();
   await page.getByTestId('tag-boop-good').click();
   await page.getByTestId('feedback-send-boop').click();
@@ -273,6 +276,7 @@ test('the exports download the same bytes the CLI writes: WAV, patch text and a 
 test('a page with no name writes as human:owner', async ({ page }) => {
   await open(page);
   await page.goto(agent.url.replace(/&name=\w+/, '') + '#/sound/beep');
+  await page.getByTestId('author-chip').click();
   await expect(page.getByTestId('author')).toHaveValue('owner');
   await page.getByTestId('wave-saw').click();
   await expect.poll(async () => (await rows(page))[0]).toMatchObject({ by: 'human:owner', text: 'sound set beep wave=saw' });

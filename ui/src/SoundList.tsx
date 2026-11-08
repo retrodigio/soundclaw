@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SoundSummary } from '@soundclaw/server/protocol';
-import { SoundCard } from './SoundCard.tsx';
+import { CardGrid } from './studio/NeedCard.tsx';
 import { checkOf, useAttentionOrder } from './studio/shellData.ts';
 import type { Store } from './store.ts';
 
@@ -80,7 +80,6 @@ export function SoundList({ store, attentionOnly = false }: { store: Store; atte
   const allTags = useMemo(() => [...new Set([...tagMap.values()].flatMap((x) => [...x]))].sort(), [tagMap]);
   const ordered = useAttentionOrder(store);
   const filtered = ordered.filter((s) => (!attentionOnly || checkOf(s) === 'fail') && matches(s, filters, (id) => [...(tagMap.get(id) ?? [])]));
-  const { shown, sentinel, more } = useMore(filtered.length, JSON.stringify(filters));
   const mineBy = useMemo(() => {
     const m = new Map<string, typeof store.requests>();
     for (const q of store.requests) { const x = m.get(q.sound); if (x) x.push(q); else m.set(q.sound, [q]); }
@@ -89,7 +88,6 @@ export function SoundList({ store, attentionOnly = false }: { store: Store; atte
   const playsBy = new Map<string, number>();
   for (const p of store.played) if (!p.slot) playsBy.set(p.id, (playsBy.get(p.id) ?? 0) + 1);
   const presence = JSON.stringify(store.presence);
-  const none: typeof store.requests = [];
   return (
     <>
       {(store.index.length > PAGE / 2 || attentionOnly) && (
@@ -98,12 +96,9 @@ export function SoundList({ store, attentionOnly = false }: { store: Store; atte
           <div className="dim" data-testid="sounds-count">{filtered.length} of {store.index.length} sounds{attentionOnly ? ' need attention' : ''}{store.index.some((s) => !s.info) ? ` · ${store.index.filter((s) => !s.info).length} not checked yet` : ''}</div>
         </>
       )}
-      <section className="sounds" data-testid="sounds" aria-label="Sounds" data-count={filtered.length}>
-        {filtered.slice(0, shown).map((s) => (
-          <SoundCard key={s.id} store={store} sound={s} doc={store.sounds.find((x) => x.id === s.id)} playing={store.playing === s.id} plays={playsBy.get(s.id) ?? 0} mine={mineBy.get(s.id) ?? none} presence={presence} />
-        ))}
+      <section className="sounds need" data-testid="sounds" aria-label="Sounds" data-count={filtered.length}>
+        <CardGrid store={store} sounds={filtered} mineBy={mineBy} playsBy={playsBy} presence={presence} />
       </section>
-      {shown < filtered.length && <div ref={sentinel} className="more" data-testid="sounds-more"><button onClick={more}>Show {Math.min(PAGE, filtered.length - shown)} more</button></div>}
       {filtered.length === 0 && store.index.length > 0 && <p className="dim" data-testid="sounds-none">No sounds match.</p>}
     </>
   );

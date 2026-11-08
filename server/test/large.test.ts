@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { checksPass } from '@soundclaw/core';
+import { TIMED_CHECKS, checksPass } from '@soundclaw/core';
 import { LEAN_AT, Writer, loadProject, type ServerMessage } from '../src/index.ts';
 import { startWatchServer, type WatchServer } from '../src/http.ts';
 import { buildLargeProject } from '../../test/support/large-project.ts';
@@ -89,6 +89,14 @@ describe('cards', () => {
     expect(card.pass).toBe(checksPass(m.checks));
     expect(card.failing).toEqual(m.checks.filter((c) => !c.pass).map((c) => c.name));
     expect(card.duration).toBeCloseTo(m.analysis.duration, 6);
+    // one issue per failing check; only the checks that report a time carry one (clip, loudness and dc are whole-sound results)
+    expect(card.issues!.map((i) => i.name)).toEqual(card.failing);
+    for (const i of card.issues!) {
+      const check = m.checks.find((c) => c.name === i.name)!;
+      expect(i.value).toBe(check.value);
+      if (TIMED_CHECKS.includes(i.name as never) && check.ranges.length) expect(i.at).toBeCloseTo(check.ranges[0]!.from, 3);
+      else expect(i.at).toBeUndefined();
+    }
     expect(card.wave.min.length).toBe(240);
     expect(card.wave.max.length).toBe(240);
     expect(card.peak).toBeGreaterThan(0);

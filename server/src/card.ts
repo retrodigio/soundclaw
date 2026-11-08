@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { threadId } from 'node:worker_threads';
-import { SPEC_RANGE_DB, analyze, checkSummary, checksPass, fullScaleOf, joinChannels, levels, measuredChannels, melSpectrogram, mixdown, peaks, runChecks, samplesHash, specMax, type Sound, type Style } from '@soundclaw/core';
+import { SPEC_RANGE_DB, analyze, checkSummary, checksPass, fullScaleOf, joinChannels, levels, measuredChannels, melSpectrogram, mixdown, peaks, runChecks, samplesHash, specMax, TIMED_CHECKS, type Sound, type Style } from '@soundclaw/core';
 import type { CardInfo, CardLite } from './protocol.ts';
 
 /** The spectrogram thumbnail's size (the page draws it as it is). */
@@ -46,13 +46,14 @@ export function buildCard(s: Sound, channels: Float32Array[], o: { key: string; 
     pass: checksPass(checks),
     failing,
     summary: checkSummary(checks),
+    issues: checks.filter((k) => !k.pass).map((k) => ({ name: k.name, value: k.value, ...(TIMED_CHECKS.includes(k.name) && k.ranges.length ? { at: round3(k.ranges[0]!.from) } : {}) })),
     peak: levels(x).peak,
     wave: { min: Array.from(p.min, round3), max: Array.from(p.max, round3) },
     spec: { w: CARD_W, h: CARD_H, frames: spec.db.length, bands, data: Buffer.from(bytes).toString('base64') },
   };
 }
 
-export const liteOf = (c: CardInfo): CardLite => ({ hash: c.hash, duration: c.duration, lufs: c.lufs, truePeakDb: c.truePeakDb, pass: c.pass, failing: c.failing, summary: c.summary });
+export const liteOf = (c: CardInfo): CardLite => ({ hash: c.hash, duration: c.duration, lufs: c.lufs, truePeakDb: c.truePeakDb, pass: c.pass, failing: c.failing, summary: c.summary, ...(c.issues ? { issues: c.issues } : {}) });
 
 /** The thumbnail cache on disk: a full card and a small one (what the list needs) for each key. */
 export class CardFiles {

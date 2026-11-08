@@ -18,6 +18,9 @@ All notable changes to SoundClaw are listed here. The format follows
   the shortcuts. Shortcuts stay out of text fields. ⌘. switches the density; the palette switches the theme.
 - **Needs attention** is the home page, as cards or rows; "Show all" brings back every sound, the sets and the songs. The editors, set page,
   audition page and song editor sit inside the shell, restyled with the tokens.
+- **Cards.** The needs-attention card is one compact, fixed-height card (waveform over spectrogram, a badge per failing check with its time when it
+  has one, who changed it last; actions on hover; an overflow menu), in a windowed grid. Cards from the server now say what each failing check measured
+  and when (`issues`). Spectrograms use the theme's ember ramp instead of a heat map.
 - **The agent's changes** pulse once in the library and keep a "new" dot until you play or open them.
 
 ### The dashboard on large projects

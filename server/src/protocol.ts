@@ -19,6 +19,8 @@ export interface CardLite {
   failing: string[];
   /** The one-line checks summary (the badge's tooltip). */
   summary: string;
+  /** One entry per failing check: what was measured as text, and when in the sound (seconds) for the checks that report a time. Absent in cards written before it existed. */
+  issues?: { name: string; value: string; at?: number }[];
 }
 
 /** A card's thumbnails: the waveform's peaks per pixel column and the spectrogram as one byte per cell (0 to 255 over its 80 dB). */

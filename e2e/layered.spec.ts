@@ -151,8 +151,7 @@ test('the layer list: mute, solo, reorder, gain and remove are one command each'
   await expect(page.locator('[data-testid^=layer-row-]')).toHaveCount(3);
   // the card on the list shows the layers
   await page.getByTestId('back').click();
-  await expect(page.getByTestId('params-impact')).toHaveAttribute('data-voice', 'layered');
-  await expect(page.getByTestId('layer-impact-1')).toContainText('1 ');
+  await expect(page.getByTestId('card-impact').locator('.nc-voice')).toHaveText('layered');
 });
 
 const WAVES = ['sine', 'square', 'saw', 'triangle', 'pulse', 'wavetable', 'white', 'metal'];

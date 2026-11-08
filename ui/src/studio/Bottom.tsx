@@ -3,7 +3,7 @@
 // filtered to the focused item).
 
 import { useEffect, useMemo, useState } from 'react';
-import { activeGroups, type Sound, type TapeEntry } from '@soundclaw/core';
+import { TIMED_CHECKS, activeGroups, type Sound, type TapeEntry } from '@soundclaw/core';
 import { useCard } from '../CardImages.tsx';
 import type { Measured, Store } from '../store.ts';
 import { Badge, LoudnessTarget, Tabs, type CheckKind } from './controls.tsx';
@@ -49,7 +49,7 @@ function SoundDetail({ store, id }: { store: Store; id: string }) {
   const info = sum.info ?? card;
   const a = measured?.analysis;
   const rule = doc ? store.rule(doc) : null;
-  const markers: WaveMarker[] = measured ? measured.checks.filter((c) => !c.pass).flatMap((c) => (c.ranges.length ? c.ranges.map((r) => ({ t: r.from, end: r.to > r.from ? r.to : undefined, kind: 'fail' as const, label: `${c.name} ${r.from.toFixed(3)} s` })) : [])) : [];
+  const markers: WaveMarker[] = measured ? measured.checks.filter((c) => !c.pass && TIMED_CHECKS.includes(c.name)).flatMap((c) => (c.ranges.length ? c.ranges.map((r) => ({ t: r.from, end: r.to > r.from ? r.to : undefined, kind: 'fail' as const, label: `${c.name} ${r.from.toFixed(3)} s` })) : [])) : [];
   const failing = info?.failing ?? [];
   const k = checkOf(sum);
   const duration = info?.duration ?? a?.duration ?? 0;

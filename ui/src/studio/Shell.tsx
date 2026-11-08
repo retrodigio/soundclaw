@@ -10,6 +10,7 @@ import { Banner, ToastHost, useToast } from './controls.tsx';
 import { Chevron, Close, KindIcon, Spark, type TabKind } from './icons.tsx';
 import { Library } from './Library.tsx';
 import { Resizer } from './layout.tsx';
+import { SelectionCtx } from './NeedCard.tsx';
 import { Page } from './pages.tsx';
 import { Palette, ShortcutSheet } from './Palette.tsx';
 import { LIMITS, loadTabs, saveTabs, setPanels, toggleDensity, toggleTheme, setPrefs, usePrefs, effectiveTheme } from './prefs.ts';
@@ -213,7 +214,9 @@ function ShellInner({ store }: { store: Store }) {
           <TabBar store={store} tabs={tabs} current={hash} onClose={closeTab} />
           <div className="page" role="main" id="page" data-testid="page">
             {store.error && <div className="error banner" data-testid="error" role="alert">{store.error} <button className="link" onClick={() => { store.error = null; store.changed(); }}>dismiss</button></div>}
-            <Page store={store} onPlay={(id) => void store.play(id)} onOpen={openSound} />
+            <SelectionCtx.Provider value={{ selected, select: setSelected, ask: (f) => { setSelected(f); focusAsk(); } }}>
+              <Page store={store} onPlay={(id) => void store.play(id)} onOpen={openSound} />
+            </SelectionCtx.Provider>
           </div>
           {p.bottomOpen && (
             <section className="bottom" aria-label="Bottom panel" data-testid="bottom">

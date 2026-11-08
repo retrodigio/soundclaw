@@ -7,6 +7,9 @@ import type { TapeEntry, WorkRequest } from '@soundclaw/core';
 import type { Store, Route } from '../store.ts';
 import type { CheckKind } from './controls.tsx';
 
+/** What a library row calls a sound. A sound has no title of its own yet (the list's `label` says what it is made of), so this is its id, the name every command uses; the label is the row's tooltip. */
+export const rowName = (s: SoundSummary): string => s.id;
+
 /** The worst check of a sound from what the list knows: × fails, … is not checked yet, ✓ passes. (The list's numbers hold pass or fail only.) */
 export function checkOf(s: SoundSummary): CheckKind {
   return s.info ? (s.info.pass ? 'pass' : 'fail') : 'checking';

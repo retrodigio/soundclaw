@@ -7,28 +7,32 @@ import type { WorkRequest } from '@soundclaw/core';
 import { RequestRow } from '../SoundCard.tsx';
 import { useNow } from '../Listening.tsx';
 import type { Store } from '../store.ts';
-import { AuthorDot, Kbd } from './controls.tsx';
+import { AuthorDot, AuthorMark, Kbd } from './controls.tsx';
 import { Play, Spark } from './icons.tsx';
 import { ago, buildFeed, requestState, type Focus } from './shellData.ts';
 
-/** The presence in one line: listening, working (with what on), or nobody. */
-export function presenceOf(store: Store): { state: 'off' | 'listening' | 'working'; text: string } {
+/** The agent's short name: `agent:claude` is `claude`. */
+const shortName = (by: string): string => by.replace(/^agent:/, '');
+
+/** The presence: who, the state, and what the agent is working on. */
+export function presenceOf(store: Store): { state: 'off' | 'listening' | 'working'; name: string; word: string; text: string } {
   const p = store.presence;
   const claimed = store.requests.find((q) => q.state === 'claimed');
-  if (claimed) return { state: 'working', text: `${claimed.claimedBy ?? 'agent'} · ${claimed.latest ?? claimed.note}`.slice(0, 60) };
-  if (p?.listening) return { state: 'listening', text: `${p.waiters[0]?.by ?? p.agents[0]?.by ?? 'agent'} is listening` };
-  return { state: 'off', text: 'no agent is listening' };
+  if (claimed) return { state: 'working', name: shortName(claimed.claimedBy ?? 'agent'), word: 'working', text: claimed.latest ?? claimed.note };
+  if (p?.listening) return { state: 'listening', name: shortName(p.waiters[0]?.by ?? p.agents[0]?.by ?? 'agent'), word: 'listening', text: '' };
+  return { state: 'off', name: '', word: 'no agent is listening', text: '' };
 }
 
 export function PresencePill({ store }: { store: Store }) {
   const p = store.presence;
   if (!p) return null;
   const pr = presenceOf(store);
+  const full = pr.state === 'off' ? pr.word : `${pr.name} ${pr.word}${pr.text ? `: ${pr.text}` : ''}`;
   return (
-    <span className={`presence presence-${pr.state}`} data-testid="listener-chip" data-listening={p.listening} data-state={pr.state}
-      title={p.listening ? 'An agent is waiting for requests or took a request recently' : 'Requests you file now wait until an agent is started on this project'}>
-      {pr.state === 'working' ? <Spark size={12} /> : <span className="presence-dot" aria-hidden />}
-      {pr.state === 'working' ? `agent · ${pr.text}` : pr.state === 'listening' ? `${pr.text}` : pr.text}
+    <span className={`presence presence-${pr.state}`} data-testid="listener-chip" data-listening={p.listening} data-state={pr.state} title={pr.text ? full : p.listening ? 'An agent is waiting for requests or took a request recently' : 'Requests you file now wait until an agent is started on this project'}>
+      {pr.state === 'off' ? <span className="presence-dot" aria-hidden /> : <AuthorMark by="agent" size={14} />}
+      {pr.state === 'off' ? pr.word : <><b className="presence-name">{pr.name}</b><span className="presence-word">{pr.word}</span></>}
+      {pr.text && <span className="presence-text">{pr.text}</span>}
     </span>
   );
 }

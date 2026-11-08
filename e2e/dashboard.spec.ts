@@ -43,8 +43,8 @@ test('lists the sounds as cards with waveforms and the history, and follows the 
   const beep = page.getByTestId('card-beep');
   await expect(page.getByTestId('sounds').locator('article')).toHaveCount(2);
   await expect(beep).toHaveAttribute('data-status', 'draft');
-  await expect(page.getByTestId('params-beep')).toHaveText('880 Hz0.3 svolume 0.4');
-  await expect(page.getByTestId('params-boop')).toContainText('220 Hz');
+  // the card names the voice; the parameters themselves are in the editor
+  await expect(beep).toContainText('tone');
   // The thumbnail is drawn: a 0.4 peak fills 40% of the height, where silence would be a line.
   await expect(page.getByTestId('wave-beep')).toHaveAttribute('data-peak', '0.4000');
   const rows = await page.getByTestId('wave-beep').evaluate((c: HTMLCanvasElement) => {
@@ -57,7 +57,7 @@ test('lists the sounds as cards with waveforms and the history, and follows the 
   expect(rows).toBeLessThan(26);
   // The card shows the same 12 digits as the CLI's result.
   const hash = samplesHash(renderSound({ ...newSound('beep'), frequency: 880, duration: 0.3, volume: 0.4 }));
-  await expect(beep.getByText(`samples ${hash.slice(0, 12)}`)).toBeVisible();
+  await expect(beep).toHaveAttribute('data-hash', new RegExp(`^${hash.slice(0, 12)}`));
   expect(await commands(page)).toEqual([
     { seq: 4, by: 'agent:claude', text: 'sound set boop frequency=220', undone: false },
     { seq: 3, by: 'agent:claude', text: 'sound new boop', undone: false },
@@ -67,7 +67,7 @@ test('lists the sounds as cards with waveforms and the history, and follows the 
 
   // Live: a change by the agent updates the card; an undo removes the sound and strikes the history.
   await agent.cli(['run', agent.dir, '-e', 'sound set boop frequency=330']);
-  await expect(page.getByTestId('params-boop')).toContainText('330 Hz');
+  await expect(page.getByTestId('feed').getByTestId('feed-item').first()).toContainText('sound set boop frequency=330');
   await agent.cli(['run', agent.dir, '-e', 'sound new bop']);
   await expect(page.getByTestId('card-bop')).toBeVisible();
   await agent.cli(['run', agent.dir, '-e', 'undo']);
@@ -143,7 +143,7 @@ test('Ask for changes reaches a waiting agent; the card follows claim, progress,
   // The agent waits in the background; the page shows it is listening.
   const waiting = agent.background(['await', agent.dir, '--timeout', '60']);
   await expect(page.getByTestId('listener-chip')).toHaveAttribute('data-listening', 'true');
-  await expect(page.getByTestId('listener-chip')).toContainText('agent:claude is listening');
+  await expect(page.getByTestId('listener-chip')).toContainText('claude');
 
   await card.getByTestId('reject-beep').click();
   await expect(card.getByTestId('reject-send-beep')).toBeDisabled();
@@ -179,7 +179,7 @@ test('Ask for changes reaches a waiting agent; the card follows claim, progress,
   expect(second.out).toContain('an octave');
   expect((await agent.cli(['work', agent.dir, 'claim', 'r1'])).out).toContain('The person answered: "an octave"');
   expect((await agent.cli(['run', agent.dir, '-e', 'sound set beep freq=0.3'])).code).toBe(0);
-  await expect(page.getByTestId('param-beep-freq')).toHaveText('freq 0.3');
+  await expect(page.getByTestId('feed').getByTestId('feed-item').first()).toContainText('sound set beep freq=0.3');
   await agent.cli(['work', agent.dir, 'done', 'freq 0.5 → 0.3']);
   await expect(card.getByTestId('done-r1')).toHaveText('✓ done: freq 0.5 → 0.3');
   await expect(page.getByTestId('requests-count')).toHaveText('0 requests for the agent');
@@ -233,14 +233,18 @@ test('a request with nobody listening says so and offers a prompt', async ({ pag
 test('a page writes as the name it is given, and refuses a bad one', async ({ page }) => {
   agent = await startAgent();
   await page.goto(`${agent.url}&name=bo`);
+  // your name is a compact chip that becomes the text field when clicked
+  await expect(page.getByTestId('author-chip')).toContainText('bo');
+  await page.getByTestId('author-chip').click();
   await expect(page.getByTestId('author')).toHaveValue('bo');
   await agent.cli(['run', agent.dir, '-e', 'sound new beep']);
   await page.getByTestId('approve-beep').click();
   await expect(page.getByTestId('status-beep')).toHaveText('approved');
   expect((await commands(page))[0]).toMatchObject({ by: 'human:bo' });
+  await page.getByTestId('author-chip').click();
   await page.getByTestId('author').fill('not ok!');
   await page.getByTestId('undo').click();
-  await expect(page.getByTestId('status-beep')).toHaveText('draft');
+  await expect(page.getByTestId('status-beep')).toHaveCount(0); // a draft shows no status chip
   // A name that is not allowed leaves the previous one in force.
   expect((await commands(page))[0]).toMatchObject({ by: 'human:bo' });
 });
@@ -254,15 +258,9 @@ test('a classic card shows its 25 parameters read-only, a waveform and a spectro
   const beep = page.getByTestId('card-beep');
   await expect(page.getByTestId('sounds').locator('article')).toHaveCount(2);
 
-  // The parameters: all 25, as values, nothing to edit yet.
-  const params = beep.getByTestId('params-beep');
-  await expect(params).toHaveAttribute('data-voice', 'classic');
-  await expect(params.locator('[data-testid^="param-beep-"]')).toHaveCount(25);
-  await expect(beep.getByTestId('param-beep-wave')).toHaveText('wave sine');
-  await expect(beep.getByTestId('param-beep-freq')).toHaveText('freq 0.3');
-  await expect(beep.getByTestId('param-beep-volume')).toHaveText('volume 0.15');
-  await expect(beep.getByTestId('param-beep-attack')).toHaveText('attack 0.05');
-  await expect(params.locator('input, select, textarea, [contenteditable]')).toHaveCount(0);
+  // The card names the voice and carries no parameter dump.
+  await expect(beep).toContainText('classic');
+  await expect(beep.locator('[data-testid^="param-"]')).toHaveCount(0);
 
   // The thumbnails are drawn: the waveform has height, and the spectrogram has many colours.
   await expect(beep.getByTestId('wave-beep')).toHaveAttribute('data-peak', /^0\.[3-9]/);
@@ -278,7 +276,7 @@ test('a classic card shows its 25 parameters read-only, a waveform and a spectro
 
   // The badge says what the CLI says.
   await expect(beep.getByTestId('check-beep')).toHaveAttribute('data-pass', 'true');
-  await expect(beep.getByTestId('check-beep')).toHaveText('✓ checks pass');
+  await expect(beep.getByTestId('check-beep')).toContainText('all pass');
   const zap = page.getByTestId('card-zap');
   await expect(zap.getByTestId('check-zap')).toHaveAttribute('data-pass', 'false');
   const cli = await agent.cli(['check', agent.dir, 'zap']);
@@ -286,11 +284,19 @@ test('a classic card shows its 25 parameters read-only, a waveform and a spectro
   expect(failing).not.toBe('');
   await expect(zap.getByTestId('check-zap')).toHaveAttribute('data-failing', failing);
   await expect(zap.getByTestId('check-zap')).toHaveAttribute('title', /^checks: \d\/6 pass; failing: /);
+  // one badge per failing check (three at most, then a count); a time only where the check reports one
+  const names = failing.split(',');
+  await expect(zap.getByTestId('check-zap').locator('.badge')).toHaveCount(Math.min(2, names.length));
+  for (const n of names.slice(0, 2)) {
+    const badge = zap.getByTestId('check-zap').locator('.badge', { hasText: n === 'loudness' ? 'loud' : n });
+    await expect(badge).toBeVisible();
+    if (['clip', 'loudness', 'dc'].includes(n)) await expect(badge).not.toHaveText(/\d\.\d\d s/);
+    else await expect(badge).toHaveText(/\d\.\d\d s/);
+  }
 
   // The agent changes the sound: the card, the badge and the thumbnail follow.
   await agent.cli(['run', agent.dir, '-e', 'sound set beep volume=0.6']);
   await expect(beep.getByTestId('check-beep')).toHaveAttribute('data-pass', 'false');
-  await expect(beep.getByTestId('param-beep-volume')).toHaveText('volume 0.6');
   await agent.cli(['run', agent.dir, '-e', 'sound set beep volume=0.15']);
   await expect(beep.getByTestId('check-beep')).toHaveAttribute('data-pass', 'true');
 });

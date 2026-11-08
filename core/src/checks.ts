@@ -119,6 +119,9 @@ export type CheckName = 'clip' | 'loudness' | 'dc' | 'click' | 'tail' | 'harsh' 
 /** The checks of one sound (set-spread is the checks of a set of sounds). */
 export const CHECK_NAMES: readonly CheckName[] = ['clip', 'loudness', 'dc', 'click', 'tail', 'harsh'];
 
+/** The checks that report where in the sound the trouble is (a click, a long tail, a harsh stretch); clip, loudness and dc are results for the whole sound and draw no marker. */
+export const TIMED_CHECKS: readonly CheckName[] = ['click', 'tail', 'harsh'];
+
 export interface CheckRange {
   /** Seconds. */
   from: number;

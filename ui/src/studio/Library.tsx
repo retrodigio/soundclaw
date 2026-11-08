@@ -9,7 +9,7 @@ import { Chip, GLYPH, Popover, Tabs, WORD, type CheckKind } from './controls.tsx
 import { Search } from './icons.tsx';
 import { VirtualList, type VirtualHandle } from './layout.tsx';
 import { usePrefs, setPrefs, type Prefs } from './prefs.ts';
-import { checkOf, lufsText, useAttentionOrder, type Focus } from './shellData.ts';
+import { checkOf, lufsText, rowName, useAttentionOrder, type Focus } from './shellData.ts';
 
 /** The row height the density gives (24 compact, 32 comfortable), read from the token. */
 export function useRowHeight(): number {
@@ -155,7 +155,7 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
       <div className={`lib-row${sel ? ' sel' : ''}${pulse ? ' pulse' : ''}`} data-testid={`lib-row-${s.id}`} data-check={k} data-new={fresh || undefined}
         onClick={() => pick(i)} onDoubleClick={() => onOpen({ kind: 'sound', id: s.id })}>
         <span className="new-dot" aria-label={fresh ? 'changed by the agent' : undefined} role={fresh ? 'img' : undefined} style={{ opacity: fresh ? 1 : 0 }} />
-        <span className="lib-name">{s.id}</span>
+        <span className="lib-name" title={s.label ? `${s.id}: ${s.label}` : s.id}>{rowName(s)}</span>
         <MiniWave store={store} id={s.id} />
         <span className="mono lib-lufs">{s.info ? lufsText(s.info.lufs) : '…'}</span>
         <Glyph kind={k} />

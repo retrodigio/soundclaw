@@ -231,7 +231,11 @@ that opens over the page, below 900 px the library is an overlay, and there is n
   Rows show a violet dot for sounds the agent changed that you have not played or opened (per browser; the row pulses once), the name, a mini
   waveform from the server's card, integrated LUFS and the check glyph. ↑↓ moves the selection and previews it (off in the palette), Enter opens it,
   Space plays it, R asks for changes.
-- **Centre page.** Needs attention as cards or rows; "Show all" brings back every sound, the sets and the songs.
+- **Centre page.** Needs attention as cards or rows; "Show all" brings back every sound, the sets and the songs. A card is one fixed height: the name
+  and voice, one 54 px panel (the waveform over the spectrogram, a marker where a check reports a time), a badge per failing check ("× click 0.14 s";
+  clip, loudness and dc are whole-sound results and carry no time) and who changed it last. Play, Approve and Ask show on hover and focus; Feedback, Edit and
+  the exports are in the overflow menu. The grid is windowed, so only the rows near the view exist. The spectrogram colours are a token ramp: the
+  ground, ember at rising opacity, then a pale highlight (`--spec-hi`).
 - **Agent rail.** Presence, the claimed request ("working on"), your requests with their state (sent, seen, claimed, working, blocked, ready for
   review), the live feed built from the tape and the request events (a play button where a sound changed), and the ask field.
 - **Bottom panel.** Detail (the selected sound's waveform with check markers and its numbers), Mixer (a sound's loudness, a song's channels) and

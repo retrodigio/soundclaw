@@ -50,6 +50,7 @@ test('a classic sound has the menu too, and the card badge follows the class', a
   await page.goto(`${agent.url}&name=ana`);
   await expect(page.getByTestId('connection')).toHaveAttribute('data-status', 'open');
   const before = await page.getByTestId('check-beep').getAttribute('data-failing');
+  await page.getByTestId('more-beep').click();
   await page.getByTestId('edit-beep').click();
   await expect(page.getByTestId('loudness-class')).toBeVisible();
   await page.getByTestId('loudness-class').selectOption('ui');

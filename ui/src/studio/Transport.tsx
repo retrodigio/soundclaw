@@ -2,7 +2,7 @@
 // a song, the master meter against the loudness target, undo and redo, who you are, the agent's
 // presence, the connection, the panel toggles and the search field.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Store } from '../store.ts';
 import { IconButton, Meter } from './controls.tsx';
 import { Chevron, Logo, Loop, Person, Play, Redo, Search, Stop, Undo } from './icons.tsx';
@@ -60,6 +60,19 @@ function MasterMeter({ store, focus }: { store: Store; focus: Focus | null }) {
   );
 }
 
+/** Your name: a compact chip (person and name) that becomes the text field when clicked. */
+function YouChip({ store }: { store: Store }) {
+  const [editing, setEditing] = useState(false);
+  const name = store.me.replace(/^human:/, '');
+  if (!editing) return <button type="button" className="you-chip" onClick={() => setEditing(true)} data-testid="author-chip" title="The name your edits are written as. Click to change."><Person size={12} color="currentColor" /><span>{name}</span></button>;
+  return (
+    <label className="t-me" title="The name your edits are written as"><Person size={12} /><span className="sr-only">Your name</span>
+      <input autoFocus value={name} data-testid="author" aria-label="Your name" onChange={(e) => store.setAuthor(e.target.value)} onBlur={() => setEditing(false)}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') setEditing(false); }} />
+    </label>
+  );
+}
+
 export function Transport({ store, focus, onPalette, canLoop, onPlay, onStop, onLoop, playingNow, looping }: {
   store: Store; focus: Focus | null; onPalette(): void; canLoop: boolean; onPlay(): void; onStop(): void; onLoop(): void; playingNow: boolean; looping: boolean;
 }) {
@@ -84,9 +97,7 @@ export function Transport({ store, focus, onPalette, canLoop, onPlay, onStop, on
         <IconButton label="Undo" shortcut={shortcutLabel('⌘Z')} onClick={() => void store.undo()} disabled={!store.canUndo()} testId="undo"><Undo /></IconButton>
         <IconButton label="Redo" shortcut={shortcutLabel('⇧⌘Z')} onClick={() => void store.redo()} disabled={!store.canRedo()} testId="redo"><Redo /></IconButton>
       </div>
-      <label className="t-me" title="The name your edits are written as"><Person size={12} /><span className="sr-only">Your name</span>
-        <input value={store.me.replace(/^human:/, '')} data-testid="author" aria-label="Your name" onChange={(e) => store.setAuthor(e.target.value)} />
-      </label>
+      <YouChip store={store} />
       <PresencePill store={store} />
       <span className={`conn conn-${store.status}`} data-testid="connection" data-status={store.status} title={`Server: ${store.status}`}><span className="conn-dot" aria-hidden /><span className="conn-word">{store.status === 'open' ? 'online' : store.status === 'closed' ? 'offline' : 'connecting'}</span></span>
       <div className="t-buttons panel-toggles" role="group" aria-label="Panels">
