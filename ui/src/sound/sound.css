@@ -2,7 +2,7 @@
    editor's tracks and device chains. Colours and sizes are the tokens'. */
 
 /* ───── the lenses ───── */
-.lens { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-panel); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.lens { container-type: inline-size; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-panel); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .lens-head { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-6) var(--sp-8); border-bottom: 1px solid var(--line); flex-wrap: wrap; font-size: var(--fs-12); }
 .lens-head .tabs-c { flex: none; }
 .lens-head .tabs-c .kbd { margin-left: 6px; }
@@ -39,8 +39,8 @@
 .lz-ghost-key { stroke: var(--agent); stroke-dasharray: 3 3; }
 .lz-tag { position: absolute; font-size: 10px; color: var(--text3); }
 .lz-legend { position: absolute; right: 10px; display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-11); }
-.lz-legend-ember { top: 8px; color: var(--ember-text); }
-.lz-legend-agent { top: 26px; color: var(--agent-text); }
+.lz-legend-ember { bottom: 8px; color: var(--ember-text); }
+.lz-legend-agent { bottom: 26px; color: var(--agent-text); }
 .lz-notes, .lz-hz { position: absolute; top: 0; bottom: 0; font-size: 10px; color: var(--text2); pointer-events: none; }
 .lz-notes { left: 4px; } .lz-hz { right: 6px; text-align: right; }
 .lz-notes span, .lz-hz span { position: absolute; transform: translateY(50%); text-shadow: 0 0 3px var(--ground), 0 0 3px var(--ground); white-space: nowrap; }
@@ -207,3 +207,15 @@
 .drag-handle svg, .device svg { pointer-events: none; }
 .drag-ghost { position: fixed; z-index: 100; pointer-events: none; background: var(--raised); border: 1px solid var(--ember); border-radius: var(--r-cell); padding: 3px 10px; font-size: var(--fs-12); box-shadow: var(--shadow); }
 .drag-handle { touch-action: none; user-select: none; } .device { user-select: none; }
+
+/* a flag after the first of its check is a small marker; its label is the tooltip */
+.lens-flag.more { padding: 2px 4px; }
+.lens-flag.more { font-size: 0; } .lens-flag.more .mono { font-size: var(--fs-11); } .lens-flag.more .lens-flag-hint { display: none; }
+/* in an editor the lens is a smaller view: the strip is one line of figures */
+.lens.compact .strip-n { display: none; }
+.lens.compact .lens-strip { gap: var(--sp-6); padding: var(--sp-6); }
+.lens.compact .strip-card { padding: 3px 8px; flex-basis: 92px; }
+.lens.compact .strip-loud { flex: 2 1 220px; padding: 2px 8px; }
+.lens.compact .strip-loud .loud-scale { display: none; }
+@container (max-width: 780px) { .lens-hint { display: none; } }
+.strip-v { white-space: nowrap; } .strip-card { min-width: 84px; }

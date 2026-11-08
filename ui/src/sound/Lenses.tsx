@@ -145,7 +145,7 @@ export function LensPanel({ store, sound, live, height = 300, prov, outline, pre
   const readout = `cursor ${axis.cursor === null ? '—' : `${fmtT(axis.cursor)} s`} · selection ${axis.sel ? `${fmtT(axis.sel.a)}–${fmtT(axis.sel.b)} s` : '—'}`;
 
   return (
-    <section className="lens" data-testid="lens-panel" data-lens={lens} aria-label="Analysis lenses">
+    <section className={`lens${height !== 'fill' && height <= 260 ? ' compact' : ''}`} data-testid="lens-panel" data-lens={lens} aria-label="Analysis lenses">
       <div className="lens-head">
         <Tabs<LensId> value={lens} onChange={setLens} label="Lens" testId="lens-tabs" idBase="lens"
           tabs={[...(layersLens ? [LAYERS_META] : []), ...LENSES].map((l) => ({ value: l.id, testId: `lens-tab-${l.id}`, label: <>{l.name}<kbd className="kbd">{l.key}</kbd></> }))} />
@@ -265,8 +265,8 @@ function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, da
       <div ref={head} className="lens-playhead" data-testid="lens-playhead" style={{ display: 'none' }} />
       {flags.map((f, i) => (
         <span key={f.id} className="lens-flagband" data-kind={f.kind} style={{ left: `${pct(f.from)}%`, width: `${Math.max(0.2, pct(f.to) - pct(f.from))}%` }}>
-          <button type="button" className="lens-flag" data-kind={f.kind} data-testid={`flag-${f.id}`} data-from={f.from} data-to={f.to} style={{ top: 6 + (i % 3) * 22 }}
-            onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onFlag(f); }} title="Jump here and loop it">
+          <button type="button" className={`lens-flag${flags.findIndex((g) => g.name === f.name) === i ? '' : ' more'}`} data-kind={f.kind} data-testid={`flag-${f.id}`} data-from={f.from} data-to={f.to} title={`${f.label}: jump here and loop it`} style={{ top: 6 + (flags.findIndex((g) => g.name === f.name) === i ? [...new Set(flags.map((g) => g.name))].indexOf(f.name) * 22 : 0) }}
+            onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onFlag(f); }}>
             <span className="mono" aria-hidden>×</span> {f.label} <span className="lens-flag-hint">click to loop</span>
           </button>
         </span>

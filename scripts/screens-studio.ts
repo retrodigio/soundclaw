@@ -102,6 +102,7 @@ async function soundShots(): Promise<void> {
     for (const theme of ['dark', 'light'] as const) {
       shots.push({ file: `home-${theme}`, theme, density: 'compact', hash: '#/', wait: 'home' });
       shots.push({ file: `classic-${theme}-compact`, theme, density: 'compact', hash: '#/sound/coin_pickup', wait: 'editor' });
+      shots.push({ file: `classic-${theme}-modules`, theme, density: 'compact', hash: '#/sound/coin_pickup', wait: 'editor', extra: async (p) => { await p.getByTestId('knob-decay').focus(); await p.getByTestId('module-1').scrollIntoViewIfNeeded(); await p.evaluate(() => document.querySelector('.page')?.scrollBy(0, 420)); await p.waitForTimeout(300); } });
       shots.push({ file: `layered-${theme}-compact`, theme, density: 'compact', hash: '#/sound/explosion_big', wait: 'editor' });
       for (const [key, lens] of [['1', 'wave'], ['2', 'spec'], ['3', 'pitch'], ['4', 'compare'], ['5', 'nums']] as const) {
         shots.push({ file: `analysis-${lens}-${theme}`, theme, density: 'compact', hash: '#/sound/laser/analysis', lens: key, wait: 'analysis-page' });
@@ -109,10 +110,10 @@ async function soundShots(): Promise<void> {
     }
     shots.push({ file: 'classic-dark-comfortable', theme: 'dark', density: 'comfortable', hash: '#/sound/coin_pickup', wait: 'editor' });
     shots.push({ file: 'layered-dark-comfortable', theme: 'dark', density: 'comfortable', hash: '#/sound/explosion_big', wait: 'editor' });
-    shots.push({ file: 'layered-dark-device-open', theme: 'dark', density: 'compact', hash: '#/sound/explosion_big', wait: 'editor', extra: async (p) => { await p.getByTestId('fx-1-1').click(); await p.waitForTimeout(300); } });
+    shots.push({ file: 'layered-dark-device-open', theme: 'dark', density: 'compact', hash: '#/sound/explosion_big', wait: 'editor', extra: async (p) => { await p.getByTestId('fx-1-1').click(); await p.getByTestId('fx-panel-1-1').scrollIntoViewIfNeeded(); await p.waitForTimeout(300); } });
     for (const v of shots) {
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
-      await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p)); } catch { /* storage off */ } }, { theme: v.theme, density: v.density });
+      await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p)); } catch { /* storage off */ } }, { theme: v.theme, density: v.density, panels: { bottomOpen: v.hash === '#/' } });
       const page = await ctx.newPage();
       await page.goto(`${a.url}&name=ana${v.hash}`);
       await page.getByTestId('connection').and(page.locator('[data-status=open]')).waitFor();

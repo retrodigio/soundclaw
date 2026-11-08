@@ -297,7 +297,7 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
             <button className="link-btn" data-testid="seed-auto" disabled={committed.seed === undefined} onClick={() => void now1(setCommand(id, { seed: 'auto' }))}>auto</button>
           </div>
 
-          <LensPanel store={store} sound={sound} live={live} height={250} prov={prov} outline={outline} previous={prov.before} onAxis={setAxis} />
+          <LensPanel store={store} sound={sound} live={live} height={220} prov={prov} outline={outline} previous={prov.before} onAxis={setAxis} />
           <div className="dim hash">samples {store.hashOf(sound).slice(0, 12)}</div>
 
           <section className="modules" data-testid="params-editor">
