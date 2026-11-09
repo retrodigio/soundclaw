@@ -41,6 +41,8 @@ jobs:
       - name: Pack (pnpm rewrites the workspace versions) and publish
         working-directory: cli
         run: |
+          v="${GITHUB_REF_NAME#v}"
+          if [ -n "$(npm view "soundclaw@$v" version 2>/dev/null)" ]; then echo "soundclaw@$v is on npm already"; exit 0; fi
           pnpm pack
           npm publish soundclaw-*.tgz --provenance --access public
 
