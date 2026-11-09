@@ -96,12 +96,12 @@ export const SOURCE_SPECS: Record<Exclude<SourceKind, 'classic'>, readonly PSpec
     num('bright', 0, 1, 0.8, '', 'brightness of the pluck (0 dull … 1 bright)'),
   ],
   sample: [
-    text('sample', '', 'the name of a sample in the project (sample import <project> <file.wav> as=<name>)'),
+    text('sample', '', 'the name of a sample in the project (soundclaw sample import <project> <file> as=<name>)'),
     num('start', 0, MAX_DURATION, 0, 's', 'trim: where in the sample to start'),
     num('end', 0, MAX_DURATION, 0, 's', 'trim: where to stop (0 = the end)'),
     num('pitch', -48, 48, 0, 'semitones', 'transposition (the sample\'s length changes with it)', true),
     num('reverse', 0, 1, 0, '', '1 plays it backwards', false, true),
-    choice('side', ['mix', 'left', 'right'], 'mix', 'which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each); for the whole file in stereo use two layers, side=left pan=-1 and side=right pan=1'),
+    choice('side', ['mix', 'left', 'right', 'stereo'], 'mix', 'which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each), or stereo: both channels, left to the left and right to the right, through one layer\'s filter, envelope and effects (the layer\'s pan does not apply; a mono file plays in both)'),
   ],
 };
 
@@ -462,7 +462,7 @@ export function layeredBody(s: LayeredSound, sampleHash: (name: string) => strin
 
 /** Is any layer panned off centre (so the sound has two channels)? */
 export function isStereo(s: LayeredSound): boolean {
-  return s.layers.some((l) => l.p.pan !== 0 || l.envs.pan !== undefined);
+  return s.layers.some((l) => l.p.pan !== 0 || l.envs.pan !== undefined || (l.kind === 'sample' && l.p.side === 'stereo'));
 }
 
 /** Layers that sound: not muted, and if any is soloed, only those. */

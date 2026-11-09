@@ -36,6 +36,7 @@ import { LOOP_FADE, LOOP_LENGTH, MAX_DURATION, type FamilyKind, type LoopSpec } 
 import { Library, MAX_SET_MEMBERS, checkMemberIds, checkSpread, defaultSetSeed, formatSpread, makeMember, memberId, parseSpread, spreadPositions, type SpreadRule } from './sets.ts';
 import { hashText } from './generators.ts';
 import { BLOCK_MARK, applyMusic, isMusicOp, parseMusic, type MusicCommand } from './music-commands.ts';
+import { applySample, isSampleOp, parseSample, type SampleCommand } from './samples.ts';
 import { COMPOSE_HEADS, applyCompose, isComposeOp, parseCompose, type ComposeCommand } from './compose.ts';
 import { SOUND_ID_RE, TONE_PARAMS, cloneSound, idClash, fmtNumber, isParamName, momentProblem, newClassicSound, newSound, paramProblem, voiceParams, type Sound, type SoundStatus, type VoiceKind } from './sound.ts';
 
@@ -135,7 +136,7 @@ export function quote(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')}"`;
 }
 
-export const AUTHOR_RE = /^(agent|human):[A-Za-z0-9_.-]{1,32}$/;
+export const AUTHOR_RE = /^(agent|human|system):[A-Za-z0-9_.-]{1,32}$/;
 export const HUMAN_RE = /^human:[A-Za-z0-9_.-]{1,32}$/;
 export const GROUP_RE = /^g\d+$/;
 
@@ -176,7 +177,8 @@ export type Command =
   | { op: 'family'; id: string; kind: FamilyKind; as: string | null; text: string }
   | { op: 'undo' | 'redo'; group: string | null; by: string | null; text: string }
   | { op: 'normalize'; args: string[]; text: string }
-  | MusicCommand;
+  | MusicCommand
+  | SampleCommand;
 
 function checkId(t: Token | undefined, line: number, what: string): string {
   if (!t) throw new DiagError(line, 1, `${what}: give the sound's id`);
@@ -692,9 +694,10 @@ function parseLine(l: RawLine): Command {
   if (head!.v === 'layer') return parseLayer(rest, head!, line);
   if (head!.v === 'fx') return parseFx(rest, head!, line);
   if (head!.v === 'env') return parseEnvCommand(rest, head!, line);
+  if (head!.v === 'sample') return parseSample(head!, rest, line);
   if (head!.v === 'instrument' || head!.v === 'pattern' || head!.v === 'song') return parseMusic(head!, rest, line, (tokens, ln) => parseLine({ line: ln, tokens }));
   if ((COMPOSE_HEADS as readonly string[]).includes(head!.v)) return parseCompose(head!, rest, line);
-  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, layer, fx, env, set, family, mutate, normalize, instrument, pattern, song, chords, bass, arp, drums, humanise, motif, layer-plan, undo, redo)`);
+  throw new DiagError(line, head!.col, `unknown command '${head!.v}' (sound, sample, layer, fx, env, set, family, mutate, normalize, instrument, pattern, song, chords, bass, arp, drums, humanise, motif, layer-plan, undo, redo)`);
 }
 
 /** A command with the line it came from. */
@@ -988,6 +991,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
     case 'normalize':
       throw new Error('normalize is worked out by the writer, which puts the commands it measured on the tape');
     default:
+      if (isSampleOp(c.op)) return applySample(lib, c);
       if (isMusicOp(c.op)) return applyMusic(lib, c as MusicCommand);
       if (isComposeOp(c.op)) return applyCompose(lib, c as unknown as ComposeCommand);
       return applyLayerCommand(lib, c);

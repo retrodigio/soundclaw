@@ -23,6 +23,7 @@ import { melDistance } from './views.ts';
 import { CLASSIC_FULL_SCALE, measuredChannels, mixdown, renderChannels } from './render.ts';
 import { SOUND_ID_RE, cloneSound, quoteText, type Sound } from './sound.ts';
 import type { SampleBank } from './synth.ts';
+import { cloneSample, type SampleEntry } from './samples.ts';
 
 export const MAX_SET_MEMBERS = 32;
 
@@ -58,6 +59,8 @@ export class Library extends Map<string, Sound> {
   /** The project's instruments (the built-in ones are not in here). */
   instruments = new Map<string, Instrument>();
   songs = new Map<string, SongDoc>();
+  /** The project's samples: names for audio in the store (`sample add`). */
+  samples = new Map<string, SampleEntry>();
   /** The project's music style guide and bible, for the commands that read them (a replay never needs them). */
   guide?: import('./musicstyle.ts').MusicGuide;
 }
@@ -67,6 +70,7 @@ export function copyLibrary(lib: Library): Library {
   out.sets = new Map(lib.sets);
   out.instruments = new Map(lib.instruments);
   out.songs = new Map(lib.songs);
+  out.samples = new Map(lib.samples);
   out.guide = lib.guide;
   return out;
 }
@@ -76,6 +80,7 @@ export function cloneLibrary(lib: Library): Library {
   out.sets = new Map([...lib.sets].map(([k, v]) => [k, cloneSet(v)] as const));
   out.instruments = new Map([...lib.instruments].map(([k, v]) => [k, cloneInstrument(v)] as const));
   out.songs = new Map([...lib.songs].map(([k, v]) => [k, cloneSong(v)] as const));
+  out.samples = new Map([...lib.samples].map(([k, v]) => [k, cloneSample(v)] as const));
   return out;
 }
 

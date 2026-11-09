@@ -43,3 +43,6 @@ export * from './compose.ts';
 export * from './stingers.ts';
 export * from './musicstyle.ts';
 export * from './restore.ts';
+export * from './pcm.ts';
+export * from './audiofile.ts';
+export * from './samples.ts';

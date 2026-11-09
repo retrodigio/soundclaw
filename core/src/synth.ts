@@ -291,11 +291,11 @@ function renderKs(l: Layer, seed: number): Float64Array {
   return out;
 }
 
-function renderSample(l: Layer, bank: SampleBank | undefined): Float64Array {
+function renderSample(l: Layer, bank: SampleBank | undefined, channel: 'left' | 'right' | null = null): Float64Array {
   const name = l.p.sample as string;
   const smp = name ? bank?.get(name) : undefined;
   if (!smp) return new Float64Array(Math.round(0.1 * SR)); // a missing sample is silence; the server refuses to write a batch that names one
-  const side = l.p.side;
+  const side = channel ?? l.p.side;
   // a file at another rate is converted to 44,100 Hz first (resample.ts), so the trim and the pitch below work on the engine's own rate
   const sig = resample(side === 'left' && smp.left ? smp.left : side === 'right' && smp.right ? smp.right : smp.data, smp.rate, SR);
   const len = sig.length;
@@ -664,6 +664,8 @@ interface Built {
   buf: Float64Array;
   /** Samples of the layer's source (the buffer is longer by the room its effects' tails may need). */
   src: number;
+  /** A stereo sample layer (`side=stereo`): the right channel; `buf` is the left. */
+  right?: Float64Array;
 }
 
 /** A sample layer with no envelope and no trim plays the file as it is: no fade, no cut (so `measure` of a reference equals the file). */
@@ -671,8 +673,8 @@ function playsAsIs(l: Layer): boolean {
   return l.kind === 'sample' && !l.amp && l.p.start === 0 && l.p.end === 0;
 }
 
-function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined): { buf: Float64Array; src: number } {
-  const src = renderSource(s, l, bank);
+/** A layer's source through its filter, envelope, effects and gain. `channel` is which channel of a stereo layer this is (it decides what the effects hear). */
+function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined, src: Float64Array = renderSource(s, l, bank), channel = 0): { buf: Float64Array; src: number } {
   let tail = 0;
   for (const f of l.fx) tail += fxTail(f);
   const tailSamples = Math.min(MAX_DURATION * SR, Math.round(tail * SR));
@@ -689,7 +691,7 @@ function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined): { 
     for (let i = 0; i < Math.min(FADE, len); i++) buf[i] = buf[i]! * (i / FADE);
     for (let i = Math.max(0, len - FADE); i < len; i++) buf[i] = buf[i]! * ((len - 1 - i) / FADE);
   }
-  for (const f of l.fx) runFx(buf, f, 0);
+  for (const f of l.fx) runFx(buf, f, channel);
   if (l.envs.gain) {
     const r = envReader(l.envs.gain);
     for (let i = 0; i < buf.length; i++) buf[i] = buf[i]! * r(i);
@@ -716,8 +718,17 @@ function totalLength(s: LayeredSound, built: Built[]): number {
   return Math.min(MAX_DURATION * SR, n + Math.round(tail * SR));
 }
 
+function buildOne(s: LayeredSound, layer: Layer, bank: SampleBank | undefined): Omit<Built, 'layer' | 'index' | 'offset'> {
+  if (layer.kind === 'sample' && layer.p.side === 'stereo') {
+    const left = buildLayer(s, layer, bank, renderSample(layer, bank, 'left'), 0);
+    const right = buildLayer(s, layer, bank, renderSample(layer, bank, 'right'), 1);
+    return { buf: left.buf, src: left.src, right: right.buf };
+  }
+  return buildLayer(s, layer, bank);
+}
+
 function buildAll(s: LayeredSound, bank: SampleBank | undefined): Built[] {
-  return audibleLayers(s).map((layer) => ({ layer, index: s.layers.indexOf(layer), offset: Math.round((layer.p.offset as number) * SR), ...buildLayer(s, layer, bank) }));
+  return audibleLayers(s).map((layer) => ({ layer, index: s.layers.indexOf(layer), offset: Math.round((layer.p.offset as number) * SR), ...buildOne(s, layer, bank) }));
 }
 
 /** A built layer placed in the sound's timeline: one array per channel, pan applied, `n` samples long. */
@@ -730,7 +741,11 @@ function place(b: Built, n: number, stereo: boolean): Float64Array[] {
     const j = b.offset + i;
     if (j >= n) break;
     const v = b.buf[i]!;
-    if (!stereo) chans[0]![j] = v;
+    if (b.right) {
+      // a stereo sample layer: each channel stays on its side
+      chans[0]![j] = v;
+      if (stereo) chans[1]![j] = b.right[i]!;
+    } else if (!stereo) chans[0]![j] = v;
     else if (panEnv) {
       const [l, r] = panGains(panEnv(i));
       chans[0]![j] = v * l;
