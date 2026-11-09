@@ -6,6 +6,15 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-09
+
+The first release.
+
+### Setup
+- **`soundclaw init`** sets up Claude Code in one step: it makes the project (or uses the one there), installs the skill, and
+  registers the MCP server at this version with `claude mcp add` (or in `.mcp.json` when `claude` is not on the PATH).
+  `--scope project` shares both with the repo.
+
 ### The dashboard shell
 - **A new look and layout.** Design tokens (dark and light themes, compact and comfortable densities, reduced motion) and bundled fonts (Inter, Space
   Grotesk and JetBrains Mono under the SIL OFL, with their licence texts), a component set (knob, slider, fader, meters, badges, authorship marks,
@@ -379,3 +388,6 @@ All notable changes to SoundClaw are listed here. The format follows
 - Requests: "Ask for changes" and "Approve" on a card; `soundclaw await` (exits with events) and the
   MCP `await_requests`; `soundclaw work list|claim|progress|block|done` and the MCP `work`.
 - Per-command `--help` and `--version`; a Claude Code skill (`soundclaw skill install`).
+
+[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/retrodigio/soundclaw/releases/tag/v0.1.0

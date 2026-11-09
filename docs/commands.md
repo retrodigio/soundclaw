@@ -61,7 +61,7 @@ changes it): undo the later changes first.
 
 ### Parameters of a sound
 
-**The tone voice** is the S0 placeholder, a plain sine. It has no fade, so it always fails the `tail`
+**The tone voice** is a placeholder, a plain sine. It has no fade, so it always fails the `tail`
 check; use the classic voice for sounds that have to be finished.
 
 | Parameter | Range | Default |
@@ -974,6 +974,7 @@ they are for reading and diffing. A hand edit to a `.sfx` file is overwritten by
 ## Commands
 
 ```
+soundclaw init [<project>, default sounds] [--scope local|project|user] [--name soundclaw] [--no-skill] [--force]
 soundclaw new <project> [--name <name>]
 soundclaw run <project> (<script> | - | -e "<commands>") [--by <author>]
 soundclaw list <project>
@@ -1007,6 +1008,15 @@ soundclaw skill install [--dest <dir> | --project <dir>]
 soundclaw await <project-folder | watch-url> [--timeout <seconds>] [--since <cursor>] [--as <name>] [--json]
 soundclaw serve --project <project> [--port 7427] [--no-mcp]
 ```
+
+`soundclaw init` sets up Claude Code in the current folder in one step. It makes the project (or
+uses the one already there), installs the skill, and registers the MCP server as
+`npx -y soundclaw@<this version> serve --project <project>` with `claude mcp add`. The scope is
+Claude Code's: `local` (the default: you, in this folder), `project` (a shared `.mcp.json` with a
+relative path, and the skill in `.claude/skills`, both for the repo) or `user` (you, in every
+folder). When the `claude` command is not on the PATH it writes `.mcp.json` instead, which Claude
+Code asks you to approve. An entry with the same name is left alone unless `--force`; after an
+upgrade, `soundclaw init --force` moves the entry to the new version.
 
 Example:
 

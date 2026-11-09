@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { commandHelp, main, type Io } from '../src/main.ts';
 
 const BIN = join(import.meta.dirname, '..', 'bin', 'soundclaw.js');
-const COMMANDS = ['new', 'run', 'list', 'history', 'render', 'view', 'describe', 'check', 'import', 'export', 'request', 'reply', 'cancel', 'work', 'skill', 'scale', 'style', 'await', 'serve'];
+const COMMANDS = ['init', 'new', 'run', 'list', 'history', 'render', 'view', 'describe', 'check', 'import', 'export', 'request', 'reply', 'cancel', 'work', 'skill', 'scale', 'style', 'await', 'serve'];
 
 function direct(args: string[]): { code: number; out: string; err: string } {
   let out = '', err = '';

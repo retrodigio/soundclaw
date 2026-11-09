@@ -11,6 +11,7 @@ import {
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
+import { init, runClaude, SCOPES, type ClaudeRunner, type Scope } from './init.ts';
 
 export interface Io {
   out(s: string): void;
@@ -19,6 +20,10 @@ export interface Io {
   now(): string;
   /** Set when the command runs inside a server (a CLI call sent to it): its writer is used instead of a new one. */
   writer?: Writer;
+  /** Runs the claude command for `init` (tests replace it). */
+  claude?: ClaudeRunner;
+  /** The folder `init` works in (tests replace it); the process's own by default. */
+  cwd?: string;
 }
 
 const nodeIo: Io = {
@@ -33,6 +38,11 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw --version | soundclaw <command> --help | soundclaw help <command>
       The version; the usage of one command.
 
+  soundclaw init [<project>, default sounds] [--scope local|project|user] [--name soundclaw] [--no-skill] [--force]
+      Set up Claude Code in this folder, in one step: make the project (or use the one there), install
+      the skill, and register the MCP server (claude mcp add; .mcp.json when claude is not on the PATH)
+      as npx soundclaw@<this version> serve --project <project>. --scope project shares both in the repo
+      (.mcp.json and .claude/skills); --force replaces an entry with the same name. Then start claude.
   soundclaw new <project> [--name <name>]
       Create a project folder: sounds/, instruments/, songs/, sets/, history.jsonl (the history
       tape), requests.jsonl, and exports/ (ignored by git).
@@ -780,21 +790,45 @@ function skillSource(): string {
   throw new ProjectError('the skill is not in this build (no skill/SKILL.md)');
 }
 
-function cmdSkill(io: Io, p: Parsed): number {
-  const [what] = p.pos;
-  if (what !== 'install' && what !== 'path') throw new UsageError('skill: install [--dest <dir> | --project <dir>], or path');
+/** Copy the shipped skill (and the command reference beside it) into dest; returns the files. */
+function installSkillAt(dest: string): string[] {
   const src = skillSource();
-  if (what === 'path') { io.out(src + '\n'); return 0; }
-  const proj = one(p, 'project');
-  const dest = one(p, 'dest') ?? (proj ? join(proj, '.claude', 'skills', 'soundclaw') : join(homedir(), '.claude', 'skills', 'soundclaw'));
   mkdirSync(dest, { recursive: true });
   cpSync(src, dest, { recursive: true, filter: (f) => !f.endsWith('package.json') });
   // The command reference goes beside it (the bundle carries a copy; the repo has it in docs/).
   const ref = join(src, '..', 'docs', 'commands.md');
   if (!existsSync(join(src, 'commands.md')) && existsSync(ref)) cpSync(ref, join(dest, 'commands.md'));
-  const files = readdirSync(dest, { recursive: true }).map(String).filter((f) => f.includes('.')).sort();
-  io.out(`installed the SoundClaw skill in ${dest} (${files.join(', ')})\nClaude Code finds it as /soundclaw; connect the tools with:\n  claude mcp add soundclaw -- npx soundclaw serve --project <your project>\n`);
+  return readdirSync(dest, { recursive: true }).map(String).filter((f) => f.includes('.')).sort();
+}
+
+function cmdSkill(io: Io, p: Parsed): number {
+  const [what] = p.pos;
+  if (what !== 'install' && what !== 'path') throw new UsageError('skill: install [--dest <dir> | --project <dir>], or path');
+  if (what === 'path') { io.out(skillSource() + '\n'); return 0; }
+  const proj = one(p, 'project');
+  const dest = one(p, 'dest') ?? (proj ? join(proj, '.claude', 'skills', 'soundclaw') : join(homedir(), '.claude', 'skills', 'soundclaw'));
+  const files = installSkillAt(dest);
+  io.out(`installed the SoundClaw skill in ${dest} (${files.join(', ')})\nClaude Code finds it as /soundclaw; connect the tools with:\n  claude mcp add soundclaw -- npx -y soundclaw serve --project <your project>\n(or run soundclaw init, which does both)\n`);
   return 0;
+}
+
+function cmdInit(io: Io, p: Parsed): number {
+  const [project = 'sounds', ...extra] = p.pos;
+  if (extra.length) throw new UsageError(`init: unexpected argument '${extra[0]}'`);
+  const scope = (one(p, 'scope') ?? 'local') as Scope;
+  if (!SCOPES.includes(scope)) throw new UsageError(`--scope is local, project or user, not '${scope}'`);
+  const name = one(p, 'name') ?? 'soundclaw';
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new UsageError(`--name is letters, digits, _ and -, not '${name}'`);
+  return init({
+    project, name, scope,
+    skill: !p.flags.has('no-skill'),
+    force: p.flags.has('force'),
+    version: soundclawVersion(),
+    cwd: io.cwd ?? process.cwd(),
+    installSkill: installSkillAt,
+    claude: io.claude ?? runClaude,
+    out: io.out,
+  });
 }
 
 export function main(argv: string[], io: Io = nodeIo): number {
@@ -803,6 +837,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
     const meta = metaCommand(argv, io);
     if (meta !== null) return meta;
     switch (cmd) {
+      case 'init': return cmdInit(io, parseArgs(rest, ['scope', 'name'], ['no-skill', 'force']));
       case 'new': return cmdNew(io, parseArgs(rest, ['name'], []));
       case 'run': return cmdRun(io, parseArgs(rest, ...WRITE_OPTS.run!));
       case 'list': return cmdList(io, parseArgs(rest, [], []));

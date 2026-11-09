@@ -103,6 +103,21 @@ machine, and can be edited and checked by a person and an agent alike.
 
 You need Node.js 22.18 or later.
 
+### With Claude Code
+
+```sh
+cd my-game
+npx soundclaw init      # makes ./sounds, installs the skill, registers the MCP server
+claude                  # or claude --continue to bring an existing session
+```
+
+Then ask: *"Make a laser and a coin pickup, and give me the dashboard link."* Open the link: every
+sound is a card you can play, edit and ask for changes on. Your requests reach the agent while it
+works, and its changes appear live. `soundclaw init --scope project` shares the setup with your repo
+(`.mcp.json` and `.claude/skills`); `soundclaw init --help` lists the options.
+
+### From the command line
+
 ```sh
 npx soundclaw new demo.sclaw
 npx soundclaw serve --project demo.sclaw &      # prints the dashboard link, with its token
@@ -122,16 +137,6 @@ Open the link: the sound is a card. Press play. Ask for changes, and run `soundc
 to receive the request. `soundclaw describe demo.sclaw zap` says what it sounds like in numbers and
 words, `soundclaw view demo.sclaw zap spec` draws its spectrogram, and `soundclaw export demo.sclaw`
 writes `exports/zap.wav`.
-
-### With Claude Code
-
-```sh
-claude mcp add soundclaw -- npx soundclaw serve --project demo.sclaw
-npx soundclaw skill install
-```
-
-The skill tells the agent how to drive the tool, including to keep `soundclaw await` running in
-the background on a served project.
 
 ## Documentation
 

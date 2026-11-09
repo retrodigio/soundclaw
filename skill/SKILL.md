@@ -19,8 +19,9 @@ voice** (`voice=layered`: up to 8 layers; see *Layered sounds*). The plain sine 
 fails the tail check and cannot finish a request.
 
 If the tools are missing, the server is not connected:
-`claude mcp add soundclaw -- npx soundclaw serve --project <folder>.sclaw` (then restart Claude
-Code). Without MCP, use the `soundclaw` command line, which does the same.
+run `npx soundclaw init` in the game's folder (or `claude mcp add soundclaw -- npx -y soundclaw
+serve --project <folder>`), then restart Claude Code. Without MCP, use the `soundclaw` command
+line, which does the same.
 
 ## Every session
 

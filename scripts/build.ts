@@ -41,6 +41,12 @@ cpSync(UI, join(OUT, 'ui'), { recursive: true });
 cpSync(join(REPO, 'skill'), join(OUT, 'skill'), { recursive: true, filter: (f) => !f.endsWith('package.json') });
 cpSync(join(REPO, 'docs', 'commands.md'), join(OUT, 'skill', 'commands.md'));
 cpSync(join(REPO, 'LICENSE'), join(OUT, 'LICENSE'));
+// The npm page shows cli/README.md: the repo's README with its relative links made absolute.
+const GH = 'https://github.com/retrodigio/soundclaw';
+writeFileSync(join(REPO, 'cli', 'README.md'), readFileSync(join(REPO, 'README.md'), 'utf8')
+  .replace(/!\[([^\]]*)\]\((?!https?:|#)([^)]+)\)/g, `![$1](https://raw.githubusercontent.com/retrodigio/soundclaw/main/$2)`)
+  .replace(/(?<!!)\[([^\]]*)\]\((?!https?:|#)([^)]+)\)/g, `[$1](${GH}/blob/main/$2)`)
+  .replace(/\]\(#/g, `](${GH}#`));
 
 // Third-party licences: every package with code in the bundle, plus the UI's runtime packages.
 const pkgDirs = new Set<string>();
