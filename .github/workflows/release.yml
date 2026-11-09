@@ -1,0 +1,53 @@
+name: Release
+
+# Push a tag vX.Y.Z (matching cli/package.json's version) to publish soundclaw to npm and make a
+# GitHub release from the CHANGELOG. npm trusts this workflow (trusted publishing over OIDC), so no
+# npm token is stored anywhere; the package carries a provenance statement.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # the GitHub release
+  id-token: write   # npm trusted publishing and provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: pnpm
+
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: npm install -g npm@latest
+
+      - name: The tag matches the package version
+        run: test "v$(node -p "require('./cli/package.json').version")" = "$GITHUB_REF_NAME"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, build and unit tests (CI on main runs the browser tests)
+        run: pnpm typecheck && pnpm build && pnpm test:unit
+
+      - name: Pack (pnpm rewrites the workspace versions) and publish
+        working-directory: cli
+        run: |
+          pnpm pack
+          npm publish soundclaw-*.tgz --provenance --access public
+
+      - name: GitHub release from the CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {f=1; next} f && (/^## \[/ || /^\[[^]]+\]: http/) {exit} f' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "SoundClaw $v" --notes-file notes.md
