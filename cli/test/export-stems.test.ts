@@ -1,4 +1,4 @@
-// S6b through the CLI: export flags, stems through the master chain, normalize in a run, a send bus, view compare with a file.
+// Through the CLI: export flags, stems through the master chain, normalize in a run, a send bus, view compare with a file.
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

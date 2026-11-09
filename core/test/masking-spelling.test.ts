@@ -1,4 +1,4 @@
-// S6b: masking names its stretches, notes keep their spelling, and the helpers' gate and legato.
+// Masking names its stretches, notes keep their spelling, and the helpers' gate and legato.
 
 import { describe, expect, it } from 'vitest';
 import { Library, applyCommand, formatPattern, keyUsesFlats, parse, parseKey, renderMatch, songReport, DEFAULT_STYLE, lookupInstrument, renderSong, serializeSong } from '../src/index.ts';

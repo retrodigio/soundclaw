@@ -48,7 +48,7 @@ command in its normal form. A batch is one group. The sounds are the tape replay
 - **Text on disk.** Everything is plain text and git-friendly. The history is append-only.
 
 The only document today is a **sound**, with one of three voices: the **classic voice** (sfxr's 25
-parameters; below), the **layered voice** (below), or the S0 placeholder, a sine tone with `frequency`, `duration` and `volume`.
+parameters; below), the **layered voice** (below), or the tone placeholder, a sine tone with `frequency`, `duration` and `volume`.
 The folder already has places (`instruments/`, `songs/`, `sets/`) for the documents the fuller tool
 will add.
 
