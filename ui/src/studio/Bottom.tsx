@@ -11,6 +11,7 @@ import { WaveView, type WaveMarker } from './layout.tsx';
 import { setPanels, usePrefs, type PanelPrefs } from './prefs.ts';
 import { checkOf, lufsText, MINUS, type Focus } from './shellData.ts';
 import { Mixer, MeterModeToggle } from '../song/Mixer.tsx';
+import { Tape, mentions } from './Tape.tsx';
 import { useSongReport } from '../song/hooks.tsx';
 
 const num = (v: number | null | undefined, digits: number, unit: string): string => (v === null || v === undefined || !Number.isFinite(v) ? `${MINUS}∞` : `${v.toFixed(digits).replace('-', MINUS)} ${unit}`);
@@ -123,11 +124,6 @@ function MixerTab({ store, focus }: { store: Store; focus: Focus | null }) {
 
 const HISTORY_ROWS = 200;
 
-/** The ids a tape entry names are matched as words (a song's `demo` also finds `demo_lead`), so `beep` does not pick up `beeper`. */
-function mentions(cmd: string, id: string): boolean {
-  return new RegExp(`(^|[^A-Za-z0-9_-])${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9-])`).test(cmd);
-}
-
 export function History({ store, focus }: { store: Store; focus: Focus | null }) {
   const [limit, setLimit] = useState(HISTORY_ROWS);
   const tape = store.tape;
@@ -141,6 +137,7 @@ export function History({ store, focus }: { store: Store; focus: Focus | null })
   const earlier = focus ? 0 : store.tapeTotal - rows.length;
   return (
     <section className="history" data-testid="history" aria-label="History">
+      <Tape store={store} filter={focus?.id ?? null} preview={focus?.kind === 'sound' ? focus.id : null} height={64} compact testId="history-tape" />
       <h2>History <span className="dim">({focus ? `${filtered.length} for ${focus.id}` : `${store.tapeTotal} commands`})</span>{focus && <span className="dim small"> {'·'} the focused item</span>}</h2>
       {rows.length === 0 && <p className="dim">{focus ? `Nothing on ${focus.id} yet.` : 'Nothing yet. Commands the agent and people run appear here.'}</p>}
       <ol>

@@ -2,6 +2,7 @@
 // list with mini waveforms from the server's cards, LUFS and the check glyph. ↑↓ moves the
 // selection and previews it, Enter opens it, Space plays it, R asks for changes on it.
 
+import { askAttr } from './ask.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SoundSummary } from '@soundclaw/server/protocol';
 import type { Store } from '../store.ts';
@@ -111,7 +112,13 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
   const at = selected && kind && selected.kind === kind ? ids.indexOf(selected.id) : -1;
 
   // keep the selected row in view when it moves by keyboard
-  useEffect(() => { if (at >= 0) list.current?.scrollToIndex(at); }, [at]);
+  // (not when the order changes under it because the agent wrote: the list never moves on a server update)
+  const lastSel = useRef<string | null>(null);
+  useEffect(() => {
+    const id = selected?.id ?? null;
+    if (at >= 0 && id !== lastSel.current) list.current?.scrollToIndex(at);
+    lastSel.current = id;
+  }, [at, selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // preview on select: the selection changed by keys or a click plays after a short pause, so a run of ↑ keys renders once
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,7 +159,7 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
     const fresh = newIds.has(s.id);
     const pulse = (store.pulses.get(s.id) ?? 0) > now - 900;
     return (
-      <div className={`lib-row${sel ? ' sel' : ''}${pulse ? ' pulse' : ''}`} data-testid={`lib-row-${s.id}`} data-check={k} data-new={fresh || undefined}
+      <div className={`lib-row${sel ? ' sel' : ''}${pulse ? ' pulse' : ''}`} data-testid={`lib-row-${s.id}`} data-ask-item={s.id} {...askAttr(s.id, { kind: 'item' }, s.id)} data-check={k} data-new={fresh || undefined}
         onClick={() => pick(i)} onDoubleClick={() => onOpen({ kind: 'sound', id: s.id })}>
         <span className="new-dot" aria-label={fresh ? 'changed by the agent' : undefined} role={fresh ? 'img' : undefined} style={{ opacity: fresh ? 1 : 0 }} />
         <span className="lib-name" title={s.label ? `${s.id}: ${s.label}` : s.id}>{rowName(s)}</span>
@@ -166,7 +173,7 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
     const x = otherRows[i]!;
     const sel = !!kind && selected?.kind === kind && selected.id === x.id;
     return (
-      <div className={`lib-row${sel ? ' sel' : ''}`} data-testid={`lib-row-${x.id}`} onClick={() => pick(i)} onDoubleClick={() => kind && onOpen({ kind, id: x.id })}>
+      <div className={`lib-row${sel ? ' sel' : ''}`} data-testid={`lib-row-${x.id}`} data-ask-item={x.id} {...(kind === 'song' ? askAttr(x.id, { kind: 'item' }, x.id) : {})} onClick={() => pick(i)} onDoubleClick={() => kind && onOpen({ kind, id: x.id })}>
         <span className="new-dot" style={{ opacity: 0 }} />
         <span className="lib-name">{x.id}</span>
         <span className="mono lib-sub">{x.sub}</span>

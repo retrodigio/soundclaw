@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
 import { HUMAN_RE, floatBytes, joinChannels, renderExact } from '@soundclaw/core';
 import { songJsonObject } from './songs.ts';
+import { reviewOf } from './changes.ts';
 import { ProjectError } from './project.ts';
 import type { ClientMessage, PersonRequest, ServerMessage } from './protocol.ts';
 import { awaitRequests, personRequest } from './requests.ts';
@@ -244,6 +245,18 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
     if (url.pathname === '/api/state') {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       json(res, 200, o.writer.snapshot());
+      return;
+    }
+    if (url.pathname === '/api/review') {
+      // What the agent did for a request (?request=r3) or in one tape group (?group=g7): before and after, parameters, numbers, checks.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      o.writer.enqueue(() => {
+        try {
+          json(res, 200, reviewOf(o.writer, { ...(url.searchParams.get('request') ? { request: url.searchParams.get('request')! } : {}), ...(url.searchParams.get('group') ? { group: url.searchParams.get('group')! } : {}) }));
+        } catch (e) {
+          json(res, 404, { error: (e as Error).message });
+        }
+      }).catch((e: unknown) => json(res, 500, { error: (e as Error).message }));
       return;
     }
     const sm0 = /^\/api\/song\/([A-Za-z][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);

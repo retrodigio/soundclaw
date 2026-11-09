@@ -9,6 +9,9 @@ import { Library } from './sets.ts';
 import { applyCommand, parse } from './commands.ts';
 import { restoreCommand } from './editor.ts';
 import { FX_SPECS, formatEnv, layerSpecs, showValue, type Env, type Fx, type Layer, type LayeredSound, type Value } from './layered.ts';
+import { quote } from './commands.ts';
+import { formatPattern } from './pattern.ts';
+import type { SongDoc } from './song.ts';
 import { TONE_PARAMS, cloneSound, fmtNumber, renderKey, type Sound } from './sound.ts';
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
@@ -111,5 +114,20 @@ export function restoreCommands(now: Sound, want: Sound, sampleHash: (name: stri
     try { applyCommand(lib, p.commands[0]!); } catch (e) { return { error: `could not write the restore (${(e as Error).message})` }; }
   }
   if (renderKey(lib.get(now.id)!, sampleHash) !== renderKey(want, sampleHash)) return { error: 'the commands cannot give that version back exactly' };
+  return { commands };
+}
+
+/**
+ * The commands that make a song's patterns as they were: one `pattern set` for each pattern that exists in both and differs. Patterns
+ * made since stay (removing one could break the order), and settings (tempo, channels, order) are not restored. Empty when the patterns
+ * already match; an error when a pattern that was there has been removed, since no command here gives it back.
+ */
+export function restoreSongCommands(now: SongDoc, want: SongDoc): { commands: string[] } | { error: string } {
+  const commands: string[] = [];
+  for (const [name, p] of want.patterns) {
+    const n = now.patterns.get(name);
+    if (!n) return { error: `pattern ${name} was removed since; no command here gives it back` };
+    if (formatPattern(n) !== formatPattern(p)) commands.push(`pattern set ${now.id}.${name} ${quote(formatPattern(p))}`);
+  }
   return { commands };
 }

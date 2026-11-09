@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { SoundSummary } from '@soundclaw/server/protocol';
-import type { TapeEntry, WorkRequest } from '@soundclaw/core';
+import { activeGroups, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { Store, Route } from '../store.ts';
 import type { CheckKind } from './controls.tsx';
 
@@ -120,4 +120,28 @@ export function useAttentionOrder(store: Store): SoundSummary[] {
   );
   const byId = new Map(store.index.map((s) => [s.id, s]));
   return ids.flatMap((id) => { const s = byId.get(id); return s ? [s] : []; });
+}
+
+export type LaneId = 'sent' | 'seen' | 'claimed' | 'working' | 'blocked' | 'review' | 'closed';
+
+/** When a request was finished (its latest done), or ''. */
+export const doneAt = (q: WorkRequest): string => [...q.events].reverse().find((e) => e.type === 'done')?.at ?? '';
+
+/** Has a person approved the item since the request was done? (An approval from a card or the review alike.) */
+export function approvedSince(store: Store, q: WorkRequest): boolean {
+  const at = doneAt(q);
+  const want = new RegExp(`^(?:sound|song) mark ${q.sound} approved\\b`);
+  const active = activeGroups(store.tape);
+  return store.tape.some((e) => e.by.startsWith('human:') && want.test(e.cmd) && (e.at ?? '') >= at && active.has(e.group));
+}
+
+/** The lane a request is in on the session page. Ready for review is a done change with no approval, ask-again or revert from a person since. */
+export function laneOf(store: Store, q: WorkRequest): LaneId {
+  switch (q.state) {
+    case 'open': return (q.seen ?? []).length ? 'seen' : 'sent';
+    case 'claimed': return q.latest ? 'working' : 'claimed';
+    case 'blocked': return 'blocked';
+    case 'done': return q.kind === 'change' && !q.reviewed && !approvedSince(store, q) ? 'review' : 'closed';
+    default: return 'closed';
+  }
 }

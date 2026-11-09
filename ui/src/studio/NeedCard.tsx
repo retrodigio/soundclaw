@@ -3,8 +3,9 @@
 // Actions (Play, Approve, Ask) show on hover and focus; Feedback, Edit and the exports are in the
 // overflow menu. Every card is the same height, so the grid can be windowed.
 
+import { askAttr } from './ask.tsx';
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { csvFileText, patchFileText, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { csvFileText, patchFileText, targetWords, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { SoundSummary } from '@soundclaw/server/protocol';
 import { useCard } from '../CardImages.tsx';
 import { download } from '../download.ts';
@@ -65,6 +66,7 @@ function RequestLine({ store, q }: { store: Store; q: WorkRequest }) {
       {(q.tags ?? []).map((t) => <span key={t} className={`chip tag${t === 'good' ? ' good' : ''}`} data-testid={`request-tag-${q.id}`}>{t}</span>)}
       {q.other && <span className="dim" data-testid={`request-other-${q.id}`}>like {q.other}</span>}
       <span className="dim nc-req-note"> {'“'}{q.note}{'”'}</span>
+      {q.target && <span className="mono dim" data-testid={`request-target-${q.id}`}> {targetWords(q.target)}</span>}
       {q.state === 'claimed' && q.latest && <span className="dim nc-req-note" data-testid="working"> {q.latest}</span>}
       {q.state === 'done' && <span className="dim nc-req-note" data-testid={`done-${q.id}`}>{'✓'} done: {q.latest}</span>}
       {(q.state === 'open' || q.state === 'claimed') && <button className="link" data-testid={`cancel-${q.id}`} onClick={() => void store.request({ action: 'cancel', id: q.id })}>withdraw</button>}
@@ -97,7 +99,7 @@ export const NeedCard = memo(function NeedCard({ store, sound, selected, playing
   const doc = (): Promise<Sound | undefined> => store.docNow(sound.id);
   const item = (label: string, run: () => void | Promise<void>, testId: string) => <button type="button" role="menuitem" className="menu-item" data-testid={testId} onClick={() => { setMenu(false); void run(); }}>{label}</button>;
   return (
-    <article ref={ref} className="nc" data-testid={`card-${sound.id}`} data-status={sound.status} data-hash={info?.hash ?? ''} data-selected={selected || undefined} data-playing={playing || undefined} data-new={fresh || undefined}
+    <article ref={ref} className="nc" data-testid={`card-${sound.id}`} data-ask-item={sound.id} {...askAttr(sound.id, { kind: 'item' }, sound.id)} data-status={sound.status} data-hash={info?.hash ?? ''} data-selected={selected || undefined} data-playing={playing || undefined} data-new={fresh || undefined}
       onClick={() => sel.select({ kind: 'sound', id: sound.id })}>
       <header className="nc-head">
         <a className="nc-name" href={`#/sound/${sound.id}`} title={`Open ${sound.id}${sound.label ? ` (${sound.label})` : ''}`}>{sound.id}</a>

@@ -57,6 +57,30 @@ All notable changes to SoundClaw are listed here. The format follows
 - **The audition page** is the same grid with one column, the A/B card beside it, and its paging, filters, play-all and keys as before.
 - **New in core:** `restoreCommands` (the commands that give a sound an earlier version's render, checked on a copy). No render changed.
 
+### The agent layer
+- **Targets.** A change request may carry a `target`: a range of a sound, bars of a song (with a channel), a parameter (of a layer or an effect),
+  a layer or the item. It is validated with the request and printed in words by `await`, the MCP text, `request` and the brief (`pinned to
+  0.31–0.38 s`, `bars 9–12 of lead`, `parameter decay`); `request --target "range 0.31-0.38"` and the MCP `request` tool take it. A request can also
+  name the done request it asks `again` about.
+- **The composer.** R, or right-click › Ask for changes, on a waveform region, bars on a song's ruler (with the selected channel), a knob, a layer, a
+  device or an item opens a popover anchored to the selection with the note and chips (the selection, the failing check inside it, the moment; the
+  check and the moment can be removed). ⌘↵ sends, Esc cancels, and focus goes back to where it was.
+- **The session page** (`#/session`): the claimed request with its latest progress and the agent's commands since the claim, a running batch as
+  cells that fill, requests in lanes (Sent, Seen, Claimed, Working, Blocked with a reply field, Ready for review, Closed), and the history tape, a
+  timeline of every command (agent marks round and violet, yours square and teal, batches as labelled spans) that pans and zooms, lists a group's
+  commands on hover and plays the focused item as it was after the group on click. The bottom panel's History tab shows the same tape, filtered to
+  the item. Pause and stop are not offered: the request machinery has no such step.
+- **Batch progress.** The writer publishes `batchProgress` messages (start with a count, item done, end) for a batch of several commands and for the
+  members a `set new` or `set regen` makes; the snapshot carries the latest. The strip appears on the page the batch touches.
+- **Review** (`#/review/<request or group>`, from the lane, the feed or the update chip): before and after waveforms aligned on the onset with the
+  checks' markers, parameters old → new with author marks, the agent's note, numbers before → after with check glyphs, level-matched A/B with Tab
+  switching in time (a song: notes per pattern and A/B of the loop). Approve (⌘↵), Ask again (a new request linked to the old one) and Revert (one
+  batch by the person) each land on the tape, offer Undo for ten seconds and return focus. `GET /api/review` serves the structured `changes`.
+- **Live arrival.** If you are editing the item the agent changes, the editor keeps your version, your edits are applied on top, and an "agent
+  update waiting · review" chip opens the review; discarding your draft takes the update. Scroll, selection, popovers and carets never move.
+- **New in core:** `RequestTarget` with `targetProblem`, `targetWords` and `parseRequestTarget`; the request fields `target` and `again`; the
+  `reviewed` record; `restoreSongCommands`. No render changed; the golden hashes are as they were.
+
 ### Songs and the mixer
 - **The arrangement.** A track per channel grouped by game layer, a bar ruler with the sections as markers, the loop region with handles, the seam
   check as a badge, a clip for each placement of a pattern with a note sketch, and the send buses. Clips the agent wrote and nobody approved are violet

@@ -6,6 +6,7 @@ import './studio/tokens.css';
 import './styles.css';
 import './studio/studio.css';
 import './studio/shell.css';
+import './studio/agent.css';
 import './sound/sound.css';
 import './sets/sets.css';
 import './song/song.css';

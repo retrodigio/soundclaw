@@ -6,7 +6,7 @@
 import { BIBLE_FILE, STYLE_FILE, musicGuide, type MusicGuide } from '@soundclaw/core';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { activeGroups, renderKey, AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, sha256Text, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
+import { activeGroups, renderKey, AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, sha256Text, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Parsed, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
@@ -14,7 +14,7 @@ import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
 import { normalizePlan } from './normalize.ts';
 import { SongBench, type SongMeasured } from './songs.ts';
-import { LEAN_AT, type CardLite, type ServerMessage, type Snapshot, type SoundSummary } from './protocol.ts';
+import { LEAN_AT, type BatchProgress, type CardLite, type ServerMessage, type Snapshot, type SoundSummary } from './protocol.ts';
 import { Thumbs } from './thumbs.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
 
@@ -74,6 +74,8 @@ export class Writer {
   private readonly listeners = new Set<Listener>();
   private queue: Promise<unknown> = Promise.resolve();
   private readonly now: () => string;
+  private batchCount = 0;
+  private lastBatch: BatchProgress | null = null;
 
   constructor(project: Project, o: WriterOptions = {}) {
     this.project = project;
@@ -103,6 +105,18 @@ export class Writer {
   requestsChanged(): void {
     this.hub.syncRequests(readRequestRecords(this.project), readRequests(this.project));
     this.emit({ type: 'requests', requests: [...readRequests(this.project).values()] });
+  }
+
+  /** The multi-item batch running now, or the last one that ran. */
+  batchProgress(): BatchProgress | null {
+    return this.lastBatch;
+  }
+
+  /** How many items a command is: a set's members (loudness matched one by one), else one. */
+  private itemsOf(c: Command): number {
+    if (c.op === 'set-new') return c.count;
+    if (c.op === 'set-regen') return this.library.sets.get(c.id)?.generated.length ?? 1;
+    return 1;
   }
 
   /** The writer's clock (UTC, whole seconds), as tape lines are stamped. */
@@ -233,7 +247,7 @@ export class Writer {
   }
 
   /** The commands (and notes) that match the loudness of the sounds a set or family command made or changed, by gain. */
-  private matchAfter(lib: Library, c: Command): { commands: string[]; notes: string[] } {
+  private matchAfter(lib: Library, c: Command, onItem?: (id: string) => void): { commands: string[]; notes: string[] } {
     const out = { commands: [] as string[], notes: [] as string[] };
     let target: number | null = null;
     let ids: string[] = [];
@@ -248,12 +262,16 @@ export class Writer {
       const as = c.as ?? `${c.id}_${c.kind}`;
       ids = [as];
     }
-    if (target === null) return out;
+    if (target === null) {
+      for (const id of ids) onItem?.(id);
+      return out;
+    }
     for (const id of ids) {
       const m = matchGain(lib.get(id)!, target, this.samples, this.style);
       if (m.command) out.commands.push(m.command);
       if (m.note) out.notes.push(m.note);
       if (m.error) out.notes.push(m.error);
+      onItem?.(id);
     }
     return out;
   }
@@ -416,6 +434,7 @@ export class Writer {
       tape: lean ? this.entries.slice(-TAPE_PAGE) : [...this.entries],
       requests: [...readRequests(this.project).values()],
       presence: this.hub.presence(),
+      batch: this.lastBatch,
     };
   }
 
@@ -429,6 +448,32 @@ export class Writer {
     if (parsed.errors.length) return { ok: false, errors: parsed.errors };
     if (!parsed.commands.length) return { ok: true, group: null, added: [], touched: [], touchedSets: [], touchedSongs: [], touchedInstruments: [], warnings: ['no commands'] };
     const group = nextGroup(this.entries);
+    // A batch of several items (many commands, or a set's members) tells the watchers how far it has got.
+    const total = parsed.commands.some((c) => c.op === 'undo' || c.op === 'redo') ? 0 : parsed.commands.reduce((n, c) => n + this.itemsOf(c), 0);
+    let progress: BatchProgress | null = null;
+    const tell = (phase: 'start' | 'item' | 'end', label = '', state: BatchProgress['state'] = 'running'): void => {
+      if (!progress) return;
+      if (phase === 'item') progress.done = Math.min(progress.total, progress.done + 1);
+      progress.state = state;
+      if (phase === 'end' && state === 'done') progress.done = progress.total;
+      if (label) progress.label = label;
+      this.lastBatch = { ...progress };
+      this.emit({ type: 'batchProgress', phase, batch: this.lastBatch });
+    };
+    if (total >= 2) {
+      progress = { id: `b${++this.batchCount}`, by: req.by, total, done: 0, label: '', state: 'running', startedAt: this.stamp() };
+      tell('start');
+    }
+    const outcome = this.runBatch(req, parsed.commands, group, tell, !!progress);
+    if (progress) {
+      if (outcome.ok) tell('end', '', 'done');
+      else tell('end', '', 'failed');
+    }
+    return outcome;
+  }
+
+  private runBatch(req: RunRequest, commands: Parsed[], group: string, tell: (phase: 'item', label?: string) => void, counted: boolean): RunOutcome {
+    const parsed = { commands };
     let seq = this.entries.reduce((n, e) => Math.max(n, e.seq), 0);
     const at = this.stamp();
     const added: TapeEntry[] = [];
@@ -484,12 +529,13 @@ export class Writer {
           // a command that stands for several (song new from-bible=, template=) goes on the tape as those commands
           for (const line of (normal ?? c.text).split('\n')) added.push({ seq: ++seq, by: req.by, at, group, cmd: line });
           // Loudness matching measures a render; the result goes on the tape as plain `sound set … gain=` commands, so a replay never measures.
-          const match = this.matchAfter(next, c);
+          const match = this.matchAfter(next, c, counted && (c.op === 'set-new' || c.op === 'set-regen') ? (id) => tell('item', `${c.text.split(' ').slice(0, 3).join(' ')}: ${id}`) : undefined);
           for (const text of match.commands) {
             applyCommand(next, parse(text).commands[0]!);
             added.push({ seq: ++seq, by: req.by, at, group, cmd: text });
           }
           warnings.push(...match.notes);
+          if (counted && c.op !== 'set-new' && c.op !== 'set-regen') tell('item', c.text);
         } catch (e) {
           errors.push({ line: c.line, col: 1, message: (e as Error).message });
         }

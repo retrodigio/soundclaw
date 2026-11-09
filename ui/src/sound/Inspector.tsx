@@ -43,8 +43,7 @@ export function AskComposer({ store, id, selection, focusToken, onClose }: { sto
   const send = async () => {
     const note = text.trim();
     if (!note) return;
-    const pinned = selection ? ` (pinned to ${selection.a.toFixed(2)}–${selection.b.toFixed(2)} s)` : '';
-    const r = await store.askForChanges(id, note + pinned);
+    const r = await store.request({ action: 'request', kind: 'change', sound: id, note, ...(selection ? { target: { kind: 'range', start: Math.round(selection.a * 1000) / 1000, end: Math.round(selection.b * 1000) / 1000 } } : {}) });
     setState({ ok: r.ok, msg: r.ok ? 'Sent to the agent.' : (r.error ?? 'The request was refused.') });
     if (r.ok) { setText(''); onClose?.(); }
   };

@@ -173,7 +173,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       after (duration, loudness, centroid, pitch) and a before/after compare view saved as a PNG.
       Without --by: everyone but the agent itself; --by human: people only. Reading moves the
       cursor (not with --since or --peek). Never undo a person's edit silently.
-  soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
+  soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--target "<where>"] [--again <request>] [--by <author>]
       Ask for a change on a sound, as the dashboard's Ask for changes does (also writes
       sound mark <id> rejected "<note>" on the history). --tag adds the quick tags of the cards
       (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another
@@ -182,6 +182,11 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       open, claimed or blocked (open ones say seen by <agent> once an agent has been handed them),
       the dashboard's blind A/B answers among them as comparisons (which side fits better in the moment,
       each side a sound as at a tape number, with the gain that matched its level).
+      --target pins the request inside the item, as a selection in the dashboard does:
+      "range 0.31-0.38" (seconds of a sound), "bars 9-12 lead" (bars of a song, then a channel if
+      you mean one), "param decay [layer 2] [fx 1]", "layer 2" or "item". The listing, await and the
+      brief print it in words (pinned to 0.31–0.38 s, bars 9–12 of lead, parameter decay).
+      --again names a done request this one asks again about.
       --by is human:<name> (default human:cli).
   soundclaw reply <project> <request> "<answer>" [--by <author>]      answer a blocked request (it opens again)
   soundclaw cancel <project> <request> ["<why>"] [--by <author>]       withdraw a request
@@ -291,7 +296,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   import: [['id', 'by'], ['quiet', 'classic']],
   normalize: [['by'], []],
   sample: [['as', 'by'], []],
-  request: [['note', 'by', 'tag', 'like'], []],
+  request: [['note', 'by', 'tag', 'like', 'target', 'again'], []],
   reply: [['by'], []],
   cancel: [['by'], []],
   work: [['by'], []],
@@ -706,7 +711,7 @@ function cmdRequest(io: Io, p: Parsed): number {
   }
   assertNoServer(dir, io);
   const w = wr(io, dir);
-  const q = personRequest(w, author(p, 'human:cli', humanName), toPersonRequest({ action: 'request', sound, note: one(p, 'note'), tags: p.flags.get('tag'), other: one(p, 'like') }));
+  const q = personRequest(w, author(p, 'human:cli', humanName), toPersonRequest({ action: 'request', sound, note: one(p, 'note'), tags: p.flags.get('tag'), other: one(p, 'like'), target: one(p, 'target'), again: one(p, 'again') }));
   w.requestsChanged();
   io.out(`${requestLine(q)}\n`);
   return 0;

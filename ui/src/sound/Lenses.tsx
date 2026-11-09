@@ -4,6 +4,7 @@
 // measuring code the CLI uses); the numbers strip under the lens is always there. Flags are the
 // failing checks' ranges as markers: a click jumps to one and loops it.
 
+import { askLabel, useAskSource } from '../studio/ask.tsx';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { noteName, peaks, midiName, type Sound } from '@soundclaw/core';
 import type { LensReply } from '../render.worker.ts';
@@ -144,6 +145,20 @@ export function LensPanel({ store, sound, live, height = 300, prov, outline, pre
 
   useEffect(() => { onAxis?.(axis); }, [axis]); // eslint-disable-line react-hooks/exhaustive-deps
   const flags = useMemo(() => flagsOf(data), [data]);
+  const body = useRef<HTMLDivElement>(null);
+  // R and the context menu ask about the selected region, anchored over it
+  useAskSource(() => {
+    const sel = axis.sel;
+    if (!sel || !keys) return null;
+    const target = { kind: 'range' as const, start: Math.round(sel.a * 1000) / 1000, end: Math.round(sel.b * 1000) / 1000 };
+    return { sound: id, target, label: askLabel(id, target), anchor: () => {
+      const r = body.current?.querySelector('[data-testid="lens-surface"]')?.getBoundingClientRect();
+      if (!r) return null;
+      const span = Math.max(1e-6, view.t1 - view.t0);
+      const x0 = r.left + ((sel.a - view.t0) / span) * r.width, x1 = r.left + ((sel.b - view.t0) / span) * r.width;
+      return new DOMRect(Math.max(r.left, x0), r.top, Math.max(8, Math.min(r.right, x1) - Math.max(r.left, x0)), r.height);
+    } };
+  }, 2);
   const loopRegion = (a: number, b: number) => { void store.playRegion(id, a, b); };
 
   const jumpToFlag = (f: Flag) => {
@@ -175,7 +190,7 @@ export function LensPanel({ store, sound, live, height = 300, prov, outline, pre
         {(axis.t1 > axis.t0 && (t0 > 0 || (duration && t1 < duration - 1e-6))) && <button type="button" className="link-btn" data-testid="lens-zoom-reset" onClick={() => set({ t0: 0, t1: 0, level: 1 })}>reset zoom</button>}
       </div>
 
-      <div className={`lens-body${height === 'fill' ? ' fill' : ''}`} style={height === 'fill' ? undefined : { height }} data-testid="lens-body">
+      <div ref={body} className={`lens-body${height === 'fill' ? ' fill' : ''}`} style={height === 'fill' ? undefined : { height }} data-testid="lens-body">
         {!data ? <div className="lens-wait" data-testid="lens-measuring">measuring…</div> : (
           <>
             {lens === 'layers' && layersLens && <LayersView data={data} view={view} lens={layersLens} bands={bands} />}
@@ -296,7 +311,7 @@ function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, da
   void data;
 
   return (
-    <div ref={box} className="lens-surface" data-testid="lens-surface" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => onPick?.('move', -1, 9, 0, 0)} onDoubleClick={() => set({ sel: null })} role="application" aria-label="Time axis: drag to select a region">
+    <div ref={box} className="lens-surface" data-testid="lens-surface" data-ask-surface onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => onPick?.('move', -1, 9, 0, 0)} onDoubleClick={() => set({ sel: null })} role="application" aria-label="Time axis: drag to select a region">
       {axis.sel && <div className="lens-sel" data-testid="lens-sel" style={{ left: `${pct(axis.sel.a)}%`, width: `${Math.max(0.15, pct(axis.sel.b) - pct(axis.sel.a))}%` }} />}
       {axis.cursor !== null && <div className="lens-cursor" data-testid="lens-cursor" style={{ left: `${pct(axis.cursor)}%` }} />}
       <div ref={head} className="lens-playhead" data-testid="lens-playhead" style={{ display: 'none' }} />

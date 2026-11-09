@@ -294,6 +294,25 @@ Take requests before anything else:
 
 A request leaves the sound marked `rejected`; the person approves it again when it is right.
 
+**Read a request's target.** A request may be pinned to part of its item: the line says so after the note, in words.
+`— pinned to 0.31–0.38 s` is a stretch of the sound (change what is heard there and leave the rest alone;
+`view` with a window and `check` show it), `— bars 9–12 of lead` is bars of a song, optionally of one channel (edit
+those bars in the pattern text, leave the others), `— parameter decay` or `— parameter cutoff of effect 1 on layer 2`
+is the control the person pointed at (start there), `— layer 2` is a layer, and `— the item as a whole` is no
+narrower than the sound or song. Text such as `[attached: click check: …; moment: "…"]` at the end of a note is the
+failing check inside the selection and the moment the person had in mind. When you file a request yourself, pin it
+the same way with `--target "range 0.31-0.38"` (also `"bars 9-12 lead"`, `"param decay layer 2 fx 1"`, `"layer 2"`,
+`"item"`; the MCP `request` tool takes the same text or an object).
+
+**Being reviewed.** When you finish a request the person reviews it in the dashboard: your commands for it, before and
+after, the parameters, the numbers and the checks, with your `done` text as the note, so say what changed and why in a
+sentence. They approve it, revert it (one batch of theirs that restores the earlier values), or ask again: that
+arrives as a new request with `(asks again about r3)`; read `history --sound <id>` and the old request's `done` text,
+because what you did was not enough or not right. If they are editing the sound while you work, your change waits
+behind a chip until they take it, so keep going and do not rewrite it. A batch of many items (`set new … count=8`,
+`set regen`, a `run` of many commands) shows the person how far it has got; prefer one batch to many single commands
+when the items belong together.
+
 ### The moment, and blind comparisons
 
 **Give every sound you make for a known situation a moment**: `sound set <id> moment="The player walks

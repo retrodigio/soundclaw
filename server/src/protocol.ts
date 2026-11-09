@@ -3,7 +3,7 @@
 
 import type { Presence } from './await.ts';
 import type { SampleInfo } from './samples.ts';
-import type { Diag, Instrument, SetDoc, SongJson, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
+import type { Diag, Instrument, RequestTarget, SetDoc, SongJson, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
 
 export type { Presence, SampleInfo };
 
@@ -73,13 +73,29 @@ export interface Snapshot {
   tape: TapeEntry[];
   requests: WorkRequest[];
   presence: Presence;
+  /** The batch the writer is running, or the last one it ran (null: none since the server started). */
+  batch: BatchProgress | null;
+}
+
+/** A multi-item batch (a run of many commands, `set new`, `set regen`): how many items, how many are done, and whether it has ended. */
+export interface BatchProgress {
+  id: string;
+  by: string;
+  total: number;
+  done: number;
+  /** The latest item done, as the command (or member) it was. */
+  label: string;
+  state: 'running' | 'done' | 'failed';
+  startedAt: string;
 }
 
 /** What a person can ask from the dashboard. */
 export type PersonRequest =
-  | { action: 'request'; kind: 'change'; sound: string; note: string; /** Quick tags (too loud, …, good). */ tags?: string[]; /** With `too similar to another sound`. */ other?: string }
+  | { action: 'request'; kind: 'change'; sound: string; note: string; /** Quick tags (too loud, …, good). */ tags?: string[]; /** With `too similar to another sound`. */ other?: string; /** What inside the item it points at. */ target?: RequestTarget; /** The done request it asks again about. */ again?: string }
   /** A blind A/B judgment: two versions (sound and tape number), the answer, the moment they were judged in and the gain each side played at. */
   | { action: 'compare'; a: { sound: string; seq: number }; b: { sound: string; seq: number }; answer: 'a' | 'b' | 'both' | 'neither'; moment?: string; gains: { a: number; b: number } }
+  /** A decision on a done request that is not a new request: approved, or reverted. */
+  | { action: 'reviewed'; id: string; how: 'approved' | 'reverted' | 'undone' }
   | { action: 'reply'; id: string; text: string }
   | { action: 'cancel'; id: string; text?: string };
 
@@ -95,6 +111,8 @@ export type ServerMessage =
   | { type: 'pong' }
   /** The project's samples changed (a sample was imported). */
   | { type: 'samples'; samples: SampleInfo[] }
+  /** A multi-item batch started (`start`, with the count), finished an item (`item`) or ended (`end`). Sent while the batch runs, before its `batch` message. */
+  | { type: 'batchProgress'; phase: 'start' | 'item' | 'end'; batch: BatchProgress }
   /** requests.jsonl changed: every request as it stands. */
   | { type: 'requests'; requests: WorkRequest[] }
   /** Who is listening for requests (sent on connect and whenever it changes). */
@@ -108,3 +126,41 @@ export type ClientMessage =
   | { type: 'run'; id: number; commands: string; by: string }
   /** A request, a reply or a cancel from the dashboard, written `by`. */
   | { type: 'request'; id: number; by: string; body: PersonRequest };
+
+/** A check as the review shows it: pass or fail, what was measured, and where in the sound (seconds) for the checks that say. */
+export interface ReviewCheck { name: string; pass: boolean; value: string; at: number[] }
+
+/** One side of a review: the sound, its checks, and its numbers. */
+export interface ReviewSide { sound: Sound | null; checks: ReviewCheck[]; lufs: number | null; truePeakDb: number | null; duration: number; centroid: number | null }
+
+/** A row of the review's numbers: before, after and the glyph of the check it belongs to (empty: none). */
+export interface ReviewRow { k: string; a: string; b: string; glyph: 'pass' | 'fail' | '' }
+
+/** What an agent did for a request (or one group), structured for the review page. */
+export interface Review {
+  /** The request, when the review is of one. */
+  request: string | null;
+  /** The tape groups the review covers, oldest first. */
+  groups: string[];
+  first: number;
+  last: number;
+  by: string;
+  at?: string;
+  /** The sound or song the review is of. */
+  item: string;
+  kind: 'sound' | 'song';
+  /** The agent's note: the text it finished the request with. */
+  note: string | null;
+  commands: string[];
+  params: { name: string; old: string; new: string; by: string }[];
+  rows: ReviewRow[];
+  before: ReviewSide | null;
+  after: ReviewSide | null;
+  /** For a song: notes that went and came, per pattern, and the song as it was and is (the page renders both for the loop). */
+  song: { notes: string[]; settings: string[]; before: SongJson | null; after: SongJson | null; stillThere: boolean } | null;
+  /** The item as it is now matches the `after` (nothing has changed it since). */
+  current: boolean;
+  /** The tape's end when this was worked out. */
+  tapeEnd: number;
+}
+

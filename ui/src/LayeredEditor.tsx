@@ -6,6 +6,7 @@
 // layer by its handle is `layer move`; dragging a device is `fx move`, or one batch (remove, then add
 // with the same parameters) to another layer; Alt-drag copies.
 
+import { askAttr, askLabel, openAsk } from './studio/ask.tsx';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   FX_KINDS, FX_SPECS, KeyedCoalescer, LAYER_SPECS, MAX_FX, MAX_LAYERS, RECIPE_NAMES, SOURCE_KINDS, addPoint, envAt, envCommand, flatEnv, fxSetCommand, isLogScale, isStereo, layerLabel, layerSetCommand, layerSpecs,
@@ -339,7 +340,6 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
   const actions: Action[] = voice ? [] : [
     { id: 'layer.add', label: 'Add a layer', group: 'Edit', shortcut: '⇧ L', key: 'shift+l', run: () => setMenu('layer'), keywords: 'new source track' },
     { id: 'panel.inspector', label: 'Toggle the inspector', group: 'Panels', shortcut: '⌥ 2', key: 'alt+2', override: true, run: () => { setAskOpen((o) => !o); setAskFocus((n) => n + 1); } },
-    { id: 'edit.ask', label: 'Ask for changes on the selection', group: 'Edit', shortcut: 'R', key: 'r', override: true, run: () => { setAskOpen(true); setAskFocus((n) => n + 1); }, keywords: 'request agent feedback' },
   ];
   useActions(actions);
 
@@ -453,7 +453,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     const prevKind = byAgent && trail && typeof trail.prev === 'object' && !('salt' in trail.prev) ? (trail.prev as Fx) : null;
     return (
       <div key={`${sc}-${k}`} className="dev-wrap">
-        <div className={`device${isOpen ? ' open' : ''}${byAgent ? ' by-agent' : ''}${over === `fx:${sc}:${k}` ? ' drop' : ''}`} data-testid={`fx-${sc}-${k}`} data-kind={f.kind} data-agent={byAgent || undefined}
+        <div className={`device${isOpen ? ' open' : ''}${byAgent ? ' by-agent' : ''}${over === `fx:${sc}:${k}` ? ' drop' : ''}`} data-testid={`fx-${sc}-${k}`} {...askAttr(id, { kind: 'param', param: f.kind, ...(sc === 'M' ? {} : { layer: Number(sc) }), fx: k }, askLabel(id, { kind: 'param', param: f.kind, ...(sc === 'M' ? {} : { layer: Number(sc) }), fx: k }))} data-kind={f.kind} data-agent={byAgent || undefined}
           tabIndex={0} role="button" aria-expanded={isOpen} aria-label={`${f.kind} effect ${k}${byAgent ? ', changed by the agent' : ''}. Enter opens its parameters.`} data-drop={`fx:${sc}:${k}`}
           onPointerDown={(e) => startDrag(e, { type: 'fx', scope, k }, `${f.kind}`)}
           onClick={() => { if (suppressClick.current) return; if (scope !== 'M') { setSel(scope); setEnvTarget(`${scope}.fx${k}.${FX_SPECS[f.kind].find((x) => x.env)?.name ?? 'mix'}`); } setOpen(isOpen ? null : { kind: 'fx', scope, k }); }}
@@ -565,7 +565,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     const srcOpen = open?.kind === 'source' && open.n === n;
     const env = l.amp;
     return (
-      <div key={l.salt} className={`track${n === sel ? ' sel' : ''}${l.mute ? ' muted' : ''}${over === `layer:${n}` ? ' drop' : ''}${byAgentLayer ? ' by-agent' : ''}`} data-testid={`layer-row-${n}`} data-kind={l.kind} data-drop={`layer:${n}`} style={{ '--lc': color } as CSSProperties}>
+      <div key={l.salt} className={`track${n === sel ? ' sel' : ''}${l.mute ? ' muted' : ''}${over === `layer:${n}` ? ' drop' : ''}${byAgentLayer ? ' by-agent' : ''}`} data-testid={`layer-row-${n}`} {...askAttr(id, { kind: 'layer', layer: n }, askLabel(id, { kind: 'layer', layer: n }))} data-kind={l.kind} data-drop={`layer:${n}`} style={{ '--lc': color } as CSSProperties}>
         <div className="track-main">
           <div className="track-head">
             <div className="track-title">
@@ -654,7 +654,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
           </div>
           <span className="dim small">{sound.layers.length} of {MAX_LAYERS} layers</span>
           <span className="spacer" />
-          <Button kind="agent" testId="ask-toggle" pressed={askOpen} onClick={() => { setAskOpen((o) => !o); setAskFocus((n) => n + 1); }}>Ask for changes <kbd className="kbd">R</kbd></Button>
+          <Button kind="agent" testId="ask-toggle" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = { kind: 'layer' as const, layer: sel }; openAsk({ sound: id, target: sel > 0 ? t : { kind: 'item' }, label: sel > 0 ? askLabel(id, t) : id, anchor: () => r }); }}>Ask for changes <kbd className="kbd">R</kbd></Button>
           <Button kind="primary" testId="insp-approve" onClick={() => void store.approve(id)}>Approve</Button>
         </div>
       )}

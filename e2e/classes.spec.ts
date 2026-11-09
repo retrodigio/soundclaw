@@ -36,6 +36,9 @@ test('the sound page shows the class rule, the menu changes it as a command, and
   // normalize writes the gain; the page follows
   const n = await agent.cli(['normalize', agent.dir, 'tick']);
   expect(n.out).toMatch(/normalized 1 sound/);
+  // the class was just changed here, so the agent's normalize waits behind the update chip until it is taken
+  await expect(page.getByTestId('update-chip')).toBeVisible();
+  await page.getByTestId('update-take').click();
   await expect.poll(async () => Number((await page.getByTestId('editor-numbers').textContent())!.match(/(-?\d+\.\d) LUFS/)![1])).toBeCloseTo(-28, 0);
   await page.screenshot({ path: join(import.meta.dirname, '..', '.dev', 'screens', 'class.png') });
   // back to the default through the menu

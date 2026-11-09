@@ -21,7 +21,7 @@ export function fixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'soundclaw-test-'));
   const dir = join(root, 'demo.sclaw');
   let n = 0;
-  const now = () => `2026-11-06T10:00:${String(n++ % 60).padStart(2, '0')}Z`;
+  const now = () => new Date(Date.UTC(2026, 10, 6, 10, 0, n++)).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const w = new Writer(createProject(dir), { now });
   return { root, dir, w, reopen: () => new Writer(loadProject(dir), { now }), clean: () => rmSync(root, { recursive: true, force: true }) };
 }

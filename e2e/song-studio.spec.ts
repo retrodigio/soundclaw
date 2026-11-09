@@ -132,13 +132,13 @@ test('bars picked on the ruler pin a request to them and the selected channel', 
   await page.getByTestId('track-name-lead').click();
   const wait = agent.background(['await', agent.dir, '--timeout', '30']);
   await page.keyboard.press('r');
-  await expect(page.getByTestId('song-ask-text')).toBeFocused();
-  await page.getByTestId('song-ask-text').fill('the lead is too busy here');
-  await page.getByTestId('song-ask-send').click();
+  await expect(page.getByTestId('composer-note')).toBeFocused();
+  await page.getByTestId('composer-note').fill('the lead is too busy here');
+  await page.getByTestId('composer-send').click();
   const done = await wait.done;
   expect(done.code).toBe(0);
   expect(done.out).toContain('the lead is too busy here');
-  expect(done.out).toContain('pinned to bars 2–3, lead');
+  expect(done.out).toContain('bars 2–3 of lead');
   // play selection loops those bars
   await page.getByTestId('play-selection').click();
   await expect(page.getByTestId('song-editor')).toHaveAttribute('data-playing', 'true', { timeout: 20_000 });

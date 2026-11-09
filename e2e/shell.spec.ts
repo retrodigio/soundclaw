@@ -331,10 +331,13 @@ test('the agent rail: its changes pulse and keep a "new" dot until you play or o
   await expect(page.getByTestId('listener-chip')).toContainText('rounding the attack');
   await agent.cli(['work', agent.dir, 'done', 'r1', 'lowered the attack']);
   await expect(page.getByTestId('rail-request-r1')).toContainText('ready for review');
-  // R focuses the ask field
+  // R opens the composer on the focused item, and Esc gives focus back
+  await page.getByTestId('lib-row-beep').click();
   await page.locator('body').click({ position: { x: 700, y: 20 } });
   await page.keyboard.press('r');
-  await expect(page.getByTestId('ask-input')).toBeFocused();
+  await expect(page.getByTestId('composer-note')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('composer')).toHaveCount(0);
 });
 
 test('the bottom panel: Detail shows the selected sound with its numbers, History lists its commands', async ({ page }) => {

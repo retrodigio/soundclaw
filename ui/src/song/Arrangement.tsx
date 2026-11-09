@@ -145,7 +145,7 @@ export function Arrangement({ store, song, arr, report, authors, channel, patter
 
   const buses = (['reverb', 'delay'] as const).filter((k) => song[k]);
   return (
-    <section className="arr" data-testid="arrangement" aria-label="Arrangement" style={{ ['--nbars' as string]: nBars }}>
+    <section className="arr" data-testid="arrangement" data-ask-surface aria-label="Arrangement" style={{ ['--nbars' as string]: nBars }}>
       <div className="arr-row arr-rulerrow">
         <div className="arr-head arr-corner">
           <span className="cap">Arrangement</span><span className="spacer" />

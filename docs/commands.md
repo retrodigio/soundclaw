@@ -997,7 +997,7 @@ soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
 soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
 soundclaw midi import <project> <file.mid> [--id <song>]
 soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
-soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--by <author>]
+soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--target "<where>"] [--again <request>] [--by <author>]
 soundclaw reply <project> <request> "<answer>" [--by <author>]
 soundclaw cancel <project> <request> ["<why>"] [--by <author>]
 soundclaw work <project> list | claim [<request>] | progress [<request>] "<note>" | block [<request>] "<question>" | done [<request>] "<what changed>" [--by <agent>]
@@ -1200,6 +1200,8 @@ write behind its back. Read-only commands (`list`, `history`, `render`, `view`, 
 | `#/sound/<id>` | the editor (classic sliders, or layers, envelopes and effects), with the **Loop** panel: a loop box (`sound loop <id> 4 …` / `off`), the length and the crossfade (each a `sound loop` command), **Play looped** (repeats until stopped) and the numbers of the seam |
 | `#/set/<set>` | a set: a header with its loudness class and the loudness spread of its members (warned when wider than twice the class tolerance); the set loudness meter (the class band and one mark per member, shaped and coloured by how it stands); the clip grid: a row per member, a column per version (its last four distinct renders from the history, v1 oldest, the current one marked; the agent's latest change that nobody approved since in a dashed violet **agent** column). A click plays a cell, **Enter** makes it current (one batch of ordinary commands, written as you; on the agent's column it approves it), **1**–**9** play a row, **⇧1**–**⇧9** a column, ⇧-click picks a second cell. The blind A/B card beside it (below, when the window is narrow) compares two versions: drag two cells onto it, pick two and press **C**, or **Compare with current**; their loudness is matched (the gain shown on each side; a pair that is the same once matched is skipped and the card says so), A and B are assigned at random and the names hidden until you answer. It shows the moment (or a field that writes `set moment`) and asks *Which one fits better in this moment?*; **Play** plays a side four times at the interval the moment names ("every 0.4 s"), else once; **Tab** switches the side heard in time; **A**, **B**, **=** and **N** answer, writing a `comparison` request; then the names are shown, the session tally grows and the next pair loads after 2 s (**→** now). Also **Play in sequence** (with a gap, in ms), **Regen with a new seed** (`set regen <set> seed=<n>`, the seed chosen by the page), the spread rules, the distance matrix (pairs outside the limits outlined) and the set-spread verdict |
 | `#/song/<id>` | the music editor: the song order (sections as blocks to drag into a new order, repeats, intro and ending, the loop region as a band on a bar ruler with handles to drag), tempo, swing, key and time, the channels (instrument, gain, pan, mute and solo for listening, game layer) with each instrument's editor (note envelope, velocity, root, range, pitch check, and its voice with the sound editor's controls; a built-in is copied into the project first), the pattern grid (every channel; a drum channel as a row per hit to click or paint), the piano roll of a melodic channel (the key's notes shaded, notes outside it marked; click to add, drag to move, drag the end to lengthen, shift-drag to select, Delete, a velocity lane, slide/vibrato/arp from the menu), the helpers (the rows a helper would write shown before **Apply** runs the same command), and playback: **Play**, **from cursor** (a click on the ruler or a step), **selection** (the notes picked, or the pattern, repeating) and **Loop**, with the cursor lit across the grid, the roll and the ruler. Every edit is the command an agent would write (`pattern note …`, `song …`, `instrument …`), one gesture one history entry; after an edit only the changed channel renders again, and a playing song plays on from where it was |
+| `#/session` | the agent's session: *Working on now* (the claimed request, its latest progress, the agent's commands since the claim, a running batch as cells that fill), your requests in lanes (Sent, Seen, Claimed, Working, Blocked with a reply field, Ready for review, Closed) and the history tape: a timeline of every command, agent marks round and violet, yours square and teal, a batch a labelled span; it pans and zooms, hovering lists a group's commands, a click plays the focused item as it was after that group (nothing is written), *Undo batch* is the existing undo |
+| `#/review/<request or group>` | what an agent did: before (A) and after (B) waveforms aligned on the onset with the checks' markers, the parameters old → new, the agent's note, the numbers before → after with check glyphs, level-matched A/B (Tab switches in time), and for a song the notes per pattern and A/B of the loop; *Approve* (⌘↵), *Ask again…*, *Revert*; each offers Undo for ten seconds |
 | `#/audition`, `#/audition/<set>` | the batch audition page: every sound (or a set's members) as a row of the clip grid with one column, the sound as it is now, with Play, the check badge, Approve, Ask and Feedback; **Play all** with a gap; filters by set, status, checks and feedback tag; the keyboard: ↑ ↓ (and ← →) move the selection, **space** plays it, **a** approves it (`sound mark … approved`), **r** opens the note for Ask for changes (shortcuts are off while you type). Two sounds picked (click one, ⇧-click another, then **C**, or drag them) go on the blind A/B card as on a set's page; while a pair waits for an answer, **a**, **b**, **=** and **n** answer it, and the moment field writes `sound set <id> moment="…"` |
 
 Approvals, asks and feedback from the audition page are the same requests as on the cards: they reach a waiting agent through `await`. So are blind A/B answers, as `comparison` requests (see "Comparisons").
@@ -1235,6 +1237,29 @@ request carrying the tags (and, for *too similar*, the other sound), which reach
 the card. Like *Ask for changes* it marks the sound rejected; the tag `good` on its own is
 praise: a `feedback` request that marks nothing and that the agent just closes. The CLI files the
 same with `request <project> <id> --tag "too loud" [--note …] [--like <sound>]`.
+
+**Targets.** A change request may point inside its item, as a selection in the dashboard does (R, or
+right-click › *Ask for changes*, on a waveform region, bars of a song, a knob, a layer or device, or an item).
+The record carries `target`: `{kind:"range", start, end}` (seconds of a sound), `{kind:"bars", from, to, channel?}`
+(bars of a song, from 1, and the selected channel), `{kind:"param", param, layer?, fx?}` (a control; `layer` and
+`fx` count from 1, `fx` with no layer is the master chain), `{kind:"layer", layer}` or `{kind:"item"}`. A request
+names a song in `sound` as it names a sound; a range needs a sound, bars need a song, a layer needs a layered
+sound with that many layers, and a bars channel must be one of the song's. `await`, `request` listings, the MCP
+text and the brief print it in words: `— pinned to 0.31–0.38 s`, `— bars 9–12 of lead`, `— parameter decay`,
+`— layer 2`, `— the item as a whole`. The CLI takes it as `--target "range 0.31-0.38"`, `"bars 9-12 lead"`,
+`"param decay layer 2 fx 1"`, `"layer 2"` or `"item"`; the MCP `request` tool takes the object or that text.
+The composer also attaches, inside the note, `[attached: <the failing check inside the selection>; moment: "…"]`
+(each removable before sending).
+
+**Review and asking again.** A person looks at what an agent did for a done request in the dashboard
+(`#/review/<request>` or `#/review/<group>`, from the session page's *Ready for review* lane, the feed, or the
+"agent update waiting" chip) and approves it, reverts it, or asks again. *Ask again* files a new change request with
+`again: "<request>"` (`request … --again r3`); `await` prints `(asks again about r3)` and the brief says what that means.
+Approving or reverting a done request also writes a `reviewed` record (`approved` or `reverted`; `undone` takes the
+decision back within the ten-second Undo), which takes it out of *Ready for review*; the listing shows
+`approved by human:ana`. Reverting is one batch by the person that restores the parameters from before (a
+`sound set` of the values that differ for a classic sound, the layer/fx commands for a layered one, `pattern set` for a
+song's patterns).
 
 **Comparisons.** The dashboard's blind A/B card plays two versions (two cells of a set's grid: one
 sound at two tape numbers, or two sounds) at matched loudness with their names hidden, and asks

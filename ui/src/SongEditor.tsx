@@ -4,6 +4,7 @@
 // edit is a command, the very text an agent would write, sent as this person: a gesture is one batch
 // on the history, undone as one.
 
+import { askLabel, useAskSource } from './studio/ask.tsx';
 import { useMemo, useRef, useState } from 'react';
 import { arrange, layerOrder, rollNotes, stepTime, type Arrangement as Arr, type Pattern, type SongDoc } from '@soundclaw/core';
 import { PianoRoll } from './PianoRoll.tsx';
@@ -75,7 +76,7 @@ function SongAsk({ store, song, bars, channel, focusToken }: { store: Store; son
   const send = async (): Promise<void> => {
     const note = text.trim();
     if (!note) return;
-    const r = await store.feedback(song.id, [], pin && bars ? `${note} (pinned to ${pin})` : note);
+    const r = await store.request({ action: 'request', kind: 'change', sound: song.id, note, ...(bars ? { target: { kind: 'bars', from: bars.from + 1, to: bars.to + 1, ...(channel ? { channel } : {}) } } : {}) });
     setState({ ok: r.ok, msg: r.ok ? 'Sent to the agent.' : (r.error ?? 'The request was refused.') });
     if (r.ok) setText('');
   };
@@ -107,6 +108,12 @@ export function SongEditor({ store, id, view }: { store: Store; id: string; view
   const [inspector, toggleInspector] = useSongInspector();
   const [inspTab, setInspTab] = useState<InspTab>('instruments');
   const [askFocus, setAskFocus] = useState(0);
+  // R and the context menu ask about the bars picked on the ruler, with the selected channel
+  useAskSource(() => {
+    if (!bars) return null;
+    const target = { kind: 'bars' as const, from: bars.from + 1, to: bars.to + 1, ...(chan ? { channel: chan } : {}) };
+    return { sound: id, target, label: askLabel(id, target), anchor: () => document.querySelector('[data-testid="bar-selection"]')?.getBoundingClientRect() ?? null };
+  }, 2);
   const root = useRef<HTMLElement | null>(null);
   const playing = !!song && store.songPlay?.id === song.id;
   const { at: playingAt, nowRef } = useSongClock(store, song, playing && view !== 'mixer', root);
@@ -163,7 +170,6 @@ export function SongEditor({ store, id, view }: { store: Store; id: string; view
 
   const actions: Action[] = [
     { id: 'panel.inspector', label: 'Toggle the inspector', group: 'Panels', shortcut: '⌥ 2', key: 'alt+2', override: true, run: () => toggleInspector() },
-    { id: 'edit.ask', label: 'Ask for changes on the selection', group: 'Edit', shortcut: 'R', key: 'r', override: true, run: () => { openInspector('changes'); setAskFocus((n) => n + 1); }, keywords: 'request agent feedback bars' },
     { id: 'song.arrangement', label: 'Song: open the arrangement', group: 'Song', run: () => { location.hash = `#/song/${id}`; }, keywords: 'tracks clips ruler' },
     { id: 'song.mixer', label: 'Song: open the mixer', group: 'Song', run: () => { location.hash = `#/song/${id}/mixer`; }, keywords: 'faders pan sends meters loudness master' },
     { id: 'song.instruments', label: 'Song: show the instruments', group: 'Song', run: () => { if (view) location.hash = `#/song/${id}`; openInspector('instruments'); }, keywords: 'channels voice' },

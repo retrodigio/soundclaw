@@ -4,7 +4,7 @@
 // (answer it here), done.
 
 import { memo, useState } from 'react';
-import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, isStereo, layerLabel, tagsNote, type Sound, type WorkRequest } from '@soundclaw/core';
+import { CLASSIC_FIELDS, FEEDBACK_TAGS, SIMILAR_TAG, WAVE_NAMES, isStereo, layerLabel, tagsNote, targetWords, type Sound, type WorkRequest } from '@soundclaw/core';
 import type { SoundSummary } from '@soundclaw/server/protocol';
 import { CardImages } from './CardImages.tsx';
 import { NoListener, unattended, useNow } from './Listening.tsx';
@@ -24,6 +24,7 @@ export function RequestRow({ store, q }: { store: Store; q: WorkRequest }) {
         {(q.tags ?? []).map((t) => <span key={t} className={`chip tag${t === 'good' ? ' good' : ''}`} data-testid={`request-tag-${q.id}`}>{t}</span>)}
         {q.other && <span className="dim" data-testid={`request-other-${q.id}`}>like {q.other}</span>}
         {(!(q.tags ?? []).length || q.note !== tagsNote(q.tags, q.other)) && <span className="dim"> “{q.note}”</span>}
+        {q.target && <span className="mono dim" data-testid={`request-target-${q.id}`}> {targetWords(q.target)}</span>}
         {(q.state === 'open' || q.state === 'claimed' || q.state === 'blocked') && (
           <button className="link" data-testid={`cancel-${q.id}`} onClick={() => void store.request({ action: 'cancel', id: q.id })}>withdraw</button>
         )}

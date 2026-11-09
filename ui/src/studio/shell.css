@@ -161,13 +161,6 @@ body { overflow: hidden; background: var(--ground); color: var(--text); font: 40
 .home-row:hover { background: var(--raised); }
 .hr-wave { width: 96px; flex: none; } .hr-num { width: 56px; text-align: right; flex: none; } .hr-checks { width: 150px; flex: none; overflow: hidden; } .hr-when { width: 64px; flex: none; font-size: var(--fs-11); }
 .home-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session { display: flex; flex-direction: column; gap: var(--sp-12); }
-.lanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sp-12); }
-.lane { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-panel); padding: var(--sp-12); display: flex; flex-direction: column; gap: var(--sp-8); }
-.lane-card { border-top: 1px solid var(--line); padding-top: var(--sp-6); display: flex; flex-direction: column; gap: 4px; }
-.session-feed { height: 420px; border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; display: flex; flex-direction: column; background: var(--panel); }
-.review { display: flex; flex-direction: column; gap: var(--sp-8); }
-.review-events { padding-left: 16px; color: var(--text2); }
 .error.banner { color: var(--fail-text); background: var(--fail-bg); border-radius: var(--r-cell); margin-bottom: var(--sp-12); }
 .offline-line { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); z-index: 60; }
 

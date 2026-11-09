@@ -4,6 +4,7 @@
 // ONE `sound set` when it is released (the Coalescer), exactly as before. A parameter the agent set
 // last (and nobody approved since) wears a violet tick and a ghost mark at the value before.
 
+import { askAttr, askLabel } from '../studio/ask.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Coalescer, EDITOR_GROUPS, GENERATOR_NAMES, MUTATE_AMOUNT, WAVE_NAMES, classicField, csvFileText, diffPatch, patchFileText, roundParam, setCommand,
@@ -156,6 +157,10 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
     void st.run(setCommand(sid, d)).then(clear);
   }, sched, PAUSE_MS), []);
   useEffect(() => () => { co.cancel(); if (release.current) clearTimeout(release.current); }, [co]);
+  const hasDraft = Object.keys(draft).length > 0;
+  // a draft or a drag open counts as editing: an agent's change to this sound waits behind the "review" chip until it is discarded or the page is left
+  useEffect(() => { store.setDraft(id, hasDraft); return () => store.setDraft(id, false); }, [store, id, hasDraft]);
+  const discard = (): void => { co.cancel(); setDraft({}); store.discardDraft(id); };
 
   const key = sound ? store.keyOf(sound) : '';
   const prevKey = useRef(key);
@@ -178,7 +183,6 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
   const actions: Action[] = [
     { id: 'edit.mutate', label: 'Mutate the sound', group: 'Edit', shortcut: 'M', key: 'm', run: mutate, enabled: () => cls, keywords: 'random variation' },
     { id: 'panel.inspector', label: 'Toggle the inspector', group: 'Panels', shortcut: '⌥ 2', key: 'alt+2', override: true, run: () => toggleInspector() },
-    { id: 'edit.ask', label: 'Ask for changes on the selection', group: 'Edit', shortcut: 'R', key: 'r', override: true, run: () => { toggleInspector(true); setAskFocus((n) => n + 1); }, keywords: 'request agent feedback' },
     { id: 'edit.hearBefore', label: 'Hear the selected control before the agent’s change, then now', group: 'Edit', run: () => hearBefore(), enabled: () => !!selected && agentSet(prov, prov.params.get(selected)) },
   ];
   useActions(cls ? actions : []);
@@ -227,7 +231,6 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
   };
 
   const data = store.lens(sound);
-  const hasDraft = Object.keys(draft).length > 0;
   const live = hasDraft ? store.render({ ...sound, patch }) : null;
   const failing = new Set<number>();
   for (const c of data?.checks ?? []) if (!c.pass && CHECK_MODULE[c.name]) failing.add(CHECK_MODULE[c.name]!);
@@ -241,7 +244,7 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
     const f = classicField(name)!;
     const a = agentProp(name);
     return (
-      <div key={name} className={`knob-slot${selected === name ? ' sel' : ''}`} data-testid={`slot-${name}`} onFocusCapture={() => setSelected(name)} onPointerDownCapture={() => setSelected(name)}>
+      <div key={name} className={`knob-slot${selected === name ? ' sel' : ''}`} data-testid={`slot-${name}`} {...askAttr(id, { kind: 'param', param: name }, askLabel(id, { kind: 'param', param: name }))} onFocusCapture={() => setSelected(name)} onPointerDownCapture={() => setSelected(name)}>
         <Knob label={CLASSIC_LABEL[name]} testId={`knob-${name}`} value={patch[name]} min={f.min} max={f.max} def={f.default} step={0.01} bipolar={isBipolar(name)} spec={classicSpec(name)} size={size} agent={a}
           onDraft={(v) => preview(name, v)} onCommit={(v) => commit(name, v)} onHearBefore={() => { setSelected(name); const t = trailOf(name); if (t && typeof t.prev === 'number') void store.playPair(id, { ...sound, patch: { ...committed, [name]: t.prev } }, sound); }} />
       </div>
@@ -256,7 +259,7 @@ export function ClassicEditor({ store, id }: { store: Store; id: string }) {
   const revert = () => { if (selected && selPrev !== null) void now1(setCommand(id, { [selected]: selPrev } as Edits)); };
 
   return (
-    <section className="editor classic" data-testid="editor" data-sound={id} data-voice="classic" data-draft={hasDraft} data-measured={!!data && !store.measure(sound).pending}>
+    <section className="editor classic" data-testid="editor" data-sound={id} data-voice="classic" data-draft={hasDraft} onKeyDown={(e) => { if (e.key === 'Escape' && hasDraft && !(e.target as HTMLElement).closest('input, textarea')) discard(); }} data-measured={!!data && !store.measure(sound).pending}>
       <header className="editor-head">
         <a href="#/" className="back" data-testid="back">← all sounds</a>
         <h2>{sound.id}</h2>

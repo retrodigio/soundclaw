@@ -191,19 +191,19 @@ test('the inspector hides with ⌥2, R asks for changes with the selected region
   await expect(page.getByTestId('inspector')).toHaveCount(0);
   await page.keyboard.press('Alt+2');
   await expect(page.getByTestId('inspector')).toBeVisible();
-  // a region, then R: the box takes focus and the request names the region
+  // a region, then R: the composer opens over the region and the request names it
   const box = (await page.getByTestId('lens-surface').boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5, { steps: 8 });
   await page.mouse.up();
   await page.keyboard.press('r');
-  await expect(page.getByTestId('ask-text')).toBeFocused();
-  await page.getByTestId('ask-text').fill('the tail is too long here');
-  await page.getByTestId('ask-text').press('Meta+Enter');
-  await expect(page.getByTestId('ask-box')).toContainText('Sent to the agent');
+  await expect(page.getByTestId('composer-note')).toBeFocused();
+  await page.getByTestId('composer-note').fill('the tail is too long here');
+  await page.getByTestId('composer-note').press('Meta+Enter');
+  await expect(page.getByTestId('composer')).toHaveCount(0);
   const list = await agent.cli(['request', agent.dir]);
-  expect(list.out).toMatch(/the tail is too long here \(pinned to 0\.\d\d–0\.\d\d s\)/);
+  expect(list.out).toMatch(/the tail is too long here.* — pinned to 0\.\d+–0\.\d+ s/);
   // M mutates with the amount and a seed
   await page.locator('body').click({ position: { x: 4, y: 4 } });
   await page.keyboard.press('m');

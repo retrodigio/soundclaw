@@ -1,6 +1,6 @@
 // Screenshots of the dashboard on an invented example project: a few sounds, a set, a song and
 // requests in different states. Run it after `pnpm build`:
-//   node scripts/screens-studio.ts <name> [sounds|sets|songs]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page; `songs`: a song's arrangement and split editor, and the mixer)
+//   node scripts/screens-studio.ts <name> [sounds|sets|songs|agent]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page; `songs`: a song's arrangement and split editor, and the mixer)
 // It starts its own server on a temporary project and stops it; nothing is left running.
 
 import { mkdirSync } from 'node:fs';
@@ -359,6 +359,98 @@ async function songShots(): Promise<void> {
     await a.close();
   }
 }
+
+
+// ---- the agent layer ------------------------------------------------------------------------------------------------
+
+async function agentShots(): Promise<void> {
+  const a = await startAgent();
+  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const cli = async (args: string[]) => { const r = await a.cli(args); if (r.code !== 0) throw new Error(`${args.join(' ')}: ${r.err || r.out}`); return r; };
+  const run = (script: string, by: string) => cli(['run', a.dir, '-e', script, '--by', by]);
+  try {
+    // the project: invented sounds and a song, and a click in "coin click" that the agent removes
+    await run(`${SOUNDS}${SONG}sound new coin_click voice=classic
+sound set coin_click wave=square attack=0 sustain=0.1 decay=0.3 freq=0.5 volume=0.245`, 'human:ana');
+    // requests in every lane
+    const ask = (sound: string, note: string, target?: string) => cli(['request', a.dir, sound, '--note', note, '--by', 'human:ana', ...(target ? ['--target', target] : [])]);
+    await ask('coin_click', 'brighter, less clicky', 'param attack');           // r1 -> done, ready for review
+    await cli(['work', a.dir, 'claim', 'r1', '--by', 'agent:claude']);
+    await run('sound set coin_click attack=0.02 freq=0.55', 'agent:claude');
+    await cli(['work', a.dir, 'done', 'r1', 'Raised the start pitch a little and gave it a 20 ms attack, which was the click.', '--by', 'agent:claude']);
+    await ask('ui_select', 'match the ui back loudness');                          // r2 -> done, ready for review
+    await cli(['work', a.dir, 'claim', 'r2', '--by', 'agent:claude']);
+    await run('sound set ui_select volume=0.2', 'agent:claude');
+    await cli(['work', a.dir, 'progress', 'r2', 'matched', '--by', 'agent:claude']);
+    await ask('explosion_big', 'less harsh around 3 kHz');                         // r3 -> blocked
+    await cli(['work', a.dir, 'claim', 'r3', '--by', 'agent:wren']);
+    await cli(['work', a.dir, 'block', 'r3', 'Roll off the top, or notch 3 kHz only?', '--by', 'agent:wren']);
+    await ask('laser', 'Shorten the laser tail', 'range 0.31-0.38');             // r4 -> claimed
+    await cli(['work', a.dir, 'claim', 'r4', '--by', 'agent:fox']);
+    await ask('footstep_grass_01', 'Footsteps on grass softer, less samey');         // r5 -> working
+    await cli(['work', a.dir, 'claim', 'r5', '--by', 'agent:otter']);
+    await cli(['work', a.dir, 'progress', 'r5', 'mutating 8 variants at spread 0.15', '--by', 'agent:otter']);
+    await ask('battle_loop', 'arp masks lead, bars 9–12', 'bars 9-12 lead');       // r6 -> seen
+    await cli(['work', a.dir, 'list', '--by', 'agent:heron']);
+    await ask('jump', 'a little higher at the top');                               // r7 -> sent
+    // some agent commands in a batch, and the person's own
+    await run(Array.from({ length: 6 }, (_, i) => `sound mutate explosion_big amount=0.1 seed=${40 + i} as=gv_${i + 1}`).join('\n'), 'agent:otter');
+    await run('sound set jump punch=0.4', 'human:ana');
+    const shots = async (file: string, hash: string, act: (p: Page) => Promise<void>, panels: Record<string, unknown> = { bottomTab: 'history' }): Promise<void> => {
+      const width = 1440, height = 900;
+      for (const theme of ['dark', 'light'] as const) {
+        const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: theme });
+        await ctx.addInitScript(([t, panels]) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify({ theme: t, density: 'compact', panels })); } catch { /* off */ } }, [theme, panels] as const);
+        const page = await ctx.newPage();
+        await page.goto(`${a.url}&name=ana${hash}`);
+        await page.getByTestId('connection').waitFor();
+        await act(page);
+        await page.screenshot({ path: join(OUT, `${file}-${theme}.png`) });
+        await ctx.close();
+      }
+    };
+    await shots('session-mid-batch', '#/session', async (p) => {
+      await p.getByTestId('lane-review-r1').waitFor();
+      // the page is told a batch is running: five of eight rendered
+      await p.evaluate(() => {
+        const s = (window as unknown as { soundclaw: { receive(m: unknown): void } }).soundclaw;
+        const b = (done: number, label: string, state = 'running') => ({ id: 'b9', by: 'agent:otter', total: 8, done, label, state, startedAt: '' });
+        s.receive({ type: 'batchProgress', phase: 'start', batch: b(0, '') });
+        for (let i = 1; i <= 5; i++) s.receive({ type: 'batchProgress', phase: 'item', batch: b(i, `sound mutate explosion_big amount=0.15 seed=441${i} as=grass_v${i}`) });
+      });
+      await p.getByTestId('session-batch').waitFor();
+      await p.waitForTimeout(300);
+    }, { bottomOpen: false });
+    await shots('composer-laser', '#/sound/laser', async (p) => {
+      const box = (await p.getByTestId('lens-surface').boundingBox())!;
+      await p.mouse.move(box.x + box.width * 0.62, box.y + box.height * 0.5);
+      await p.mouse.down();
+      await p.mouse.move(box.x + box.width * 0.83, box.y + box.height * 0.5, { steps: 8 });
+      await p.mouse.up();
+      await p.keyboard.press('r');
+      await p.getByTestId('composer').waitFor();
+      await p.getByTestId('composer-note').fill('The tail rings on too long here. It should be gone before the next shot at 0.3 s.');
+    });
+    await shots('review-coin-click', '#/review/r1', async (p) => {
+      await p.getByTestId('review-item').waitFor();
+      await p.getByTestId('review-wave-a').waitFor();
+      await p.waitForTimeout(500);
+    });
+    await shots('update-chip-classic', '#/sound/jump', async (p) => {
+      await p.getByTestId('slot-freq').getByRole('slider').focus();
+      await p.keyboard.press('ArrowUp');
+      await p.waitForFunction(() => ((window as unknown as { soundclaw: unknown }).soundclaw as unknown as { tape: { by: string; cmd: string }[] }).tape.some((e) => e.by === 'human:ana' && /sound set jump/.test(e.cmd)));
+      await run('sound set jump decay=0.35 sustain=0.2', 'agent:claude');
+      await p.getByTestId('update-chip').waitFor();
+      await p.waitForTimeout(300);
+    });
+  } finally {
+    await browser.close();
+    await a.close();
+  }
+}
+
+if (process.argv[3] === 'agent') { await agentShots(); process.exit(0); }
 
 if (process.argv[3] === 'sets') { await setShots(); process.exit(0); }
 if (process.argv[3] === 'sounds') { await soundShots(); process.exit(0); }

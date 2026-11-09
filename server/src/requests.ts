@@ -6,7 +6,7 @@
 
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ANSWER_WORDS, AUTHOR_RE, SIMILAR_TAG, comparisonProblem, comparisonWords, foldRequests, momentLine, momentOf, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, songText, type RequestRecord, type WorkRequest } from '@soundclaw/core';
+import { ANSWER_WORDS, AUTHOR_RE, parseRequestTarget, targetAdvice, targetProblem, targetWords, type RequestTarget, SIMILAR_TAG, comparisonProblem, comparisonWords, foldRequests, momentLine, momentOf, tagsNote, isFeedbackTag, nextRequestId, openRequests, quote, requestProblem, serializeSound, songText, type RequestRecord, type WorkRequest } from '@soundclaw/core';
 import { unseenOpen, type AgentEvent } from './await.ts';
 import { checkLine, failingChecks } from './ears.ts';
 import { songCheckLine, songFailing } from './songs.ts';
@@ -54,6 +54,7 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   if (q.action === 'reply') return appendRequest(p, { type: 'reply', id: q.id, by, at, text: String(q.text ?? '') });
   if (q.action === 'cancel') return appendRequest(p, { type: 'cancel', id: q.id, by, at, ...(q.text ? { text: q.text } : {}) });
   if (q.action === 'compare') return personComparison(w, by, q);
+  if (q.action === 'reviewed') return appendRequest(p, { type: 'reviewed', id: q.id, by, at, text: q.how });
   const reqs = readRequests(p);
   const id = nextRequestId(reqs);
   const text = (q.note ?? '').trim();
@@ -67,9 +68,10 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   }
   const note = text || tagsNote(tags, q.other);
   if (!note) throw new ProjectError('say what should change, or pick a tag');
+  if (q.target !== undefined) checkTarget(w, q.sound, q.target);
   // Praise alone is feedback: nothing to change, so the sound is not marked.
   const kind = tags.length && tags.every((t) => t === 'good') ? 'feedback' : 'change';
-  const rec: RequestRecord = { type: 'request', id, sound: q.sound, kind, note, ...(tags.length ? { tags } : {}), ...(q.other ? { other: q.other } : {}), by, at };
+  const rec: RequestRecord = { type: 'request', id, sound: q.sound, kind, note, ...(tags.length ? { tags } : {}), ...(q.other ? { other: q.other } : {}), ...(q.target ? { target: q.target } : {}), ...(q.again ? { again: q.again } : {}), by, at };
   const problem = requestProblem(reqs, rec);
   if (problem) throw new ProjectError(problem);
   if (kind === 'feedback') return appendRequest(p, rec);
@@ -77,6 +79,22 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   const r = w.hub.withoutMarkEvents(() => w.run({ commands: `${w.hasSong(q.sound) ? 'song' : 'sound'} mark ${q.sound} rejected ${quote(markNote)}`, by }));
   if (!r.ok) throw new ProjectError(r.errors.map((e) => e.message).join('; '));
   return appendRequest(p, { ...rec, mark: r.added.at(-1)?.seq });
+}
+
+/** A target must fit the item it is on: time and layers belong to a sound, bars to a song. */
+function checkTarget(w: Writer, sound: string, t: RequestTarget): void {
+  const bad = targetProblem(t);
+  if (bad) throw new ProjectError(bad);
+  const song = w.hasSong(sound);
+  if (t.kind === 'bars' && !song) throw new ProjectError(`${sound} is a sound: bars are for a song (pin a stretch of a sound with a range)`);
+  if (t.kind === 'range' && song) throw new ProjectError(`${sound} is a song: pin bars of it, not seconds`);
+  if (t.kind === 'bars' && t.channel && !w.song(sound).channels.some((c) => c.name === t.channel)) throw new ProjectError(`song ${sound} has no channel '${t.channel}'`);
+  if (t.kind === 'layer' || (t.kind === 'param' && t.layer !== undefined)) {
+    const layer = t.kind === 'layer' ? t.layer : t.layer!;
+    const doc = song ? null : w.sound(sound);
+    if (!doc || doc.voice !== 'layered') throw new ProjectError(`${sound} has no layers to point at`);
+    if (layer > doc.layers.length) throw new ProjectError(`${sound} has ${doc.layers.length} layer${doc.layers.length === 1 ? '' : 's'}, not ${layer}`);
+  }
 }
 
 /**
@@ -106,11 +124,11 @@ export function requestLine(q: WorkRequest): string {
   const state = q.state === 'claimed' ? `claimed by ${q.claimedBy}` : q.state === 'blocked' ? `blocked: "${q.question}"`
     : q.state === 'open' && q.seen.length ? `seen by ${q.seen.map((x) => x.by).join(', ')}` : q.state;
   if (q.comparison) return `${q.id} comparison ${q.sound}: ${comparisonWords(q.comparison)} (from ${q.by} at ${q.at}; ${state})`;
-  return `${q.id} ${q.kind} ${q.sound}${q.tags.length ? ` [${q.tags.join(', ')}]` : ''}${q.note && q.note !== tagsNote(q.tags, q.other) ? `: "${q.note}"` : ''}${q.other ? ` (like ${q.other})` : ''} (from ${q.by} at ${q.at}; ${state})`;
+  return `${q.id} ${q.kind} ${q.sound}${q.tags.length ? ` [${q.tags.join(', ')}]` : ''}${q.note && q.note !== tagsNote(q.tags, q.other) ? `: "${q.note}"` : ''}${q.other ? ` (like ${q.other})` : ''}${q.target ? ` — ${targetWords(q.target)}` : ''}${q.again ? ` (asks again about ${q.again})` : ''} (from ${q.by} at ${q.at}; ${state}${q.reviewed ? `; ${q.reviewed.how} by ${q.reviewed.by}` : ''})`;
 }
 
 /** A request, reply or cancel from the CLI or MCP as the dashboard's message. Checked here for shape; personRequest checks it against the project. */
-export function toPersonRequest(a: { action?: string; sound?: string; note?: string; id?: string; text?: string; tags?: string[]; other?: string }): PersonRequest {
+export function toPersonRequest(a: { action?: string; sound?: string; note?: string; id?: string; text?: string; tags?: string[]; other?: string; target?: unknown; again?: string }): PersonRequest {
   const action = a.action ?? 'request';
   if (action === 'reply' || action === 'cancel') {
     if (!a.id || !/^r\d+$/.test(a.id)) throw new ProjectError(`${action}: give the request's id (like r3)`);
@@ -122,7 +140,17 @@ export function toPersonRequest(a: { action?: string; sound?: string; note?: str
   }
   if (action !== 'request') throw new ProjectError(`unknown action '${action}' (request, reply, cancel)`);
   if (!a.sound) throw new ProjectError('request: give the sound');
-  return { action, kind: 'change', sound: a.sound, note: a.note ?? '', ...(a.tags?.length ? { tags: a.tags } : {}), ...(a.other ? { other: a.other } : {}) };
+  let target: RequestTarget | undefined;
+  if (a.target !== undefined && a.target !== null && a.target !== '') {
+    try {
+      target = typeof a.target === 'string' ? parseRequestTarget(a.target) : (a.target as RequestTarget);
+    } catch (e) {
+      throw new ProjectError((e as Error).message);
+    }
+    const bad = targetProblem(target);
+    if (bad) throw new ProjectError(bad);
+  }
+  return { action, kind: 'change', sound: a.sound, note: a.note ?? '', ...(a.tags?.length ? { tags: a.tags } : {}), ...(a.other ? { other: a.other } : {}), ...(target ? { target } : {}), ...(a.again ? { again: a.again } : {}) };
 }
 
 /** An agent's name as an author: `claude` and `agent:claude` both give `agent:claude`. */
@@ -266,6 +294,8 @@ export function requestBrief(w: Writer, q: WorkRequest, steps: WorkSteps = MCP_S
     out.push(`Nothing needs to change because of it on its own. Close it with ${steps.done(q.id, 'what you take from it')}.`);
     return out.join('\n');
   }
+  if (q.target) out.push(targetAdvice(q.target));
+  if (q.again) out.push(`This asks again about ${q.again}, which you finished and the person looked at: what you did was not enough or not right. Read it with \`history --sound ${q.sound}\` and go on from there.`);
   if (q.other) out.push(`The person finds it too like ${q.other}: \`view ${q.sound} compare ${q.other}\` shows how close they are.`);
   if (w.hasSong(q.sound)) out.push(`${songCheckLine(w.measureSong(q.sound).report.checks)} (finishing the request needs every check to pass except the advisory ones (masking); \`check\` lists what fails and where, \`view ${q.sound} notes\` and \`view ${q.sound} mix\` show what the render does)`);
   else if (w.has(q.sound)) out.push(`${checkLine(w.measure(q.sound))} (finishing the request needs every check to pass; \`check\` lists what fails and where, \`view\` and \`describe\` let you hear the change)`);

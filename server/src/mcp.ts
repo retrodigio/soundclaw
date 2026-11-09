@@ -435,6 +435,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       note: z.string().optional().describe('request: what should change (may be left out when tags say it)'),
       tags: z.array(z.enum(['too loud', 'too quiet', 'too long', 'too short', 'too harsh', 'too dull', 'too similar to another sound', 'good'])).optional().describe('request: the cards\' quick tags (good alone is praise: no mark)'),
       like: z.string().optional().describe('request with the tag too similar to another sound: the other sound'),
+      target: z.union([z.string(), z.object({ kind: z.enum(['range', 'bars', 'param', 'layer', 'item']) }).passthrough()]).optional().describe('request: what inside the sound or song it points at, as the dashboard\'s selection does: {kind:"range",start,end} (seconds), {kind:"bars",from,to,channel?}, {kind:"param",param,layer?,fx?}, {kind:"layer",layer}, {kind:"item"}; or text: "range 0.31-0.38", "bars 9-12 lead", "param decay layer 2 fx 1", "layer 2", "item"'),
+      again: z.string().regex(/^r\d+$/).optional().describe('request: the done request this one asks again about'),
       id: z.string().regex(/^r\d+$/).optional().describe('reply, cancel: the request'),
       text: z.string().optional().describe('reply: the answer; cancel: why'),
     }),

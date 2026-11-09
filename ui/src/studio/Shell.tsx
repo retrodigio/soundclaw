@@ -6,9 +6,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Store } from '../store.ts';
 import { BottomPanel } from './Bottom.tsx';
+import { AskHost, askHere, itemSpec, openAsk } from './ask.tsx';
 import { Banner, ToastHost, useToast } from './controls.tsx';
 import { Chevron, Close, KindIcon, Spark, type TabKind } from './icons.tsx';
 import { Library } from './Library.tsx';
+import { UndoBar } from './decisions.tsx';
+import { BatchStrip, UpdateChip } from './live.tsx';
 import { Resizer } from './layout.tsx';
 import { SelectionCtx } from './NeedCard.tsx';
 import { Page } from './pages.tsx';
@@ -143,7 +146,7 @@ function ShellInner({ store }: { store: Store }) {
     { id: 'transport.stop', label: 'Stop playback', group: 'Transport', run: stop },
     { id: 'edit.undo', label: 'Undo', group: 'Edit', shortcut: '⌘ Z', key: 'mod+z', run: () => { void store.undo(); }, enabled: () => store.canUndo() },
     { id: 'edit.redo', label: 'Redo', group: 'Edit', shortcut: '⇧ ⌘ Z', key: 'mod+shift+z', run: () => { void store.redo(); }, enabled: () => store.canRedo() },
-    { id: 'edit.ask', label: 'Ask for changes on the selection', group: 'Edit', shortcut: 'R', key: 'r', run: focusAsk, keywords: 'request agent feedback' },
+    { id: 'edit.ask', label: 'Ask for changes on the selection', group: 'Edit', shortcut: 'R', key: 'r', run: () => { if (!askHere(focus)) focusAsk(); }, keywords: 'request agent feedback' },
     { id: 'edit.approve', label: 'Approve the focused item', group: 'Edit', shortcut: '⌘ ↵', key: 'mod+enter', inText: false, run: () => { if (focus?.kind === 'sound') void store.approve(focus.id); else if (focus?.kind === 'song') void store.run(`song mark ${focus.id} approved`); }, enabled: () => focus?.kind === 'sound' || focus?.kind === 'song' },
     { id: 'nav.palette', label: 'Open the command palette', group: 'Navigate', shortcut: '⌘ K', key: 'mod+k', inText: true, noPalette: true, run: () => setOverlay((o) => (o === 'palette' ? null : 'palette')) },
     { id: 'nav.filter', label: 'Filter the library', group: 'Navigate', shortcut: '/', key: '/', run: () => { if (narrowLib) setLibOverlay(true); else setPanels({ libOpen: true }); setTimeout(() => filterRef.current?.focus(), 30); }, keywords: 'search find' },
@@ -207,7 +210,7 @@ function ShellInner({ store }: { store: Store }) {
       <div className="studio-body">
         {libVisible && !narrowLib && (
           <aside className="library" aria-label="Library" data-testid="library-panel">
-            <Library store={store} selected={selected} onSelect={setSelected} onOpen={open} onAsk={(f) => { setSelected(f); focusAsk(); }} inputRef={filterRef} />
+            <Library store={store} selected={selected} onSelect={setSelected} onOpen={open} onAsk={(f) => { setSelected(f); if (f.kind !== 'set') openAsk(itemSpec(f.id)); else focusAsk(); }} inputRef={filterRef} />
             <Resizer side="left" size={p.libW} min={LIMITS.libW[0]} max={LIMITS.libW[1]} onSize={(v) => setPanels({ libW: v })} onToggle={() => setPanels({ libOpen: false })} label="Resize the library" testId="resize-library" />
           </aside>
         )}
@@ -215,6 +218,10 @@ function ShellInner({ store }: { store: Store }) {
           <TabBar store={store} tabs={tabs} current={hash} onClose={closeTab} />
           <div className="page" role="main" id="page" data-testid="page">
             {store.error && <div className="error banner" data-testid="error" role="alert">{store.error} <button className="link" onClick={() => { store.error = null; store.changed(); }}>dismiss</button></div>}
+            <div className="live-layer">
+              {route.kind !== 'session' && <BatchStrip store={store} scope={route.kind === 'sound' || route.kind === 'song' ? route.id : null} />}
+              {(route.kind === 'sound' || route.kind === 'song') && <UpdateChip store={store} id={route.id} />}
+            </div>
             <SelectionCtx.Provider value={{ selected, select: setSelected, ask: (f) => { setSelected(f); focusAsk(); } }}>
               <Page store={store} onPlay={(id) => void store.play(id)} onOpen={openSound} />
             </SelectionCtx.Provider>
@@ -243,7 +250,7 @@ function ShellInner({ store }: { store: Store }) {
       {narrowLib && libOverlay && (
         <div className="scrim" onMouseDown={() => setLibOverlay(false)} data-testid="library-scrim">
           <aside className="library overlay-panel" aria-label="Library" data-testid="library-panel" onMouseDown={(e) => e.stopPropagation()}>
-            <Library store={store} selected={selected} onSelect={setSelected} onOpen={open} onAsk={(f) => { setSelected(f); setLibOverlay(false); focusAsk(); }} inputRef={filterRef} />
+            <Library store={store} selected={selected} onSelect={setSelected} onOpen={open} onAsk={(f) => { setSelected(f); setLibOverlay(false); if (f.kind !== 'set') openAsk(itemSpec(f.id)); else focusAsk(); }} inputRef={filterRef} />
           </aside>
         </div>
       )}
@@ -255,6 +262,8 @@ function ShellInner({ store }: { store: Store }) {
           </aside>
         </div>
       )}
+      <AskHost store={store} focus={focus} />
+      <UndoBar />
       {overlay === 'palette' && <Palette store={store} focus={focus} onClose={() => setOverlay(null)} ask={(t, f) => ask(t, f)} />}
       {overlay === 'shortcuts' && <ShortcutSheet onClose={() => setOverlay(null)} />}
       {store.status === 'closed' && <div className="offline-line"><Banner kind="warn" title="Lost the SoundClaw server" testId="offline">Retrying{'…'} Everything open keeps playing from the local render.</Banner></div>}

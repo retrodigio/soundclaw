@@ -7,8 +7,12 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTHOR_RE, CLASSIC_FIELDS, TONE_PARAMS, WAVE_NAMES, activeGroups, compareView, groupsOf, patternChangeView, patternNoteDiff, replay, serializeInstrument, serializeSong, serializeSound, songText, type Library, type SongDoc, type Sound, type TapeEntry } from '@soundclaw/core';
+import { AUTHOR_RE, TIMED_CHECKS, songToJson, type SongJson, type CheckResult, CLASSIC_FIELDS, TONE_PARAMS, WAVE_NAMES, activeGroups, compareView, groupsOf, patternChangeView, patternNoteDiff, replay, serializeInstrument, serializeSong, serializeSound, songText, type Library, type SongDoc, type Sound, type TapeEntry } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
+import type { Review, ReviewCheck, ReviewRow, ReviewSide } from './protocol.ts';
+
+export type { Review, ReviewCheck, ReviewRow, ReviewSide };
+import { readRequests } from './requests.ts';
 import type { Writer } from './writer.ts';
 
 export const CHANGES_FILE = join('.cache', 'changes-seen.json');
@@ -279,4 +283,90 @@ export function formatChanges(r: ChangesResult, o: ChangesOptions): string {
 
 export function changesText(w: Writer, o: ChangesOptions): string {
   return formatChanges(collectChanges(w, o), o);
+}
+
+
+const checksOf = (cs: CheckResult[]): ReviewCheck[] => cs.map((c) => ({ name: c.name, pass: c.pass, value: c.value, at: TIMED_CHECKS.includes(c.name) ? c.ranges.map((r) => Math.round(r.from * 1000) / 1000) : [] }));
+
+function sideOf(w: Writer, s: Sound | undefined): ReviewSide | null {
+  if (!s) return null;
+  const r = w.cache.render(s, w.samples);
+  const m = w.measureSound(s, r);
+  return { sound: s, checks: checksOf(m.checks), lufs: Number.isFinite(m.analysis.lufs) ? m.analysis.lufs : null, truePeakDb: Number.isFinite(m.analysis.truePeakDb) ? m.analysis.truePeakDb : null, duration: m.analysis.duration, centroid: m.analysis.centroid.mean || null };
+}
+
+/** `name old → new` lines as pairs; the layered voice's differing lines are paired in order (what went, what came). */
+function paramPairs(a: Sound | undefined, b: Sound | undefined, by: string): Review['params'] {
+  const lines = paramLines(a, b);
+  const out: Review['params'] = [];
+  const gone: string[] = [], came: string[] = [];
+  for (const l of lines) {
+    const m = /^(.+?) (.+) → (.+)$/.exec(l);
+    if (l.startsWith('− ')) gone.push(l.slice(2));
+    else if (l.startsWith('+ ')) came.push(l.slice(2));
+    else if (m) out.push({ name: m[1]!, old: m[2]!, new: m[3]!, by });
+    else out.push({ name: l, old: '', new: '', by });
+  }
+  for (let i = 0; i < Math.max(gone.length, came.length); i++) out.push({ name: (came[i] ?? gone[i] ?? '').split(/\s+/).slice(0, 2).join(' '), old: gone[i] ?? '', new: came[i] ?? '', by });
+  return out;
+}
+
+/** The structured review of a request (the agent's commands for it) or of one tape group. */
+export function reviewOf(w: Writer, o: { request?: string; group?: string }): Review {
+  const entries = w.tape();
+  let picked: TapeEntry[];
+  let item: string;
+  let note: string | null = null;
+  let request: string | null = null;
+  if (o.request) {
+    const q = readRequests(w.project).get(o.request);
+    if (!q) throw new ProjectError(`no request ${o.request}`);
+    request = q.id;
+    item = q.sound;
+    const claim = q.events.find((e) => e.type === 'claim');
+    const done = [...q.events].reverse().find((e) => e.type === 'done');
+    note = done?.text ?? q.latest;
+    const from = claim ? Date.parse(claim.at) : 0;
+    const to = done ? Date.parse(done.at) : Date.now();
+    picked = w.history({ sound: q.sound }).filter((e) => e.by === q.claimedBy && (!e.at || (Date.parse(e.at) >= from && Date.parse(e.at) <= to)));
+    if (!picked.length) throw new ProjectError(`${q.id}: the tape has no commands by ${q.claimedBy ?? 'the agent'} on ${q.sound} between its claim and its done`);
+  } else if (o.group) {
+    const g = groupsOf(entries).get(o.group);
+    if (!g) throw new ProjectError(`no group ${o.group} on the tape`);
+    picked = g;
+    const first = libraryAt(entries, g[0]!.seq - 1), last = libraryAt(entries, g.at(-1)!.seq);
+    const changed = [...new Set([...first.keys(), ...last.keys()])].filter((id) => { const a = first.get(id), b = last.get(id); return !a || !b || serializeSound(a) !== serializeSound(b); });
+    const songs = [...new Set([...first.songs.keys(), ...last.songs.keys()])].filter((id) => { const a = first.songs.get(id), b = last.songs.get(id); return !a || !b || songText(a) !== songText(b); });
+    item = changed[0] ?? songs[0] ?? '';
+    if (!item) throw new ProjectError(`${o.group} changed no sound or song`);
+  } else throw new ProjectError('a review is of a request or a group');
+  const first = Math.min(...picked.map((e) => e.seq));
+  const last = Math.max(...picked.map((e) => e.seq));
+  const by = picked[0]!.by;
+  const before = libraryAt(entries, first - 1);
+  const after = libraryAt(entries, last);
+  const now = libraryAt(entries, entries.reduce((n, e) => Math.max(n, e.seq), 0));
+  const isSong = after.songs.has(item) || before.songs.has(item);
+  const a = isSong ? undefined : before.get(item), b = isSong ? undefined : after.get(item);
+  const A = sideOf(w, a), B = sideOf(w, b);
+  const rows: ReviewRow[] = [];
+  if (A && B) {
+    const fmt = (v: number | null, d: number, unit: string) => (v === null ? '−∞' : `${v.toFixed(d)} ${unit}`);
+    const byName = new Map(A.checks.map((c) => [c.name, c]));
+    rows.push({ k: 'Integrated', a: fmt(A.lufs, 1, 'LUFS'), b: fmt(B.lufs, 1, 'LUFS'), glyph: B.checks.find((c) => c.name === 'loudness')?.pass === false ? 'fail' : B.checks.some((c) => c.name === 'loudness') ? 'pass' : '' });
+    for (const c of B.checks) {
+      if (c.name === 'loudness') continue;
+      rows.push({ k: c.name, a: byName.get(c.name)?.value ?? '', b: c.value, glyph: c.pass ? 'pass' : 'fail' });
+    }
+    rows.push({ k: 'Centroid', a: A.centroid === null ? 'none' : `${(A.centroid / 1000).toFixed(1)} kHz`, b: B.centroid === null ? 'none' : `${(B.centroid / 1000).toFixed(1)} kHz`, glyph: '' });
+    rows.push({ k: 'True peak', a: fmt(A.truePeakDb, 1, 'dBTP'), b: fmt(B.truePeakDb, 1, 'dBTP'), glyph: '' });
+    rows.push({ k: 'Duration', a: `${A.duration.toFixed(2)} s`, b: `${B.duration.toFixed(2)} s`, glyph: '' });
+  }
+  const sa = before.songs.get(item), sb = after.songs.get(item);
+  const song: Review['song'] = isSong ? (() => {
+    const sc = sa && sb ? songChange(w, item, sa, sb, [...new Set(picked.map((e) => e.group))].join('+')) : null;
+    return { notes: sc?.notes ?? [], settings: sc?.settings ?? [], before: sa ? songToJson(sa) : null, after: sb ? songToJson(sb) : null, stillThere: now.songs.has(item) };
+  })() : null;
+  const cur = isSong ? (now.songs.has(item) && sb ? songText(now.songs.get(item)!) === songText(sb) : false) : (now.has(item) && b ? serializeSound(now.get(item)!) === serializeSound(b) : false);
+  return { request, groups: [...new Set(picked.map((e) => e.group))], first, last, by, ...(picked[0]!.at ? { at: picked[0]!.at } : {}), item, kind: isSong ? 'song' : 'sound', note, commands: picked.map((e) => e.cmd), params: paramPairs(a, b, by), rows, before: A, after: B, song, current: cur, tapeEnd: entries.at(-1)?.seq ?? 0 };
 }

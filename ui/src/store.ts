@@ -3,8 +3,8 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { restoreCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
-import type { CardInfo, ClientMessage, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
+import { Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import type { BatchProgress, CardInfo, ClientMessage, Review, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
 import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
 import { gridVersions, provenanceMemo, type Provenance, type Version } from './sound/provenance.ts';
@@ -105,6 +105,22 @@ function initialAuthor(): string {
   return 'human:owner';
 }
 
+/** The items (sounds, songs) a tape command is about: its first arguments, a song's pattern as `song.pattern`. */
+export function itemsOfCmd(cmd: string, known: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (const t of cmd.split(/\s+/).slice(1, 5)) {
+    const id = t.replace(/^["']|["']$/g, '').split('.')[0]!;
+    if (known.has(id) && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/** An agent change the person has not taken yet: the editor shows their version while it waits. */
+export interface HeldUpdate { sound?: Sound; song?: SongDoc; by: string; group: string; request: string | null; at: number }
+
+/** How long after a person's last edit they still count as editing. */
+export const EDITING_MS = 60_000;
+
 export class Store {
   status: Status = 'connecting';
   project: Snapshot['project'] | null = null;
@@ -126,6 +142,21 @@ export class Store {
   tape: TapeEntry[] = [];
   requests: WorkRequest[] = [];
   presence: Presence | null = null;
+  /** The multi-item batch the writer is running or ran last, with when it ended here (ms; 0 while running or unknown) and the items its commands named. */
+  batch: BatchProgress | null = null;
+  batchEndedAt = 0;
+  batchItems = new Set<string>();
+  /** What each item of the batch was, in the order they landed. */
+  batchLabels: string[] = [];
+  /** Every progress message of the last batch as `phase:done/total`, for tests. */
+  batchLog: string[] = [];
+  /** When (ms) this person last changed each item on this page. */
+  private editedAt = new Map<string, number>();
+  /** Items with a draft or a drag open in an editor. */
+  private drafts = new Set<string>();
+  /** Agent changes waiting for a person who is editing the item: the page shows their version until they take the update. */
+  held = new Map<string, HeldUpdate>();
+  private liveSongs: SongDoc[] = [];
   me: string = initialAuthor();
   /** Sounds the agent changed that this browser has not played or opened since (the library's "new" dot), kept per browser. */
   agentNew = new Set<string>();
@@ -185,7 +216,7 @@ export class Store {
 
   connect(token: string): void {
     this.token = token;
-    window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.route = parseRoute(location.hash); this.changed(); });
+    window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.route = parseRoute(location.hash); this.releaseHoldsAway(); this.changed(); });
     const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     this.ws = ws;
@@ -215,7 +246,10 @@ export class Store {
         this.tapeTotal = m.snapshot.tapeTotal;
         this.historyFlags = m.snapshot.history;
         this.sets = m.snapshot.sets ?? [];
-        this.songs = (m.snapshot.songs ?? []).map(songFromJson);
+        this.held.clear();
+        this.setSongs((m.snapshot.songs ?? []).map(songFromJson));
+        this.batch = m.snapshot.batch ?? null;
+        this.batchEndedAt = 0;
         this.instruments = m.snapshot.instruments ?? [];
         this.samples = m.snapshot.samples ?? [];
         this.style = m.snapshot.style ?? DEFAULT_STYLE;
@@ -223,7 +257,17 @@ export class Store {
         this.requests = m.snapshot.requests;
         this.presence = m.snapshot.presence;
         break;
+      case 'batchProgress': {
+        const known = new Set([...this.index.map((x) => x.id), ...this.songs.map((x) => x.id)]);
+        if (m.phase === 'start') { this.batchItems = new Set(); this.batchLabels = []; this.batchLog = []; this.batchEndedAt = 0; }
+        else if (m.phase === 'item' && m.batch.label) { this.batchLabels = [...this.batchLabels, m.batch.label]; for (const id of itemsOfCmd(m.batch.label, known)) this.batchItems.add(id); }
+        this.batchLog = [...this.batchLog, `${m.phase}:${m.batch.done}/${m.batch.total}`];
+        this.batch = m.batch;
+        if (m.phase === 'end') this.batchEndedAt = Date.now();
+        break;
+      }
       case 'batch': {
+        this.holdForEditing(m);
         this.lean = m.lean;
         if (m.lean) {
           for (const x of m.sounds) this.docs.set(x.id, x);
@@ -237,7 +281,8 @@ export class Store {
         this.sets = m.sets ?? this.sets;
         const playingSong = this.songPlay ? this.songs.find((x) => x.id === this.songPlay!.id) : undefined;
         const before = playingSong ? this.songKey(playingSong) : null;
-        if (m.songs) this.songs = m.songs.map(songFromJson);
+        if (m.songs) this.setSongs(m.songs.map(songFromJson));
+        this.applyHolds();
         if (m.instruments) this.instruments = m.instruments;
         this.tape = [...this.tape, ...m.entries];
         // a song playing that the batch changed plays on from where it is, rendered again (only the parts that changed)
@@ -319,6 +364,8 @@ export class Store {
 
   /** Commands as this person: one undo group. */
   run(commands: string): Promise<RunResult> {
+    const known = new Set([...this.index.map((x) => x.id), ...this.songs.map((x) => x.id)]);
+    for (const line of commands.split('\n')) for (const it of itemsOfCmd(line, known)) this.editedAt.set(it, Date.now());
     const id = ++this.nextId;
     return new Promise((resolve) => {
       this.waiting.set(id, resolve);
@@ -332,6 +379,103 @@ export class Store {
       this.answers.set(id, resolve);
       this.send({ type: 'request', id, by: this.me, body });
     });
+  }
+
+  /** The songs the server has, and the ones the page shows (a held song stays the person's version). */
+  private setSongs(list: SongDoc[]): void {
+    this.liveSongs = list;
+    this.songs = list.map((x) => this.held.get(x.id)?.song ?? x);
+  }
+
+  private applyHolds(): void {
+    this.songs = this.liveSongs.map((x) => this.held.get(x.id)?.song ?? x);
+    this.rebuildSounds();
+  }
+
+  /** An editor says a draft or a drag is open on the item (or closed). */
+  setDraft(id: string, open: boolean): void {
+    if (open === this.drafts.has(id)) return;
+    if (open) this.drafts.add(id); else this.drafts.delete(id);
+  }
+
+  /** The person discarded their draft: the agent's update waiting on the item is taken too. */
+  discardDraft(id: string): void {
+    this.drafts.delete(id);
+    this.takeUpdate(id);
+  }
+
+  /** Is the person editing this item now? Its editor is open in the focused tab, and they changed something in the last minute or a draft or drag is open. */
+  isEditing(id: string): boolean {
+    const r = this.route;
+    if (!((r.kind === 'sound' || r.kind === 'song') && r.id === id)) return false;
+    if (typeof document !== 'undefined' && !document.hasFocus()) return false;
+    return this.drafts.has(id) || Date.now() - (this.editedAt.get(id) ?? 0) < EDITING_MS;
+  }
+
+  /** An agent batch is about to land: for each item the person is editing, keep their version and remember the update. */
+  private holdForEditing(m: Extract<ServerMessage, { type: 'batch' }>): void {
+    if (m.by.startsWith('human:')) {
+      // the person's own commit lands on their version: their edit is applied to the version they are looking at, and the update keeps waiting
+      const known = new Set([...this.index.map((x) => x.id), ...this.songs.map((x) => x.id)]);
+      for (const [id, h] of [...this.held]) {
+        const mine = m.entries.filter((e) => itemsOfCmd(e.cmd, known).includes(id));
+        if (!mine.length) continue;
+        if (!h.sound) { this.held.delete(id); continue; }
+        try {
+          const lib = new Library([[id, cloneSound(h.sound)]]);
+          for (const e of mine) {
+            const p = parse(e.cmd);
+            if (p.errors.length || p.commands.length !== 1) throw new Error('not one command');
+            applyCommand(lib, p.commands[0]!);
+          }
+          this.held.set(id, { ...h, sound: lib.get(id)! });
+        } catch {
+          this.held.delete(id);
+        }
+      }
+      return;
+    }
+    const known = new Set([...this.index.map((x) => x.id), ...this.liveSongs.map((x) => x.id)]);
+    const group = m.group;
+    for (const id of new Set(m.entries.flatMap((e) => itemsOfCmd(e.cmd, known)))) {
+      if (!this.isEditing(id)) continue;
+      const have = this.held.get(id);
+      const song = this.liveSongs.find((x) => x.id === id);
+      const request = this.requests.find((q) => q.state === 'claimed' && q.claimedBy === m.by && q.sound === id)?.id ?? have?.request ?? null;
+      this.held.set(id, { ...(song ? { song: have?.song ?? song } : { sound: have?.sound ?? this.docs.get(id) }), by: m.by, group: have?.group ?? group, request, at: Date.now() });
+    }
+  }
+
+  /** Take the agent's update on an item: the page shows it as it is now. */
+  takeUpdate(id: string): void {
+    if (!this.held.delete(id)) return;
+    this.applyHolds();
+    this.changed();
+  }
+
+  private releaseHoldsAway(): void {
+    const r = this.route;
+    let any = false;
+    for (const id of [...this.held.keys()]) {
+      if ((r.kind === 'sound' || r.kind === 'song') && r.id === id) continue;
+      this.held.delete(id);
+      any = true;
+    }
+    if (any) this.applyHolds();
+  }
+
+  /** What the agent did for a request (`r3`) or in a tape group (`g7`): before and after, parameters, numbers, checks. */
+  async review(idOrGroup: string): Promise<Review> {
+    const key = /^r\d+$/.test(idOrGroup) ? 'request' : 'group';
+    const r = await fetch(`/api/review?${key}=${encodeURIComponent(idOrGroup)}&token=${encodeURIComponent(this.token)}`);
+    const body = (await r.json()) as Review & { error?: string };
+    if (!r.ok) throw new Error(body.error ?? 'no such review');
+    return body;
+  }
+
+  /** A person's decision on a done request (approved or reverted); asking again is the new request that names it. */
+  decide(id: string, how: 'approved' | 'reverted' | 'undone'): Promise<Answer> {
+    return this.request({ action: 'reviewed', id, how });
   }
 
   approve(id: string): Promise<RunResult> {
@@ -407,12 +551,12 @@ export class Store {
   }
 
   private rebuildSounds(): void {
-    this.sounds = this.index.flatMap((x) => { const d = this.docs.get(x.id); return d ? [d] : []; });
+    this.sounds = this.index.flatMap((x) => { const d = this.held.get(x.id)?.sound ?? this.docs.get(x.id); return d ? [d] : []; });
   }
 
   /** A sound's document: held, or (in a lean project) asked for; undefined until it is here. */
   doc(id: string): Sound | undefined {
-    const d = this.docs.get(id);
+    const d = this.held.get(id)?.sound ?? this.docs.get(id);
     if (!d && this.lean && this.index.some((x) => x.id === id)) void this.fetchDoc(id);
     return d;
   }
@@ -956,6 +1100,70 @@ export class Store {
   async playVersion(id: string, seq: number, doc: Sound): Promise<void> {
     this.markSeen(id);
     await this.playDoc(`${id}@${seq}`, doc, id, undefined, false, false, undefined, { seq });
+  }
+
+  /**
+   * Hear a sound as it was after a tape entry: the page replays the tape up to it (loading the earlier entries first when it holds only the
+   * newest ones) and plays the result in the worker. Nothing is written.
+   */
+  async previewAt(id: string, seq: number): Promise<{ ok: boolean; error?: string }> {
+    for (let guard = 0; this.tape.length < this.tapeTotal && guard < 50; guard++) { const before = this.tape.length; await this.loadEarlier(); if (this.tape.length === before) break; }
+    const r = replay(this.tape.filter((e) => e.seq <= seq));
+    const doc = r.library.get(id);
+    if (!doc) return { ok: false, error: `${id} did not exist yet at #${seq}` };
+    await this.ensureSamples(doc);
+    await this.playDoc(`${id}@tape${seq}`, doc, id, undefined, true, false, undefined, { seq });
+    return { ok: true };
+  }
+
+  /** Play channels already rendered (a song's loop, say) under a key, at a gain (dB); playing it again stops it. */
+  async playBuffer(key: string, id: string, chans: Float32Array[], gainDb = 0, loop = true, seq?: number): Promise<void> {
+    if (this.playing === key) { this.stop(); return; }
+    this.stop();
+    const token = ++this.playToken;
+    this.playing = key;
+    this.changed();
+    this.ctx ??= new AudioContext({ sampleRate: 44100 });
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    if (token !== this.playToken) return;
+    const len = chans[0]!.length;
+    const buf = this.ctx.createBuffer(chans.length, len, 44100);
+    chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+    const src = this.ctx.createBufferSource();
+    const g = this.ctx.createGain();
+    g.gain.value = 10 ** (gainDb / 20);
+    src.buffer = buf;
+    src.loop = loop;
+    src.connect(g);
+    g.connect(this.out());
+    src.onended = () => { if (this.source === src) { this.source = null; this.playing = null; this.changed(); this.wake(); } };
+    this.source = src;
+    this.played.push({ id, loop, hash: sha256Text(`${key}|${len}`), samples: len, key, ...(seq !== undefined ? { seq } : {}), gain: gainDb });
+    this.clock = { at: performance.now(), from: 0, len: len / 44100, loop };
+    src.start();
+  }
+
+  private loudMemo = new WeakMap<object, { lufs: number | null; truePeakDb: number | null }>();
+  /** The integrated loudness and true peak of rendered channels (a song's loop), kept by the buffer. */
+  songLoudness(mix: readonly Float32Array[]): { lufs: number | null; truePeakDb: number | null } {
+    const have = this.loudMemo.get(mix);
+    if (have) return have;
+    const a = analyze([...mix]);
+    const v = { lufs: Number.isFinite(a.lufs) ? a.lufs : null, truePeakDb: Number.isFinite(a.truePeakDb) ? a.truePeakDb : null };
+    this.loudMemo.set(mix, v);
+    return v;
+  }
+
+  /** What undoing a review decision needs: the commands that give the item's parameters back as they were before the agent (or why not). */
+  async restoreFor(r: Review): Promise<{ commands: string[] } | { error: string }> {
+    if (r.kind === 'song') {
+      const now = this.liveSongs.find((x) => x.id === r.item);
+      if (!now || !r.song?.before) return { error: `song ${r.item} is not there to restore` };
+      return restoreSongCommands(now, songFromJson(r.song.before));
+    }
+    const now = await this.docNow(r.item);
+    if (!now || !r.before?.sound) return { error: `no sound '${r.item}' to restore` };
+    return restoreCommands(now, r.before.sound, (n) => this.sampleBank.hash(n) ?? 'missing');
   }
 
   /** Play versions one after the other with a gap (ms): a row or a column of the grid. */

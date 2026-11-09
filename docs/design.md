@@ -353,6 +353,28 @@ exit is what wakes an agent that ran it in the background. A `seen` record notes
 was handed a request, so a card can say "seen by agent:claude". The server also knows who is
 listening (open waits, agents that called a tool lately), and a card says plainly when nobody is.
 
+A change request may carry a **target** (a range, bars of a song with a channel, a parameter, a layer, or the item), set by
+the dashboard's composer from whatever is selected; it is validated with the request (a range needs a sound, bars a song)
+and printed in words by every surface that prints a request. A request may also name the done request it asks **again**
+about, and a person's decision on a done request (`reviewed`: approved, reverted, or undone within ten seconds) is a
+record of its own; "ready for review" is a done change with no such decision and no approval from a person since.
+The writer tells watchers how far a multi-item batch has got: `batchProgress` messages (`start` with the item count,
+`item`, `end`) go over the websocket, ahead of the `batch` message that carries the result, and the latest one is in
+the snapshot. An item is a command of a batch of several, or a member of a set that `set new` or `set regen` makes
+(its loudness match is the slow part); a batch of one command says nothing.
+
+### Presence and live arrival
+
+The page never moves what you are looking at because of a server update. A changed library row pulses once and keeps a
+"new" dot until played or opened; scroll, selection, open popovers and carets are untouched; toasts and the Undo bar
+are polite and never take focus; the batch strip and the update chip float in a zero-height sticky layer, so they take
+no room. When the agent changes the item you are editing (its editor is open in the focused tab and you changed
+something in the last minute, or a draft or drag is open) the store **holds** your version: the editor keeps showing it,
+your own edits are applied on top of it, and an "agent update waiting · review" chip opens the review. Taking the
+update (the chip's link, discarding your draft, or leaving the editor) shows the item as it is. The page replays
+the tape itself for the history tape's preview and for a revert's commands; a review's before and after, parameters,
+numbers and check markers come from `GET /api/review?request=r3|group=g7`, which is `changes` with the structure kept.
+
 ## The editor and human edits
 
 A classic sound's page (`#/sound/<id>`, opened from its card) is the editor: the 25 parameters as
