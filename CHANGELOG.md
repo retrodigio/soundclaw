@@ -6,6 +6,12 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-09
+
+### Changed
+- Releases are published from GitHub Actions by npm trusted publishing, with a provenance statement on the package.
+- A browser test of the command palette expects the platform's modifier key (⌘ on a Mac, Ctrl elsewhere).
+
 ## [0.1.0] - 2026-11-09
 
 The first release.
@@ -389,5 +395,6 @@ The first release.
   MCP `await_requests`; `soundclaw work list|claim|progress|block|done` and the MCP `work`.
 - Per-command `--help` and `--version`; a Claude Code skill (`soundclaw skill install`).
 
-[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/retrodigio/soundclaw/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/retrodigio/soundclaw/releases/tag/v0.1.0
