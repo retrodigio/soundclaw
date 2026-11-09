@@ -59,6 +59,33 @@ diff well in git. A hand edit to one is overwritten by the next change (turning 
 a command is a later step). Commands that settle something the text left open (a default seed for a
 preset or a mutation) write the settled value into their normal form, so the tape replays exactly.
 
+## Samples
+
+A sample is **bytes named by their hash**. The store keeps each audio once, as a plain WAV in `samples/objects/<xx>/<hash>.wav`; objects are written
+whole under a temporary name and moved into place, and never rewritten or renamed, so git stores each once. The hash is a SHA-256 over a fixed header
+(`soundclaw-pcm 1`, rate, channels, sample format) and the interleaved little-endian samples, not over a file: the chunks a WAV carries around its
+audio, or another container holding the same audio, change nothing, and a lossless store in another encoding could come later without changing a name's
+hash or a render. The formats stored are 8, 16, 24 and 32-bit integer and 32-bit float, exactly as read, so a file renders as it always has.
+
+**Names live on the tape.** `sample add <name> hash=…` (with the facts about the audio, its provenance and its licence), `sample set`, `sample rename`
+and `sample remove` are tape commands with authors and undo groups, replayed like sounds; `samples/<name>.sample` is written from the tape for reading
+and diffs. A name resolves to a hash at that point of the tape, and the render key holds the hash, so a name pointed at other audio renders again, undo
+brings the old audio back, and an earlier version of a sound (a set's clip grid, a review) renders with the audio its names stood for then. The
+dashboard fetches audio by hash (`/api/sample-object/<hash>`, cacheable for ever) and decodes it with the same core code as the server, which is why
+the page renders the bytes Node renders.
+
+**Everything that reads the world happens once, in the command, and its result is written into the command.** A file is decoded when it is imported
+(WAV, AIFF and FLAC by `core`'s own decoders, which use only integers; OGG, MP3 and M4A through ffmpeg, an import-time convenience), and what was read
+(hash, rate, channels, frames, root note, loop, cue points) is in the `sample add` line. Replay, undo and rendering never decode a compressed file, call
+out, or measure. Uploads are read in a worker thread, with a size limit, a sanitised name, and the hash checked before the name goes on the tape.
+
+**Licences travel with the audio.** Each sample has a licence (never inferred) and a provenance (source, origin, the original file's hash, who and when,
+and for generated or derived audio how). A sound, instrument or song carries the licences of every sample it reaches, through parents too, and a manifest
+export is gated by the project's policy. The tool records; it gives no legal advice.
+
+**Projects from 0.1** keep `samples/<name>.wav` files with nothing on the tape. They read as samples that are not on the tape yet, rendering the same
+floats (the decoders are tested against the 0.1 reader), until `soundclaw upgrade` moves them into the store in one group by `system:upgrade`.
+
 ## Rendering
 
 `renderSound` produces 44,100 Hz mono samples. It is deterministic by construction: fixed

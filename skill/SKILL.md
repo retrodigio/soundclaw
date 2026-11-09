@@ -110,10 +110,17 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
 - Envelope targets: `N.amp`, `N.<param>` (those marked in docs/commands.md), `N.fxK.<param>`, `master.fxK.<param>`. Curves
   are for the segment arriving at a point: `lin exp hold ease`. A fixed value set later removes the envelope.
 - Any layer off centre in `pan` makes the sound **stereo**; the checks count both channels and `describe` says stereo.
-- `sample import <project> <file.wav> as=<name>` (CLI `soundclaw sample import …`, MCP `sample`) before a `sample` layer;
-  a batch naming a missing sample is refused. A sample layer with no envelope and no `start`/`end` plays the file as it is (no fade,
-  not cut), so `measure` of it equals the file. A 48 or 96 kHz file is converted with a windowed sinc (the import says so) and keeps
-  its loudness. A stereo file stays stereo as two layers: `layer add <id> sample sample=<name> side=left pan=-1` and `… side=right pan=1`.
+- Samples are named audio in the project's store. `sample import <project> <file or folder> as=<name> licence=<id>` (CLI `soundclaw sample import …`,
+  MCP `sample`) reads WAV, AIFF and FLAC (OGG, MP3 and M4A when ffmpeg is installed) before a `sample` layer; a batch naming a missing sample is
+  refused. Say where a file came from and under what licence when you know it: `licence=CC0-1.0`, `CC-BY-4.0` with `attribution="…"`, `own`;
+  it is `unknown` otherwise, and the tool never guesses. Change a sample with the tape commands (`sample set <name> root=C4 tags=wood licence=own`,
+  `sample rename`, `sample remove`) and look with `sample list` / `sample show`. A sample layer with no envelope and no `start`/`end` plays the file as
+  it is (no fade, not cut), so `measure` of it equals the file. A 48 or 96 kHz file is converted with a windowed sinc (the import says so) and keeps
+  its loudness. Channels are kept: `side=stereo` plays both channels of a stereo file in one layer (`side=left`, `side=right` and the default `mix`
+  play one channel or the average). `soundclaw licence check <project>` (MCP `licence`) says which sounds may ship; a manifest export (`--all`, a set,
+  `--pack`) refuses a sound that reaches an unknown or blocked licence unless you pass `--allow-licence <id>` (only if the person says so), lists the
+  samples used and writes `ATTRIBUTION.txt`. Pointing a name at other audio (`sample set <name> hash=…`) is undoable like any edit. A 0.1 project's
+  `samples/*.wav` still work; `soundclaw upgrade <project>` moves them into the store. `sample gc` is a dry run until `--apply`.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower

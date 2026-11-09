@@ -24,8 +24,11 @@ machine, and can be edited and checked by a person and an agent alike.
   done in arithmetic that every platform agrees on), with generators by category (pickup, laser,
   explosion, powerup, hit, jump, blip), seeded `mutate`, and import and export of sfxr patch text and
   `synth.csv`.
+- **Samples with provenance.** Audio files (WAV, AIFF, FLAC, and OGG, MP3 or M4A through ffmpeg) are kept once, by content, in the
+  project; their names, where they came from and their licence are on the history tape, so undo covers them. A sound, instrument or song
+  knows the licences it reaches, and a manifest export lists them, writes `ATTRIBUTION.txt` and refuses what may not ship.
 - **The layered voice.** Up to 8 layers per sound (classic, oscillators, FM, Karplus-Strong plucks, imported
-  samples), breakpoint envelopes on any parameter, filters and effects per layer and on a master chain, stereo, a
+  samples, stereo ones included), breakpoint envelopes on any parameter, filters and effects per layer and on a master chain, stereo, a
   limiter on export, recipes for footsteps, UI clicks, doors and magic, and an editor with a layer list, an envelope
   graph and effect chains. The same deterministic renderer runs in Node and the browser.
 - **Sets, families and loops.** `set new footsteps from=step count=6 target=-20 spread="1.freq±12%"` makes six seeded variants of

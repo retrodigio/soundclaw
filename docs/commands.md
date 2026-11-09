@@ -214,8 +214,8 @@ the highs fall faster).
 | `decay` | 0.05 to 10 s | 1 | - | time for the string to fall by 60 dB |
 | `bright` | 0 to 1 | 0.8 | - | brightness of the pluck (0 dull … 1 bright) |
 
-*sample*: an imported WAV (`soundclaw sample import <project> <file.wav | folder> [as=<name>]`: PCM 8/16/24/32-bit or 32-bit float,
-any rate, at most 120 s; it is copied to `<project>/samples/`). A sample's name keeps the case of the file name (or of `as=`), like
+*sample*: a named sample of the project (see [Samples](#samples): `soundclaw sample import <project> <file | folder> [as=<name>]` reads WAV,
+AIFF and FLAC, and OGG, MP3 and M4A through ffmpeg; a layer plays at most 120 s of it). A sample's name keeps the case of the file name (or of `as=`), like
 a sound's id, and two names that differ only in case are refused (`Boom` and `boom`); a layer names it exactly. The layer plays the file
 as it is: with no amplitude envelope and no `start`/`end` there is no fade at either end and `duration=auto` does not cut it, so `measure`
 of a sound that only plays a file measures the file (a trimmed layer, or one with an envelope, still gets the 2 ms fades).
@@ -227,26 +227,27 @@ and its passband gain is 1, so the loudness is kept (within 0.2 LU, tested on 22
 prints this method for a file whose rate is not 44,100 Hz. After that the sample is trimmed by `start` and `end` (seconds of the
 file), transposed by `pitch` (linear interpolation between samples; its length changes with it) and optionally backwards.
 
-*Stereo.* A layer is one signal. `side=mix` (the default) plays the average of all the file's channels; `side=left` and `side=right`
-play one channel of a stereo file. To keep a stereo file stereo use two layers, hard-panned:
+*Stereo.* Channels are kept in the store. `side=mix` (the default) plays the average of all the file's channels; `side=left` and
+`side=right` play one channel of a stereo file; `side=stereo` plays both, the left channel to the left and the right to the right,
+through one layer's filter, envelope, effects and gain (each channel is processed on its own, so the layer's effects hear a left and a right;
+the layer's `pan` does not apply to it, and a mono file plays the same in both):
 
 ```
-layer add boom sample sample=Wind side=left pan=-1
-layer add boom sample sample=Wind side=right pan=1
+layer add boom sample sample=Wind side=stereo
 ```
 
-(`pan=-1` and `pan=1` are full left and full right: the two channels come out as they are in the file, and the sound is stereo.
-`measure` of that sound agrees with ffmpeg's `ebur128` on the file within 0.2 LU.) `sample import` prints these two lines for a
-stereo file. A batch that names a sample that is not in the project is refused. The render key includes the file's hash.
+The older two-layer form still works and renders as before (`side=left pan=-1` and `side=right pan=1`; `measure` of a sound made that way agrees
+with ffmpeg's `ebur128` on the file within 0.2 LU). `sample import` says how to use a stereo file. A batch that names a sample that is not in
+the project is refused. The render key includes the audio's hash.
 
 | Parameter | Range | Default | Envelope | Meaning |
 |---|---|---|---|---|
-| `sample` | text | none | - | the name of a sample in the project (sample import <project> <file.wav> as=<name>) |
+| `sample` | text | none | - | the name of a sample in the project (soundclaw sample import <project> <file> as=<name>) |
 | `start` | 0 to 120 s | 0 | - | trim: where in the sample to start |
 | `end` | 0 to 120 s | 0 | - | trim: where to stop (0 = the end) |
 | `pitch` | -48 to 48 semitones | 0 | yes | transposition (the sample's length changes with it) |
 | `reverse` | 0 to 1 (whole) | 0 | - | 1 plays it backwards |
-| `side` | `mix`, `left`, `right` | mix | - | which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each); for the whole file in stereo use two layers, side=left pan=-1 and side=right pan=1 |
+| `side` | `mix`, `left`, `right`, `stereo` | mix | - | which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each), or stereo: both channels, left to the left and right to the right, through one layer's filter, envelope and effects (the layer's pan does not apply; a mono file plays in both) |
 
 **Envelopes.** `env <id> <target> "<breakpoints>"` replaces a fixed value with breakpoints `time:value`, times in seconds from the
 start of the layer (the master chain's from the start of the sound), rising. Each point may carry a curve for the segment
@@ -955,6 +956,117 @@ for `run` and `work`, and `human:<name>` for `request`, `reply` and `cancel`. Th
 as `agent:claude`. A dashboard page writes as the name in its header (`?name=ana` in the URL gives
 `human:ana`; with no name, the last one used in that browser, else `human:owner`).
 
+## Samples
+
+A sample is audio kept once, by content, in the project, with a name, where it came from and its licence. The audio is a plain WAV in
+`samples/objects/<first two hex digits>/<hash>.wav`; objects are never rewritten or renamed. The **name** is on the history tape
+(`sample add <name> hash=…`), so a sample has an author and an undo group like a sound, and pointing a name at other audio is a command
+that undo takes back. `samples/<name>.sample` is the same facts as text, written from the tape for reading and diffs.
+
+*The hash* is the SHA-256 of a fixed header (`soundclaw-pcm 1`, then the rate, the channels and the sample format) and the samples as
+little-endian values, not of a file's bytes: the extra chunks a WAV may carry (`LIST`, `smpl`, `bext`) do not change it, and the same
+audio read from a WAV, an AIFF or a FLAC file has one hash and is kept once. The renderer reads the stored audio only: a file is decoded
+once, when it is imported, and a replay or a render never decodes a compressed file or measures anything.
+
+### Importing
+
+`soundclaw sample import <project> <file | folder>` (the MCP `sample` tool's `import`, or a file dropped on the dashboard) reads:
+
+| Format | Read |
+|---|---|
+| WAV | PCM 8, 16, 24 and 32 bit; float 32 and 64 (stored as float 32, and the import says so); `WAVE_FORMAT_EXTENSIBLE`; 1 to 8 channels |
+| AIFF, AIFF-C | uncompressed (`none`), `sowt` (little-endian) and `fl32` |
+| FLAC | every subframe kind and stereo mode, 4 to 32 bits (stored at the width that holds them, left-justified) |
+| OGG, Opus, MP3, M4A/AAC, WMA | through `ffmpeg` when it is installed (stored as 16-bit PCM at the file's own rate and channels; the original file's hash is kept in the provenance); otherwise the error says to install it or convert the file to WAV |
+
+The decoders are plain TypeScript in `core`; ffmpeg is an import-time convenience and never a render dependency. Channels are kept. What a
+file says about itself is read and printed: the root note and fine tuning, a loop and the one-shot flag (`smpl`, `acid`, AIFF `INST`), cue
+points (kept as slice points), the tempo and text tags (kept in the note). Licence text in a file is not taken as a licence.
+
+The name defaults to the file's name with anything but letters, digits, `_` and `-` turned into `_`; `as=<name>` names it. A folder
+imports every audio file directly in it as **one undo group**; a file that cannot be read is reported and the others still go in. The same
+audio under a second name adds the name, not a second object, and says so. A name that exists with other audio is refused. Importing
+the same file under the same name again does nothing. SoundClaw never fetches a file from an address: download it with your own tools and import it with `origin=<address>`, so the provenance keeps where it came from.
+
+**Limits** (printed when one is hit):
+
+| | Limit |
+|---|---|
+| A file | at most 600 s and 200 MB |
+| Rate | 8,000 to 192,000 Hz (files of a 0.1 project from 3,000 Hz still open) |
+| Channels | 1 to 8 |
+| What a sample layer plays | at most 120 s of a sample |
+| The store | a warning past 250 MB; an import past 1 GB is refused without `--force` |
+
+### The tape commands
+
+```
+sample add <name> hash=<sha256> rate=<Hz> channels=<n> frames=<n> format=pcm8|pcm16|pcm24|pcm32|f32 [<field>=<value> ...]
+sample set <name> <field>=<value> ...          (<field>=none clears an optional field)
+sample rename <name> <new name>                (sounds and instruments that play it follow)
+sample remove <name>                           (refused while a sound or instrument plays it)
+```
+
+`sample add` names audio that is in the store: a batch that names a hash that is not there is refused, naming the hash (import first).
+`sample set <name> hash=…` points a name at other audio and needs `rate=`, `channels=`, `frames=` and `format=` with it; renders follow it,
+and `undo` brings the old audio back. The fields, in the order the normal form writes them:
+
+| Field | Value |
+|---|---|
+| `root`, `tune` | the pitch the audio sounds at (`C4`, `F#3`, or a MIDI number) and a tuning offset in cents (-100 to 100) |
+| `loop`, `loopmode` | loop points in frames (`<start>-<end>`) and `none`, `sustain`, `continuous` or `oneshot` (`sustain` when a loop is given) |
+| `slices` | slice points in frames, ascending (at most 1024) |
+| `tags`, `gain`, `note` | up to 32 lower-case tags (`wood,door`); a default level in dB (-60 to 24); a note (at most 400 characters) |
+| `source` | `file`, `library`, `recorded`, `generated`, `derived`, `bounce` or `instrument-import` (default `file`) |
+| `origin`, `orig-hash`, `orig-format` | a file name, a library id and path, or an address (never an absolute path from a disk); the original file's SHA-256 and format |
+| `date`, `author` | when and by whom, written by the writer from the tape line |
+| `provider`, `endpoint`, `model`, `prompt`, `params`, `seed`, `take`, `request`, `credits` | for generated audio: who made it and how, take `n/m`, the provider's request id and the credits charged |
+| `parents`, `ops` | for derived audio: the parents' hashes and the operations |
+| `licence`, `attribution`, `terms` | see below |
+
+### Licences
+
+Each sample has a licence: an SPDX id (`CC0-1.0`, `CC-BY-4.0`), or `own`, `generated:<provider>:<plan>`, `proprietary:<note>` or `unknown`
+(the default). The tool never guesses one: it takes the licence it is given and no other, and it records licences; it gives no legal advice.
+A sound, instrument or song carries the licences of every sample it reaches (layers, instruments its channels play, and the parents of
+derived samples), and its state is the worst of them:
+
+| State | Meaning |
+|---|---|
+| `shippable` | may ship (also a sound that plays no sample) |
+| `attribution` | may ship with credit: `CC-BY-*` and any licence with attribution text |
+| `unknown` | the licence has not been set |
+| `blocked` | the project's policy does not let it ship |
+
+The default policy ships `own`, `CC0-1.0`, `CC-BY-*` (with `ATTRIBUTION.txt`) and `generated:*:*` (generated audio from a paid plan), and blocks
+`unknown`, any `-NC` or `-ND` licence, `generated:*:free` and `proprietary:*`. A project changes it in `project.json`:
+
+```
+"licences": { "allow": ["own", "CC0-1.0", "CC-BY-*"], "block": ["unknown", "*-NC*"] }
+```
+
+(patterns where `*` matches anything; `block` is looked at first; a list left out keeps its default; `unknown` is never shippable). While you work
+a licence only warns; the gate is on export. `soundclaw licence check <project> [<id>...]` reports each item (default every sound, instrument and
+song) with the samples behind its verdict. A manifest export (`--all`, `--set`, `--pack`) refuses an item whose state is `unknown` or `blocked`
+unless `--allow-licence <id>` names that licence (written into the manifest as `allowedLicences`); it lists the samples used (name, hash, licence,
+attribution, terms, source) in `manifest.json`, with each sound's `licences` and `licence`, and writes `ATTRIBUTION.txt` when a licence asks
+for attribution. A single-file export warns and goes ahead.
+
+### Looking after the store
+
+`soundclaw sample gc <project>` lists the objects no line of the tape names (a dry run); `--apply` deletes them. Undo and redo are commands, so
+an object named by an undone group is kept. `--drop-history` also drops objects only undone or replaced states used, and lists first the tape
+lines (the versions) that will then no longer render with their audio; the parents of a derived sample that is still in use stay.
+`soundclaw sample git-lfs` prints the `.gitattributes` lines for Git LFS; plain git works and stores each object once, because objects never change.
+Libraries of recordings stay outside projects: only what a project uses is copied in.
+
+### Projects from 0.1
+
+A project whose samples are `samples/<name>.wav` files with nothing on the tape opens and renders exactly as before: the files read as
+samples that are not on the tape yet (`sample list` marks them), with the licence `unknown`. `soundclaw upgrade <project>` moves them into the
+store and writes one `sample add` group by `system:upgrade`; every render stays the same sample for sample. A name already on the tape is left
+alone and reported. After an upgrade an undo that would take a sample away from a sound that plays it is refused.
+
 ## The project folder
 
 ```
@@ -962,6 +1074,7 @@ demo.sclaw/
   project.json     format and name
   sounds/          <id>.sfx per sound: the current state, written from the history
   instruments/ songs/ sets/    homes for the documents later versions add
+  samples/         objects/<xx>/<hash>.wav: the audio, once per content; <name>.sample: each name, written from the history
   history.jsonl    the command tape: every change, its author and undo group; the source of truth
   requests.jsonl   what people asked for, and how the agent answered; append-only
   exports/         WAV files (ignored by git)
@@ -989,8 +1102,16 @@ soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>]
 soundclaw describe <project> <id>
 soundclaw check <project> [<id>...]
 soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
-soundclaw sample import <project> <file.wav | folder> [as=<name>]
+soundclaw sample import <project> <file | folder> [as=<name>] [licence=<id>] [attribution="<text>"] [terms=<url>] [tags=a,b] [source=<kind>] [origin="<where from>"] [note="<text>"] [--force]
 soundclaw sample list <project>
+soundclaw sample show <project> <name>
+soundclaw sample add|set <project> <name> <field>=<value>...
+soundclaw sample rename <project> <name> <new>
+soundclaw sample remove <project> <name>
+soundclaw sample gc <project> [--apply] [--drop-history]
+soundclaw sample git-lfs
+soundclaw upgrade <project>
+soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
 soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
 soundclaw midi import <project> <file.mid> [--id <song>]
@@ -1187,7 +1308,9 @@ everything else is audio, ready to drop into a pack. Without `--all`, `--set` or
 A layered sound exports as audio only, **WAV** (16-bit, 44,100 Hz, mono or stereo, through the limiter above) **or OGG**; `export` says so for each one
 and how much the limiter reduced it, `--format csv` and `patch` refuse a layered sound that is named and skip it when everything is
 exported (a `synth.csv` row cannot hold layers). A classic sound marked classic, or never layered, keeps exporting as a row.
-`sample import <project> <file.wav | folder> [as=<name>]` copies a WAV (or every `.wav` in a folder; a file that cannot be read is reported and the others still go in) into `<project>/samples/`; `sample list` lists them.
+Samples are brought in with `sample import` (see [Samples](#samples)). A manifest export (`--all`, `--set`, `--pack`) lists the samples its sounds use and writes
+`ATTRIBUTION.txt` when a licence asks for it; it refuses a sound that reaches an unknown or blocked licence unless `--allow-licence <id>` lets that licence through
+(the ids let through are written into `manifest.json`); a single-file export warns instead.
 
 Exit codes: 0 done, 1 refused (an error in the commands or the project; nothing was applied), 2
 usage error, 3 (`await` only) the timeout passed with nothing to report.
@@ -1307,8 +1430,9 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `normalize` | `sounds`, `to` (a class name, or `target=<LUFS>`): write the gain that brings sounds, a set or a song to a loudness, as one undo group. A song with layers is fitted so every mix of them is inside the class window. |
 | `check` | `sounds` (sound ids and set names; default all), `json`: the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
 | `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
-| `sample` | `action` (`import` with `file` (a WAV or a folder) and `as`, or `list`): WAV samples for sample layers. |
-| `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too. A song: `format` `wav`, `ogg` or `midi`, `loop`, `stems`, `stemsThroughMaster`, `loops`, `pattern`. |
+| `sample` | `action`: `import` (`file`, a file or a folder, with `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin`, `note`, `force`), `list`, `show` (`name`), `gc` (`apply`, `drop_history`), `upgrade`. Change a sample with `run` (`sample set …`, `sample rename …`, `sample remove …`). |
+| `licence` | `ids` (sounds, sets, songs, instruments, samples; default every sound, instrument and song), `allow_licence`: where each stands (shippable, attribution, unknown, blocked) and the samples behind it. |
+| `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too (`allow_licence` lets licence ids through a manifest export). A song: `format` `wav`, `ogg` or `midi`, `loop`, `stems`, `stemsThroughMaster`, `loops`, `pattern`. |
 | `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |
 | `request` | File (`sound`, `note`, `tags`, `like`), `reply` (`id`, `text`) or `cancel` a request. |
 | `work` | `next` (default), `progress`, `done`, `blocked`, `list`. |
@@ -1324,7 +1448,9 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `GET /api/render/<id>.f32` | The sound's samples as the server renders them: little-endian float32 (a stereo sound: the left channel, then the right). |
 | `GET /api/render/<id>.f64` | The exact doubles (for a classic sound, the reference samples that WAVs quantise): little-endian float64. |
 | `GET /api/render/<id>.wav` | The same as the exported WAV (a classic sound in the pre-rendered form, a layered sound through the limiter, stereo when it is). |
-| `GET /api/samples`, `GET /api/samples/<name>.wav` | The project's samples (name, SHA-256, rate, length) and their bytes; the page fetches them to render sample layers. |
+| `GET /api/samples`, `GET /api/samples/<name>.wav` | The project's samples (name, hash, rate, length, format, licence and its state, source, tags) and the audio a name stands for. |
+| `GET /api/sample-object/<hash>` | The stored audio of a hash, as a WAV. The bytes never change, so it is sent as cacheable for ever; the page fetches the samples a sound names by hash to render its sample layers. |
+| `POST /api/samples/import?by=human:<name>&name=<file name>` | An uploaded audio file (the body is its bytes, at most 200 MB), read in a worker thread and named on the tape as that person. `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin` and `note` are as for `sample import`; the file name is cut to its last part. |
 | `GET /api/await?timeout=…&since=…&as=agent:<name>` | Long poll for events. |
 | `GET /api/presence` | Who is listening. |
 | `POST /api/cli` | A writing CLI command, run on the server's writer (used by the CLI itself). |

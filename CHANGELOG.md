@@ -6,6 +6,28 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Samples
+- **A store for audio.** Samples are kept once per content, as `samples/objects/<xx>/<hash>.wav`, under a hash of the audio itself (not of a file,
+  so the chunks around it change nothing). Objects are written atomically and never rewritten. Names are on the history tape (`sample add`, `sample
+  set`, `sample rename`, `sample remove`), with authors and undo groups; pointing a name at other audio renders again and undo brings the old audio
+  back, in the page too, and an earlier version of a sound renders with the audio its names stood for then. `samples/<name>.sample` is written
+  from the tape.
+- **More formats, channels kept.** WAV (PCM 8/16/24/32-bit, float 32 and 64, extensible), AIFF and AIFF-C, and FLAC are read by SoundClaw's own
+  decoders; OGG, MP3 and M4A through ffmpeg when it is installed. The root note, loop points, one-shot flag, cue points and text tags a file carries
+  are read and printed. A folder is one undo group, and the same audio under a second name is kept once. A sample layer takes `side=stereo`: both
+  channels of a file in one layer (the two-layer form renders as before).
+- **Provenance and licence.** Each sample records its source, origin, the original file's hash, who and when, and its licence (an SPDX id, `own`,
+  `generated:…`, `proprietary:…`, or `unknown`, the default; nothing is guessed). Sounds, instruments and songs carry the licences of every sample
+  they reach. `soundclaw licence check` reports where each stands; manifest exports (`--all`, `--set`, `--pack`) list the samples used, write
+  `ATTRIBUTION.txt` when a licence asks for credit, and refuse what reaches an unknown or blocked licence unless `--allow-licence <id>` lets it
+  through. `project.json` `licences` changes the policy.
+- **Looking after the store.** `soundclaw sample show`, `sample gc` (a dry run; `--apply`, `--drop-history`), `sample git-lfs`, a limits table,
+  uploads from the page (read in a worker thread) at `POST /api/samples/import`, and the audio at `GET /api/sample-object/<hash>`.
+- **Projects from 0.1 keep working.** Their `samples/*.wav` files open and render exactly as before; `soundclaw upgrade` moves them into the store.
+
+### Fixed
+- The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.
+
 ## [0.1.1] - 2026-11-09
 
 ### Changed
