@@ -3,12 +3,32 @@
 // background process, and removes the folder.
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const REPO = join(import.meta.dirname, '..');
 export const BIN = join(REPO, 'cli', 'bin', 'soundclaw.js');
+
+/**
+ * Every server this worker starts, so none outlives it. A spec that times out while `startAgent` is still waiting for the URL never
+ * gets the Agent back to close, and a worker that is stopped runs no hooks: this set is emptied when the worker exits or is told to stop,
+ * and each pid is also written to the file named by SOUNDCLAW_E2E_PIDS, which global-teardown.ts reads when the whole run ends.
+ */
+const live = new Set<ChildProcess>();
+let reaperInstalled = false;
+function reapAll(): void {
+  for (const c of live) {
+    try { c.kill('SIGTERM'); } catch { /* gone already */ }
+  }
+  live.clear();
+}
+function installReaper(): void {
+  if (reaperInstalled) return;
+  reaperInstalled = true;
+  process.on('exit', reapAll);
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) process.once(sig, () => { reapAll(); process.exit(sig === 'SIGINT' ? 130 : 143); });
+}
 
 export interface Done { code: number | null; out: string; err: string }
 
@@ -42,11 +62,15 @@ export async function startAgent(o: { build?: (dir: string) => void } = {}): Pro
   let server!: ChildProcess;
   const launch = async (port: number): Promise<string> => {
     stderr = '';
+    installReaper();
     server = spawn(process.execPath, [BIN, 'serve', '--project', dir, '--port', String(port), '--no-mcp'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    live.add(server);
+    server.once('exit', () => live.delete(server));
+    if (process.env.SOUNDCLAW_E2E_PIDS && server.pid) appendFileSync(process.env.SOUNDCLAW_E2E_PIDS, `${server.pid}\n`);
     server.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
     const t0 = Date.now();
     while (!/watch at (\S+)/.test(stderr)) {
-      if (Date.now() - t0 > 15_000) { server.kill(); throw new Error(`no URL from the server: ${stderr}`); }
+      if (Date.now() - t0 > 15_000 || server.exitCode !== null) { server.kill(); throw new Error(`no URL from the server: ${stderr}`); }
       await new Promise((r) => setTimeout(r, 25));
     }
     return /watch at (\S+)/.exec(stderr)![1]!;

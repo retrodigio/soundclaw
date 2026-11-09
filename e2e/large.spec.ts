@@ -46,7 +46,7 @@ test('a project of 400 sounds opens at once, loads thumbnails as cards come into
   const lap = (what: string) => console.log(`  [${((Date.now() - T) / 1000).toFixed(1)} s] ${what}`);
   lap('built');
   expect(sounds.length).toBe(400);
-  expect(readdirSync(join(agent.dir, 'samples')).filter((f) => f.endsWith('.wav')).length).toBe(100);
+  expect(readdirSync(join(agent.dir, 'samples')).filter((f) => f.endsWith('.sample')).length).toBe(100);
   await watchLongTasks(page);
 
   // 1. the list, from the state alone
