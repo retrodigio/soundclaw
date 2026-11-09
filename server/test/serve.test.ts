@@ -83,6 +83,19 @@ describe('the server process', () => {
     expect(existsSync(tf)).toBe(false);
   });
 
+  it('a server started again on the same folder keeps its token, so an open dashboard reconnects', async () => {
+    const first = await startServe();
+    server!.kill('SIGTERM');
+    await new Promise((r) => server!.once('exit', r));
+    expect(existsSync(tokenFilePath(dir))).toBe(false);
+    const again = await startServe();
+    expect(again.token).toBe(first.token);
+    // the kept token is private too
+    const last = tokenFilePath(dir).replace(/\.json$/, '.last.json');
+    if (process.platform !== 'win32') expect(statSync(last).mode & 0o777).toBe(0o600);
+    expect(readFileSync(last, 'utf8')).not.toContain(dir);
+  });
+
   it('serves the API only with the token, and only to localhost names', async () => {
     const s = await startServe();
     const base = `http://127.0.0.1:${s.port}`;

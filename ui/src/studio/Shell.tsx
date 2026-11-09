@@ -7,12 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { Store } from '../store.ts';
 import { BottomPanel } from './Bottom.tsx';
 import { AskHost, askHere, itemSpec, openAsk } from './ask.tsx';
-import { Banner, ToastHost, useToast } from './controls.tsx';
+import { ToastHost, useToast } from './controls.tsx';
 import { Chevron, Close, KindIcon, Spark, type TabKind } from './icons.tsx';
 import { Library } from './Library.tsx';
 import { UndoBar } from './decisions.tsx';
 import { BatchStrip, UpdateChip } from './live.tsx';
-import { Resizer } from './layout.tsx';
+import { OfflineBanner, RefusedBanner } from './offline.tsx';
+import { PartBoundary, Resizer } from './layout.tsx';
 import { SelectionCtx } from './NeedCard.tsx';
 import { Page } from './pages.tsx';
 import { Palette, ShortcutSheet } from './Palette.tsx';
@@ -61,6 +62,24 @@ function TabBar({ store, tabs, current, onClose }: { store: Store; tabs: TabInfo
   );
 }
 
+const noop = (): void => undefined;
+/** Keys that belong to one page, for the shortcut sheet: listed, never bound here, not in the palette. */
+const REFERENCE_KEYS: Action[] = [
+  { id: 'ref.mutate', label: 'Mutate the sound (classic editor)', group: 'Edit', shortcut: 'M' },
+  { id: 'ref.lens', label: 'Switch the lens: waveform, spectrogram, pitch, compare, numbers (sound pages)', group: 'Analysis', shortcut: '1–5' },
+  { id: 'ref.layers', label: 'Lens: sum by layer (layered editor)', group: 'Analysis', shortcut: '6' },
+  { id: 'ref.addLayer', label: 'Add a layer (layered editor)', group: 'Edit', shortcut: '⇧ L' },
+  { id: 'ref.gridRow', label: 'Play a row of the clip grid, back to back', group: 'Audition', shortcut: '1–9' },
+  { id: 'ref.gridCol', label: 'Play a column of the clip grid', group: 'Audition', shortcut: '⇧ 1–9' },
+  { id: 'ref.compare', label: 'Compare the two selected cells on the A/B card', group: 'Audition', shortcut: 'C' },
+  { id: 'ref.abA', label: 'Blind A/B: A fits better', group: 'Audition', shortcut: 'A' },
+  { id: 'ref.abB', label: 'Blind A/B: B fits better', group: 'Audition', shortcut: 'B' },
+  { id: 'ref.abBoth', label: 'Blind A/B: both would do', group: 'Audition', shortcut: '=' },
+  { id: 'ref.abNeither', label: 'Blind A/B: neither would do', group: 'Audition', shortcut: 'N' },
+  { id: 'ref.abTab', label: 'Switch A and B while playing (A/B card, review)', group: 'Audition', shortcut: 'Tab' },
+  { id: 'ref.abNext', label: 'The next pair (A/B card)', group: 'Audition', shortcut: '→' },
+].map((a) => ({ ...a, local: true, noPalette: true, run: noop }));
+
 function ShellInner({ store }: { store: Store }) {
   useSyncExternalStore(store.subscribe, store.getVersion);
   const toast = useToast();
@@ -79,13 +98,26 @@ function ShellInner({ store }: { store: Store }) {
   const overlayRef = useRef(overlay);
   overlayRef.current = overlay;
   useEffect(() => { setModalProbe(() => overlayRef.current !== null); }, []);
+  // the queue went out after a reconnect: say so (refusals have their own banner)
+  useEffect(() => {
+    if (!store.flushes) return;
+    const ok = store.sentAfterReconnect - store.refused.length;
+    if (ok > 0) toast(`Sent ${ok} queued edit${ok === 1 ? '' : 's'} to the server, in order.`);
+  }, [store.flushes]); // eslint-disable-line react-hooks/exhaustive-deps
   const filterRef = useRef<HTMLInputElement>(null);
 
   /* tabs: opening an item opens or focuses its tab; the list is saved per browser and project */
   const project = store.project?.name ?? null;
   const [tabHashes, setTabHashes] = useState<string[]>([]);
   const loaded = useRef<string | null>(null);
-  useEffect(() => { if (project && loaded.current !== project) { loaded.current = project; setTabHashes(loadTabs(project)); } }, [project]);
+  useEffect(() => {
+    if (!project || loaded.current === project) return;
+    loaded.current = project;
+    // the saved tabs, and the one the address opened (a link to an item opens its tab even in a fresh browser)
+    const here = tabOf(location.hash || '#/');
+    const saved = loadTabs(project);
+    setTabHashes(here && !saved.includes(here.hash) ? [...saved, here.hash] : saved);
+  }, [project]);
   useEffect(() => {
     const t = tabOf(hash);
     if (t) setTabHashes((xs) => (xs.includes(t.hash) ? xs : [...xs, t.hash]));
@@ -176,6 +208,8 @@ function ShellInner({ store }: { store: Store }) {
     { id: 'view.cards', label: 'Needs attention: show cards', group: 'View', run: () => setPrefs({ homeView: 'cards' }) },
     { id: 'view.rows', label: 'Needs attention: show rows', group: 'View', run: () => setPrefs({ homeView: 'rows' }) },
     { id: 'help.shortcuts', label: 'Show the keyboard shortcuts', group: 'Help', shortcut: '?', key: '?', run: () => setOverlay('shortcuts') },
+    // the keys a page handles itself, listed in the sheet from anywhere (a page's own entry replaces its line while it is open)
+    ...REFERENCE_KEYS,
   ];
   useActions(actions);
 
@@ -216,6 +250,8 @@ function ShellInner({ store }: { store: Store }) {
         )}
         <div className="center">
           <TabBar store={store} tabs={tabs} current={hash} onClose={closeTab} />
+          <OfflineBanner store={store} />
+          <RefusedBanner store={store} />
           <div className="page" role="main" id="page" data-testid="page">
             {store.error && <div className="error banner" data-testid="error" role="alert">{store.error} <button className="link" onClick={() => { store.error = null; store.changed(); }}>dismiss</button></div>}
             <div className="live-layer">
@@ -223,13 +259,13 @@ function ShellInner({ store }: { store: Store }) {
               {(route.kind === 'sound' || route.kind === 'song') && <UpdateChip store={store} id={route.id} />}
             </div>
             <SelectionCtx.Provider value={{ selected, select: setSelected, ask: (f) => { setSelected(f); focusAsk(); } }}>
-              <Page store={store} onPlay={(id) => void store.play(id)} onOpen={openSound} />
+              <PartBoundary reset={hash} name="page"><Page store={store} onPlay={(id) => void store.play(id)} onOpen={openSound} /></PartBoundary>
             </SelectionCtx.Provider>
           </div>
           {p.bottomOpen && (
             <section className="bottom" aria-label="Bottom panel" data-testid="bottom">
               <Resizer side="top" size={p.bottomH} min={LIMITS.bottomH[0]} max={LIMITS.bottomH[1]} onSize={(v) => setPanels({ bottomH: v })} onToggle={() => setPanels({ bottomOpen: false })} label="Resize the bottom panel" testId="resize-bottom" />
-              <BottomPanel store={store} focus={panelFocus} />
+              <PartBoundary name="bottom panel"><BottomPanel store={store} focus={panelFocus} /></PartBoundary>
             </section>
           )}
         </div>
@@ -266,7 +302,6 @@ function ShellInner({ store }: { store: Store }) {
       <UndoBar />
       {overlay === 'palette' && <Palette store={store} focus={focus} onClose={() => setOverlay(null)} ask={(t, f) => ask(t, f)} />}
       {overlay === 'shortcuts' && <ShortcutSheet onClose={() => setOverlay(null)} />}
-      {store.status === 'closed' && <div className="offline-line"><Banner kind="warn" title="Lost the SoundClaw server" testId="offline">Retrying{'…'} Everything open keeps playing from the local render.</Banner></div>}
     </div>
   );
 }

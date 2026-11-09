@@ -40,7 +40,7 @@
 .cg-colhead { padding: 8px 10px; font-size: var(--fs-11); color: var(--text3); display: flex; align-items: center; gap: 5px; }
 .cg-colhead + .cg-colhead { border-left: 1px solid var(--control); }
 .cg-colhead[data-agent] { color: var(--agent-text); }
-.cg-colhead .kbd { margin-left: auto; font-size: 9px; padding: 0 4px; opacity: 0.8; }
+.cg-colhead .kbd { margin-left: auto; font-size: 9px; padding: 0 4px; }
 .cg-rowwrap { border-bottom: 1px solid var(--control); }
 .cg-rowwrap[data-selected='true'] { background: var(--sel); }
 .cg-rowwrap[data-current='true'] { box-shadow: inset 3px 0 0 var(--ember); }

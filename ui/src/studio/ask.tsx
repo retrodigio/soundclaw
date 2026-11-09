@@ -147,8 +147,9 @@ function contextFor(store: Store, spec: AskSpec): { check: string | null; moment
   if (t.kind === 'range') {
     // the page's own measurement of a short sound knows where each failing check is; the card's issues are the fallback
     const doc0 = store.doc(spec.sound);
-    const dur = store.summary(spec.sound)?.info?.duration ?? 0;
-    if (doc0 && dur > 0 && dur <= 2.5) {
+    // (a sound whose card has not come yet is measured too: a long one comes back pending from the worker)
+    const dur = store.summary(spec.sound)?.info?.duration;
+    if (doc0 && (dur === undefined || dur <= 2.5)) {
       try {
         const m = store.measure(doc0);
         if (!m.pending) for (const c of m.checks) if (!c.pass && !check && c.ranges.some((r) => r.to >= t.start - 0.02 && r.from <= t.end + 0.02)) check = `${c.name} check: ${c.value}`;

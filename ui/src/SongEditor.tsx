@@ -5,7 +5,7 @@
 // on the history, undone as one.
 
 import { askLabel, useAskSource } from './studio/ask.tsx';
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { arrange, layerOrder, rollNotes, stepTime, type Arrangement as Arr, type Pattern, type SongDoc } from '@soundclaw/core';
 import { PianoRoll } from './PianoRoll.tsx';
 import { HelperPanel, InstrumentPanel } from './SongPanels.tsx';
@@ -18,6 +18,17 @@ import { useSongClock, useSongReport } from './song/hooks.tsx';
 import { barSeconds, channelColour, laneFlags, patternAuthors, type Clip, type LaneFlag } from './song/model.ts';
 import { AuthorDot, authorOf, Button, Segmented, Tabs } from './studio/controls.tsx';
 import { useActions, type Action } from './studio/registry.ts';
+import { Resizer } from './studio/layout.tsx';
+import { read, write } from './studio/prefs.ts';
+
+const ARR_KEY = 'soundclaw.songArrH';
+const ARR_MIN = 120, ARR_MAX = 720, ARR_DEFAULT = 226;
+/** The arrangement's height, kept per browser (the split editor under it takes the rest). */
+function useArrHeight(): [number, (v: number) => void, boolean] {
+  const saved = () => { const v = Number(read(ARR_KEY)); return read(ARR_KEY) !== null && Number.isFinite(v) && v >= ARR_MIN && v <= ARR_MAX ? v : null; };
+  const [h, setH] = useState(() => saved() ?? ARR_DEFAULT);
+  return [h, (v: number) => { setH(v); write(ARR_KEY, String(v)); }, saved() !== null];
+}
 import { ago } from './studio/shellData.ts';
 
 const TIMES = ['4/4', '3/4', '2/4', '6/8', '5/4', '7/8', '12/8'];
@@ -102,6 +113,19 @@ export function SongEditor({ store, id, view }: { store: Store; id: string; view
   const [bars, setBars] = useState<BarSel | null>(null);
   const [flagId, setFlagId] = useState<string | null>(null);
   const [tab, setTab] = useState<'roll' | 'grid'>('roll');
+  const [arrH, setArrH, arrSaved] = useArrHeight();
+  const [arrFit, setArrFit] = useState<number | null>(null);
+  // with no height saved, the arrangement takes what the split editor leaves, so the roll's velocity lane is on screen
+  useLayoutEffect(() => {
+    if (arrSaved || arrFit !== null) return;
+    const el = root.current, page = el?.closest('.page'), arrEl = el?.querySelector('.arr'), split = el?.querySelector('.split');
+    if (!el || !page || !arrEl || !split) return;
+    const pb = page.getBoundingClientRect().bottom - 12;
+    const a = arrEl.getBoundingClientRect(), sp = split.getBoundingClientRect();
+    const fit = Math.round(pb - a.top - (sp.top - a.bottom) - sp.height);
+    setArrFit(Math.min(ARR_DEFAULT, Math.max(150, fit)));
+  });
+  const arrShown = arrSaved ? arrH : arrFit ?? arrH;
   const [ghostOn, setGhostOn] = useState(false);
   const [ghostCh, setGhostCh] = useState<string | null>(null);
   const [ghostManual, setGhostManual] = useState(false);
@@ -277,11 +301,12 @@ export function SongEditor({ store, id, view }: { store: Store; id: string; view
     <section ref={root} className="editor song-editor" data-testid="song-editor" data-song={song.id} data-playing={playing} data-step={at?.step ?? ''} data-pattern={at?.pattern ?? ''}>
       {header}
       <div className="song-grid" data-inspector={inspector || undefined}>
-        <div className="song-main">
+        <div className="song-main" style={{ ['--arr-h' as string]: `${arrShown}px` }}>
           <Arrangement store={store} song={song} arr={arr} report={report} authors={authors} channel={channel?.name ?? null} pattern={pattern?.name ?? null} intensity={intensity}
             onChannel={(c) => { if (song.channels.find((x) => x.name === c)?.inst) { setChan(c); setSelected(new Set()); } }}
             onClip={(cl: Clip) => { setPatName(cl.pattern); if (song.channels.find((x) => x.name === cl.channel)?.inst) setChan(cl.channel); setSelected(new Set()); setCursor(cl.t0); }}
             cursor={cursor} onCursor={setCursor} nowRef={nowRef} playing={playing} bars={bars} onBars={setBars} flag={flagId} onFlag={pickFlag} send={send} />
+          <div className="song-divider"><Resizer side="bottom" size={arrShown} min={ARR_MIN} max={ARR_MAX} onSize={setArrH} onToggle={() => setArrH(arrShown > ARR_DEFAULT ? ARR_DEFAULT : ARR_MAX)} label="Resize the arrangement and the editor under it" testId="song-divider" /></div>
           <div className="row pattern-tabs" data-testid="pattern-tabs">
             <span className="dim">patterns</span>
             {names.map((n) => (

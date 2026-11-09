@@ -134,7 +134,8 @@ export interface ReviewCheck { name: string; pass: boolean; value: string; at: n
 export interface ReviewSide { sound: Sound | null; checks: ReviewCheck[]; lufs: number | null; truePeakDb: number | null; duration: number; centroid: number | null }
 
 /** A row of the review's numbers: before, after and the glyph of the check it belongs to (empty: none). */
-export interface ReviewRow { k: string; a: string; b: string; glyph: 'pass' | 'fail' | '' }
+/** A row of the review's numbers: before (a) and after (b), the after side's check glyph, and for a check the before side's (`ga`). */
+export interface ReviewRow { k: string; a: string; b: string; glyph: 'pass' | 'fail' | ''; ga?: 'pass' | 'fail' | '' }
 
 /** What an agent did for a request (or one group), structured for the review page. */
 export interface Review {

@@ -141,7 +141,7 @@
 .mx-strip.solo { border-color: var(--warn); }
 .mx-strip.mute { opacity: 0.7; }
 .mx-strip[data-silent] .mx-head b { color: var(--text2); }
-.mx-strip.master { width: 232px; background: var(--raised); border-color: var(--line2); }
+.mx-strip.master { width: 232px; background: var(--raised); border-color: var(--line2); position: sticky; right: 0; z-index: 2; box-shadow: -10px 0 12px -10px rgb(0 0 0 / 0.45); }
 .mx-strip.master.compact { width: 110px; }
 .mx-head { align-self: stretch; display: flex; flex-direction: column; gap: 2px; border-top: 4px solid var(--line2); padding-top: var(--sp-6); margin-top: calc(var(--sp-8) * -1 - 1px); }
 .mx-name { font-size: var(--fs-12); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -180,3 +180,11 @@ button.mx-ins { cursor: pointer; }
 .mixer-bottom-head { display: flex; align-items: center; gap: var(--sp-12); padding: 0 var(--sp-8) var(--sp-4); }
 .mixer-bottom .mixer { padding: 0 var(--sp-8); }
 .mixer-bottom .mx-strips { overflow-x: auto; }
+
+/* the arrangement and the split editor share the height: the arrangement scrolls in its own height, a divider sets it (kept per browser) */
+.song-main > .arr { max-height: var(--arr-h, 226px); overflow-y: auto; scrollbar-width: thin; }
+.song-main > .arr .arr-rulerrow { position: sticky; top: 0; z-index: 4; background: var(--panel); }
+.song-divider { position: relative; height: 8px; margin: -6px 0 -4px; flex: none; }
+.song-divider .resizer { position: absolute; left: 0; right: 0; top: 0; bottom: 0; height: auto; width: auto; cursor: row-resize; border-radius: 4px; }
+.song-divider .resizer::after { content: ''; position: absolute; left: 50%; top: 3px; width: 36px; height: 2px; margin-left: -18px; border-radius: 1px; background: var(--line2); }
+.song-divider .resizer:hover::after, .song-divider .resizer[data-active]::after, .song-divider .resizer:focus-visible::after { background: var(--ember); }

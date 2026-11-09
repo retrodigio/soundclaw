@@ -20,18 +20,29 @@ export function presenceOf(store: Store): { state: 'off' | 'listening' | 'workin
   const claimed = store.requests.find((q) => q.state === 'claimed');
   if (claimed) return { state: 'working', name: shortName(claimed.claimedBy ?? 'agent'), word: 'working', text: claimed.latest ?? claimed.note };
   if (p?.listening) return { state: 'listening', name: shortName(p.waiters[0]?.by ?? p.agents[0]?.by ?? 'agent'), word: 'listening', text: '' };
-  return { state: 'off', name: '', word: 'no agent is listening', text: '' };
+  return { state: 'off', name: '', word: 'not listening', text: '' };
 }
 
 export function PresencePill({ store }: { store: Store }) {
   const p = store.presence;
   if (!p) return null;
+  // offline: the server is gone, so nobody can be listening or working as far as this page knows
+  if (store.status === 'closed') {
+    return (
+      <span className="presence presence-offline" data-testid="listener-chip" data-listening="false" data-state="offline" title="The SoundClaw server is not reachable: the agent cannot see this page until it comes back">
+        <span className="presence-dot" aria-hidden /><span className="presence-word">offline</span>
+      </span>
+    );
+  }
   const pr = presenceOf(store);
-  const full = pr.state === 'off' ? pr.word : `${pr.name} ${pr.word}${pr.text ? `: ${pr.text}` : ''}`;
+  // the pill shows short state words; the full sentence is the tooltip
+  const full = pr.state === 'off' ? 'No agent is listening: requests you file now wait until an agent is started on this project'
+    : pr.state === 'listening' ? `${pr.name} is listening: an agent is waiting for requests or took a request recently`
+      : `${pr.name} is working${pr.text ? `: ${pr.text}` : ''}`;
   return (
-    <span className={`presence presence-${pr.state}`} data-testid="listener-chip" data-listening={p.listening} data-state={pr.state} title={pr.text ? full : p.listening ? 'An agent is waiting for requests or took a request recently' : 'Requests you file now wait until an agent is started on this project'}>
+    <span className={`presence presence-${pr.state}`} data-testid="listener-chip" data-listening={p.listening} data-state={pr.state} title={full}>
       {pr.state === 'off' ? <span className="presence-dot" aria-hidden /> : <AuthorMark by="agent" size={14} />}
-      {pr.state === 'off' ? pr.word : <><b className="presence-name">{pr.name}</b><span className="presence-word">{pr.word}</span></>}
+      {pr.state === 'off' ? <span className="presence-word">{pr.word}</span> : <><b className="presence-name">{pr.name}</b><span className="presence-word">{pr.word}</span></>}
       {pr.text && <span className="presence-text">{pr.text}</span>}
     </span>
   );

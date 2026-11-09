@@ -90,6 +90,14 @@ const glyph = (g: 'pass' | 'fail' | ''): string => (g === 'pass' ? '✓' : g ===
 
 // ---- the page ----------------------------------------------------------------------------------------------------------------
 
+/** One compact value for a side of a numbers row: the value when it is short, else its first number with its unit, else the check's glyph (the full text is the tooltip). */
+export function compactValue(v: string, g?: 'pass' | 'fail' | ''): string {
+  if (v.length <= 14) return v;
+  const m = /[−-]?\d+(?:\.\d+)?\s?(?:dBTP|dBFS|dB|LUFS|LU|kHz|Hz|ms|s|%)?/.exec(v);
+  if (m) return m[0].trim();
+  return g === 'pass' ? '✓' : g === 'fail' ? '×' : v.slice(0, 13) + '…';
+}
+
 export function Review({ store, id }: { store: Store; id: string }) {
   const toast = useToast();
   const q = /^r\d+$/.test(id) ? store.requests.find((x) => x.id === id) : undefined;
@@ -287,7 +295,7 @@ export function Review({ store, id }: { store: Store; id: string }) {
             <span className="cap">Numbers</span>
             {data.rows.map((r) => (
               <div key={r.k} className="rv-num" data-testid="review-number" data-glyph={r.glyph || undefined}>
-                <span className="rv-num-k">{r.k}</span><span className="mono dim">{r.a}</span><span className="dim" aria-hidden>{'→'}</span><span className="mono">{r.b}</span>
+                <span className="rv-num-k" title={r.k}>{r.k}</span><span className="mono dim" title={r.a}>{compactValue(r.a, r.ga)}</span><span className="dim" aria-hidden>{'→'}</span><span className="mono" title={r.b}>{compactValue(r.b, r.glyph)}</span>
                 <span className={`mono rv-glyph g-${r.glyph || 'none'}`} aria-label={r.glyph === 'pass' ? 'passes' : r.glyph === 'fail' ? 'fails' : undefined}>{glyph(r.glyph)}</span>
               </div>
             ))}

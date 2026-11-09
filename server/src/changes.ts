@@ -356,7 +356,8 @@ export function reviewOf(w: Writer, o: { request?: string; group?: string }): Re
     rows.push({ k: 'Integrated', a: fmt(A.lufs, 1, 'LUFS'), b: fmt(B.lufs, 1, 'LUFS'), glyph: B.checks.find((c) => c.name === 'loudness')?.pass === false ? 'fail' : B.checks.some((c) => c.name === 'loudness') ? 'pass' : '' });
     for (const c of B.checks) {
       if (c.name === 'loudness') continue;
-      rows.push({ k: c.name, a: byName.get(c.name)?.value ?? '', b: c.value, glyph: c.pass ? 'pass' : 'fail' });
+      const ca = byName.get(c.name);
+      rows.push({ k: c.name, a: ca?.value ?? '', b: c.value, glyph: c.pass ? 'pass' : 'fail', ga: ca ? (ca.pass ? 'pass' : 'fail') : '' });
     }
     rows.push({ k: 'Centroid', a: A.centroid === null ? 'none' : `${(A.centroid / 1000).toFixed(1)} kHz`, b: B.centroid === null ? 'none' : `${(B.centroid / 1000).toFixed(1)} kHz`, glyph: '' });
     rows.push({ k: 'True peak', a: fmt(A.truePeakDb, 1, 'dBTP'), b: fmt(B.truePeakDb, 1, 'dBTP'), glyph: '' });

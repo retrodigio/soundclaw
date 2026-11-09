@@ -244,7 +244,11 @@ test('the history tape: agent marks are round and yours square, a batch is a lab
   const round = await page.getByTestId('tape').locator(`[data-testid=tape-mark][data-seq="${first.seq}"]`).evaluate((e) => getComputedStyle(e).borderRadius);
   const square = await page.getByTestId('tape').locator('[data-testid=tape-mark][data-by="you"]').first().evaluate((e) => getComputedStyle(e).borderRadius);
   expect(parseFloat(round)).toBeGreaterThan(parseFloat(square));
-  await expect(page.getByTestId('tape').getByTestId(`tape-span-${last.group}`)).toContainText('batch · 2 commands');
+  const span = page.getByTestId('tape').getByTestId(`tape-span-${last.group}`);
+  await expect(span).toHaveAttribute('title', new RegExp(`${last.group}: batch of 2 commands by`));
+  // the label fits its span: the long form, "n cmds" or the count, never cut
+  await expect(span.locator('.tape-span-label')).toHaveText(/^(batch · 2 commands|2 cmds|2|)$/);
+  expect(await span.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   // hovering a mark lists its group's commands
   await page.getByTestId('tape').locator(`[data-testid=tape-mark][data-seq="${last.seq}"]`).hover();
   await expect(page.getByTestId('tape-tip')).toContainText('sound set laser sustain=0.3');
@@ -391,7 +395,8 @@ test('nothing moves under you across a burst of agent commands: scroll, selectio
   const many = Array.from({ length: 80 }, (_, i) => `sound new s${String(i).padStart(2, '0')}`).join('; ');
   await open(page, '#/', [many, LASER]);
   const list = page.locator('.lib-list .vlist').first();
-  await expect(page.getByTestId('lib-row-s00')).toBeVisible();
+  // the list is drawn (newest first: s00 is far down, which is the point of scrolling)
+  await expect(page.locator('.lib-row').nth(12)).toBeVisible();
   await list.evaluate((e) => { e.scrollTop = 300; });
   const rowId = await page.locator('.lib-row').nth(12).getAttribute('data-testid');
   await page.getByTestId(rowId!).click();

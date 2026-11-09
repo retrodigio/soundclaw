@@ -2,7 +2,9 @@
 // project folder holds the server's pid and URL but never the token (the folder may be shared or
 // committed). The token goes in a file of its own, outside the project folder, that only the
 // user can read (mode 0600 in a 0700 folder). The file is removed when the server stops. Being
-// outside the project, no SoundClaw tool or view can read it, and the worker's fence holds.
+// outside the project, no SoundClaw tool or view can read it, and the worker's fence holds. A
+// second file beside it keeps the last token after the server stops, so a server started again
+// on the same folder uses it and a dashboard left open reconnects.
 
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -51,6 +53,25 @@ export function writeTokenFile(dir: string, info: Omit<TokenFile, 'dir' | 'pid'>
   rmSync(f, { force: true });
   writeFileSync(f, JSON.stringify({ pid: process.pid, dir: real(dir), ...info } satisfies TokenFile) + '\n', { mode: 0o600 });
   if (POSIX) chmodSync(f, 0o600);
+  const last = lastTokenPath(dir);
+  rmSync(last, { force: true });
+  writeFileSync(last, JSON.stringify({ token: info.token }) + '\n', { mode: 0o600 });
+  if (POSIX) chmodSync(last, 0o600);
+}
+
+const lastTokenPath = (dir: string): string => tokenFilePath(dir).replace(/\.json$/, '.last.json');
+
+/** The token the last server on this folder used, alive or not (a restarted server keeps it, so an open dashboard reconnects). Only from a file nobody else can read. */
+export function lastToken(dir: string): string | null {
+  const f = lastTokenPath(dir);
+  if (!existsSync(f)) return null;
+  try {
+    if (POSIX && (statSync(f).mode & 0o077) !== 0) return null;
+    const t = JSON.parse(readFileSync(f, 'utf8')) as { token?: unknown };
+    return typeof t.token === 'string' && /^[0-9a-f]{32}$/.test(t.token) ? t.token : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Remove this process's token file for the folder (another server's is left alone). */

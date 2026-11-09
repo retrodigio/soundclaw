@@ -94,7 +94,7 @@ function EnvelopeDraw({ patch, ghost, onDraft, onCommit }: { patch: ClassicPatch
         <path d={pathOf(cur)} className="env-line" />
         {corners.map((c) => (
           <circle key={c.name} cx={c.x} cy={c.y} r={ghost[c.name] !== undefined ? 5 : 4} className="env-corner" data-by={ghost[c.name] !== undefined ? 'agent' : undefined} data-testid={`env-corner-${c.name}`} tabIndex={0} role="slider" aria-label={`Envelope ${c.label}`}
-            aria-valuenow={patch[c.name]} aria-valuemin={classicField(c.name)!.min} aria-valuemax={classicField(c.name)!.max}
+            aria-valuenow={patch[c.name]} aria-valuetext={formatValue(patch[c.name] ?? 0, classicSpec(c.name))} aria-valuemin={classicField(c.name)!.min} aria-valuemax={classicField(c.name)!.max}
             onPointerDown={(e) => {
               if (e.button !== 0) return;
               (e.target as Element).setPointerCapture(e.pointerId);

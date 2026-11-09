@@ -1,6 +1,6 @@
 // Screenshots of the dashboard on an invented example project: a few sounds, a set, a song and
 // requests in different states. Run it after `pnpm build`:
-//   node scripts/screens-studio.ts <name> [sounds|sets|songs|agent]  saves PNGs to .dev/screens/studio/<name>/ (with `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page; `songs`: a song's arrangement and split editor, and the mixer)
+//   node scripts/screens-studio.ts <name> [sounds|sets|songs|agent]  saves PNGs to .dev/screens/studio/<name>/ (with `final`: every screen of the example in both themes, the densities, narrow widths and the states; `sounds`: the sound pages; `sets`: a set's page, the blind A/B card and the audition page; `songs`: a song's arrangement and split editor, and the mixer)
 // It starts its own server on a temporary project and stops it; nothing is left running.
 
 import { mkdirSync } from 'node:fs';
@@ -450,6 +450,60 @@ sound set coin_click wave=square attack=0 sustain=0.1 decay=0.3 freq=0.5 volume=
   }
 }
 
+// ---- the whole dashboard on the example the walking specs use (`node scripts/screens-studio.ts <name> final`) ----
+
+async function finalShots(): Promise<void> {
+  const { SCREENS, makeExample } = await import('../e2e/example.ts');
+  const a = await startAgent();
+  await makeExample(a);
+  const browser = await chromium.launch();
+  const shoot = async (file: string, url: string, ready: string, o: { theme: 'dark' | 'light'; density?: 'compact' | 'comfortable'; w?: number; h?: number; act?: (p: Page) => Promise<void> }) => {
+    const w = o.w ?? 1440, h = o.h ?? 900;
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: 'reduce' });
+    await ctx.addInitScript((p) => { try { localStorage.setItem('soundclaw.prefs', JSON.stringify(p)); localStorage.setItem('soundclaw.homeAll', '1'); } catch { /* storage off */ } }, { theme: o.theme, density: o.density ?? 'compact', panels: { bottomOpen: !/#\/song\//.test(url), bottomTab: 'history' } });
+    const page = await ctx.newPage();
+    await page.goto(url);
+    await page.getByTestId(ready).first().waitFor({ timeout: 30_000 });
+    // the numbers, the thumbnails and the cards arrive before the picture
+    await page.getByTestId('lens-measuring').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => undefined);
+    await page.waitForFunction(() => ![...document.querySelectorAll('[data-testid^="lib-row-"]')].some((r) => { const b = r.getBoundingClientRect(); return b.top < innerHeight && b.bottom > 0 && (r.querySelector('.mini-shim') || r.querySelector('.lib-lufs')?.textContent === '…'); }), undefined, { timeout: 20_000 }).catch(() => undefined);
+    await page.waitForTimeout(600);
+    if (o.act) await o.act(page);
+    await page.waitForTimeout(300);
+    const path = join(OUT, `${file}-${w}x${h}.png`);
+    await page.screenshot({ path });
+    console.log(path);
+    await ctx.close();
+  };
+  try {
+    const by = (n: string) => SCREENS.find((s) => s.name === n)!;
+    for (const theme of ['dark', 'light'] as const) for (const s of SCREENS) await shoot(`${s.name}-${theme}`, `${a.url}&name=ana${s.hash}`, s.ready, { theme, act: s.act });
+    for (const n of ['home', 'classic', 'layered']) for (const theme of ['dark', 'light'] as const) { const s = by(n); await shoot(`${n}-${theme}-comfortable`, `${a.url}&name=ana${s.hash}`, s.ready, { theme, density: 'comfortable' }); }
+    for (const w of [1024, 760]) for (const n of ['home', 'classic', 'song', 'session']) { const s = by(n); await shoot(`${n}-dark`, `${a.url}&name=ana${s.hash}`, s.ready, { theme: 'dark', w, h: w === 760 ? 900 : 768 }); }
+    // the states: a new project, and offline with edits queued (the large project and mid-batch are in the list above)
+    const empty = await startAgent();
+    try {
+      for (const theme of ['dark', 'light'] as const) await shoot(`state-new-project-${theme}`, `${empty.url}&name=ana`, 'new-project', { theme });
+      await empty.cli(['run', empty.dir, '-e', 'sound new coin voice=classic preset=pickup seed=5\nsound new jump voice=classic preset=jump seed=2']);
+      for (const theme of ['dark', 'light'] as const) {
+        await shoot(`state-offline-${theme}`, `${empty.url}&name=ana#/sound/coin`, 'editor', {
+          theme, act: async (p) => {
+            await empty.stop();
+            await p.getByTestId('offline').waitFor();
+            for (const c of ['sound set coin decay=0.364', 'sound set jump decay=0.25', 'sound set coin sustain=0.04']) await p.evaluate((x) => (window as unknown as { soundclaw: { run(c: string): Promise<unknown> } }).soundclaw.run(x), c);
+            await p.getByTestId('offline-queue').locator('summary').click();
+          },
+        });
+        await empty.restart();
+      }
+    } finally { await empty.close(); }
+  } finally {
+    await browser.close();
+    await a.close();
+  }
+}
+
+if (process.argv[3] === 'final') { await finalShots(); process.exit(0); }
 if (process.argv[3] === 'agent') { await agentShots(); process.exit(0); }
 
 if (process.argv[3] === 'sets') { await setShots(); process.exit(0); }

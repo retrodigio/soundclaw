@@ -51,21 +51,53 @@ machine, and can be edited and checked by a person and an agent alike.
 - **Deterministic rendering.** A sound renders to 44,100 Hz mono samples by pure TypeScript, the
   same samples in Node and in the browser (tested), cached by the content hash of the document, and
   exported as 16-bit WAV.
-- **A live dashboard.** `soundclaw serve` shows every sound as a card with a play button, a
-  waveform, a spectrogram, its checks and the history. The browser renders with the same code as the agent, so what plays is
-  what the agent rendered (the card and the CLI print the same hash).
-- **A sound editor.** Open a classic sound from its card: its 25 parameters as sliders in sfxr's
-  groups that replay as you move them, the category buttons and `random`, mutate, A/B, and WAV,
-  patch text and CSV downloads. Every edit is a command written as `human:<name>`, the line an
-  agent would write (a drag is one command), so `soundclaw changes` shows an agent what you did.
-- **A music editor.** Open a song from its card: the pattern grid (drum hits to paint), a piano roll (click to add, drag to
-  move or lengthen, a velocity lane, slide/vibrato/arp), the channels and their instruments (an instrument's voice with the
-  sound editor's controls), the song order with the loop region on a bar ruler, the helpers with a preview, and playback with
-  a cursor. Each edit is the command an agent would write (`pattern note move tune.verse lead 4 step=6 note=G5`), one gesture
-  one undo step, and `changes` shows the agent what a person did to a song, note by note.
+- **A live dashboard.** `soundclaw serve` opens a studio in the browser: a library, the sounds that need attention, an
+  agent rail and the history. The browser renders with the same code as the agent, so what plays is what the agent rendered.
+  Every edit a person makes there is a command written as `human:<name>`, the line an agent would write (a drag is one command),
+  so `soundclaw changes` shows an agent what you did. See [the dashboard](#the-dashboard) below.
 - **People and agents talk through requests.** "Ask for changes", quick feedback tags (too loud, too harsh, good, …) and "Approve" on a card reach an
   agent that is waiting with `soundclaw await` (it exits with the events, which wakes the agent) or
   the MCP `await_requests`; the agent takes them with `soundclaw work` or the MCP `work` tool.
+
+## The dashboard
+
+`soundclaw serve --project <folder>` serves the dashboard and the MCP server from one process; the page updates live as the agent works.
+
+![The home page: sounds that need attention first, the library, the agent rail and the history tape](docs/screens/home.png)
+
+- **The shell.** A transport bar with the master meter, the library (filter, needs-attention order, mini waveforms, loudness and the
+  check glyph), tabs for open items, the agent rail (who is working on what, your requests and their state, a live feed), and a bottom
+  panel with the selected sound's detail, the mixer and the history tape. ⌘K opens a palette of every action and item (a sentence typed
+  there becomes a change request); `?` lists every shortcut. Dark and light themes, compact and comfortable densities.
+- **Sound pages.** The classic editor (modules in signal order, knobs that take units, a drawn envelope) and the layered editor (layers
+  as tracks with device chains), both over analysis lenses: waveform with loudness over time, mel spectrogram, pitch, a difference
+  view against the version before, and every number the checks use. What the agent changed last is marked until a person approves it.
+
+![The classic editor: generators, the waveform lens with a flagged click, the numbers and this sound's history](docs/screens/classic.png)
+![The layered editor: layers as tracks with their device chains and an effect's panel open](docs/screens/layered-device.png)
+
+- **Sets and blind A/B.** A set's members as a grid of their versions, a loudness meter for the family, and a blind A/B card that
+  matches levels, hides the names and asks which fits the moment in the game better.
+
+![A set: the family's loudness and a grid of each member's versions, the agent's proposal dashed](docs/screens/set.png)
+
+- **Songs.** The arrangement (tracks by game layer, the loop region, song checks drawn on the lanes), the piano roll beside the
+  pattern text (both live, both edit the same source), and the mixer with live meters, sends and a master loudness target.
+
+![A song: the arrangement over the piano roll and its pattern text](docs/screens/song.png)
+![The mixer: strips with live meters, the masking lane and the master](docs/screens/mixer.png)
+
+- **The agent layer.** Select a range, bars, a knob or a device and press R to ask for changes pinned to it; the session page
+  shows what the agent is doing and every request in lanes; a review page shows before and after (waveforms, parameters, numbers,
+  level-matched A/B) with Approve, Ask again and Revert.
+
+![The session page: the request being worked on, a running batch and requests in lanes](docs/screens/session.png)
+![A review: before and after, the parameters and the numbers](docs/screens/review.png)
+
+- **States.** A new project offers three starts (a sound, a set, a song) and the CLI line an agent would run; a large project shows
+  its list at once and fills in thumbnails as they come; when the server goes away the page keeps playing, queues your edits and
+  sends them in order when it is back. Text meets WCAG contrast in both themes (a test measures every screen), and the layout holds
+  from 1440 px down to 360 px without sideways scrolling.
 
 ## Try it
 

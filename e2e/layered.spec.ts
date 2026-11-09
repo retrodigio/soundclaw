@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures.ts';
 import { encodeWav, floatsFromBytes, samplesHash } from '../core/src/index.ts';
+import { settledDrag } from './drag.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;
@@ -80,13 +81,7 @@ test('builds a three-layer impact in the editor, drags an envelope point (one hi
   const before = await texts(page);
   const pt = page.getByTestId('env-point-1');
   const t0 = Number(await pt.getAttribute('data-t')), v0 = Number(await pt.getAttribute('data-v'));
-  await pt.scrollIntoViewIfNeeded();
-  const box = (await pt.boundingBox())!;
-  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
-  await page.mouse.move(cx, cy);
-  await page.mouse.down();
-  await page.mouse.move(cx - 60, cy + 50, { steps: 12 });
-  await page.mouse.up();
+  await settledDrag(page, pt, -60, 50, { steps: 12, attr: 'data-t' });
   await expect.poll(async () => (await texts(page)).length).toBe(before.length + 1);
   const entry = (await rows(page))[0]!;
   expect(entry.by).toBe('human:ana');
@@ -144,13 +139,7 @@ test('the layer list: mute, solo, reorder, gain and remove are one command each'
   await expect.poll(async () => (await texts(page))[0]).toBe('layer move impact 1 to=2');
   await expect(page.getByTestId('layer-row-2')).toHaveAttribute('data-kind', 'osc');
   // a drag on a gain slider writes one command
-  await page.getByTestId('layer-gain-1').scrollIntoViewIfNeeded();
-  const box = (await page.getByTestId('layer-gain-1').boundingBox())!;
-  const y = box.y + box.height / 2;
-  await page.mouse.move(box.x + box.width * 0.5, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.35, y, { steps: 15 });
-  await page.mouse.up();
+  await settledDrag(page, page.getByTestId('layer-gain-1'), -0.15 * (await page.getByTestId('layer-gain-1').boundingBox())!.width, 0, { steps: 15 });
   await expect.poll(async () => (await texts(page)).length).toBe(base + 4);
   expect((await texts(page))[0]).toMatch(/^layer set impact 1 gain=0\.\d+$/);
   await page.waitForTimeout(1200);

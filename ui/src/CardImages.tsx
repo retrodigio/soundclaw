@@ -19,9 +19,11 @@ export function useCard(store: Store, id: string, key: string): { ref: React.Ref
     io.observe(el);
     return () => io.disconnect();
   }, []);
-  // asked for while near the screen, and again when the sound changes (its key moves on)
+  // asked for while near the screen, and again when the sound changes (its key moves on); given back
+  // only when it was asked for (the library row may want the same card, and its claim must stand)
   useEffect(() => {
-    if (near) store.wantCard(id);
+    if (!near) return;
+    store.wantCard(id);
     return () => store.unwantCard(id);
   }, [store, id, key, near]);
   return { ref, card: store.cardOf(id) };

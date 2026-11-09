@@ -49,6 +49,20 @@ export function MiniWave({ store, id, w = 48, h = 14 }: { store: Store; id: stri
   return <svg className="mini-wave" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden data-stale={sum && card.key !== sum.key ? 'true' : undefined}><path d={`${top}${bot}Z`} /></svg>;
 }
 
+/** The server is still working out cards (thumbnails, numbers, checks): a thin ember line under the header counts them. Gone when every sound has one. */
+export function ThumbProgress({ store, testId = 'thumb-progress' }: { store: Store; testId?: string }) {
+  const total = store.index.length;
+  let known = 0;
+  for (const x of store.index) if (x.info) known++;
+  if (!total || known >= total) return null;
+  return (
+    <div className="thumb-progress" data-testid={testId} data-known={known} data-total={total}>
+      <div className="thumb-line" role="progressbar" aria-label="Thumbnails worked out" aria-valuemin={0} aria-valuemax={total} aria-valuenow={known} aria-valuetext={`${known} of ${total} thumbnails`}><span style={{ width: `${(100 * known) / total}%` }} /></div>
+      <span className="mono thumb-text">index {total} {'·'} thumbs {known} / {total}</span>
+    </div>
+  );
+}
+
 function Glyph({ kind }: { kind: CheckKind }) {
   return <span className="mono lib-glyph" data-kind={kind} role="img" aria-label={WORD[kind]}>{GLYPH[kind]}</span>;
 }
@@ -222,6 +236,7 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
           : <span>Sort: name</span>}
         <span className="mono" data-testid="lib-count">{shown} / {total}</span>
       </div>
+      {tab === 'sounds' && <ThumbProgress store={store} />}
       <div className="lib-list" onKeyDown={onKeyDown}>
         {total === 0 ? <p className="lib-empty dim">{tab === 'sounds' ? 'No sounds yet.' : `No ${tab} yet.`}</p> : shown === 0 ? <p className="lib-empty dim">Nothing matches.</p> : (
           <VirtualList ref={list} count={shown} rowHeight={rowH} label={`${tab}`} activeIndex={at} testId="lib-list" renderRow={tab === 'sounds' ? renderSound : renderOther} />

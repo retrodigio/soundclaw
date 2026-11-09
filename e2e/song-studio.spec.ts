@@ -6,6 +6,7 @@
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures.ts';
+import { settledDrag } from './drag.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;
@@ -290,8 +291,8 @@ test('the mixer: a fader, a pan knob and a send knob each write one command for 
   const before = (await humanGroups(page)).length;
 
   // the fader: one drag, one command
-  const f = (await page.getByTestId('fader-lead').boundingBox())!;
-  await drag(page, { x: f.x + f.width / 2, y: f.y + f.height * 0.2 }, { x: f.x + f.width / 2, y: f.y + f.height * 0.45 });
+  const fh = (await page.getByTestId('fader-lead').boundingBox())!.height;
+  await settledDrag(page, page.getByTestId('fader-lead'), 0, fh * 0.25, { steps: 6, at: (b) => ({ x: b.x + b.width / 2, y: b.y + b.height * 0.2 }) });
   await expect.poll(async () => (await humanGroups(page)).length).toBe(before + 1);
   let last = (await humanGroups(page)).at(-1)!;
   expect(last).toHaveLength(1);
@@ -301,7 +302,7 @@ test('the mixer: a fader, a pan knob and a send knob each write one command for 
   await expect(page.getByTestId('fader-lead-value')).not.toHaveText('0.0 dB');
 
   // the pan knob: one drag
-  await drag(page, await centre(page, 'knob-lead-pan'), { ...(await centre(page, 'knob-lead-pan')), y: (await centre(page, 'knob-lead-pan')).y - 24 });
+  await settledDrag(page, page.getByTestId('knob-lead-pan'), 0, -24, { steps: 6 });
   await expect.poll(async () => (await humanGroups(page)).length).toBe(before + 2);
   last = (await humanGroups(page)).at(-1)!;
   expect(last).toHaveLength(1);
@@ -309,7 +310,7 @@ test('the mixer: a fader, a pan knob and a send knob each write one command for 
   await expect(page.getByTestId('knob-lead-pan-value')).toHaveText(/^R\d+$/);
 
   // the send knob named for its bus: one drag
-  await drag(page, await centre(page, 'knob-lead-reverb'), { ...(await centre(page, 'knob-lead-reverb')), y: (await centre(page, 'knob-lead-reverb')).y - 24 });
+  await settledDrag(page, page.getByTestId('knob-lead-reverb'), 0, -24, { steps: 6 });
   await expect.poll(async () => (await humanGroups(page)).length).toBe(before + 3);
   last = (await humanGroups(page)).at(-1)!;
   expect(last).toHaveLength(1);

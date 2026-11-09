@@ -12,12 +12,12 @@ input, textarea { background: var(--ground); color: var(--text); border: 1px sol
 .spacer { flex: 1; }
 .me input { width: 8em; margin-left: 6px; }
 .chip { display: inline-block; border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; font-size: 12px; }
-.listener-chip.on { color: var(--good); border-color: var(--good); }
-.listener-chip.off { color: var(--warn); border-color: var(--warn); }
-.conn-open { color: var(--good); } .conn-closed { color: var(--bad); }
-.status-approved { color: var(--good); border-color: var(--good); }
-.status-rejected { color: var(--warn); border-color: var(--warn); }
-.state-open { color: var(--warn); } .state-claimed { color: var(--accent); } .state-blocked { color: var(--bad); } .state-done { color: var(--good); }
+.listener-chip.on { color: var(--pass-text); border-color: var(--good); }
+.listener-chip.off { color: var(--warn-text); border-color: var(--warn); }
+.conn-open { color: var(--pass-text); } .conn-closed { color: var(--fail-text); }
+.status-approved { color: var(--pass-text); border-color: var(--good); }
+.status-rejected { color: var(--warn-text); border-color: var(--warn); }
+.state-open { color: var(--warn-text); } .state-claimed { color: var(--ember-text); } .state-blocked { color: var(--fail-text); } .state-done { color: var(--pass-text); }
 .sounds { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .empty { grid-column: 1 / -1; color: var(--dim); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -33,7 +33,7 @@ button.play { min-width: 84px; border-color: var(--accent); }
 .blocked { display: flex; flex-direction: column; gap: 4px; }
 .no-listener { border: 1px solid var(--warn); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
 .prompt-text { white-space: pre-wrap; background: var(--ground); padding: 6px; border-radius: 6px; }
-.error { color: var(--bad); }
+.error { color: var(--fail-text); }
 .banner { padding: 6px 16px; background: var(--fail-bg); }
 .history h2 { font-size: 15px; margin: 0 0 8px; }
 .history ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -41,7 +41,7 @@ button.play { min-width: 84px; border-color: var(--accent); }
 .cmd-row code { grid-column: 1 / -1; word-break: break-all; }
 .cmd-row.undone code { text-decoration: line-through; color: var(--dim); }
 .seq, .group { color: var(--dim); font: 11px var(--font-mono); }
-.by.human { color: var(--warn); } .by.agent { color: var(--accent); }
+.by.human { color: var(--warn-text); } .by.agent { color: var(--ember-text); }
 
 /* classic parameters, the spectrogram and the check badge */
 .spec { display: block; width: 100%; height: 48px; image-rendering: pixelated; margin-top: 4px; border-radius: 2px; }
@@ -49,7 +49,7 @@ button.play { min-width: 84px; border-color: var(--accent); }
 .params.classic .changed { font-weight: 600; color: var(--text); }
 .params.classic .dim { opacity: 0.45; }
 .analysis { font-size: 11px; margin: 2px 0; }
-.chip.check-pass { color: var(--ember); }
+.chip.check-pass { color: var(--ember-text); }
 .chip.check-fail { color: var(--fail-text); }
 
 /* feedback tags, the editor */
@@ -60,7 +60,7 @@ a.button:hover { border-color: var(--accent); }
 button.tag { border-radius: 12px; padding: 1px 9px; font-size: 12px; }
 button.tag.on { background: var(--ember-bg); border-color: var(--accent); color: var(--text); }
 button.tag.good.on { background: var(--pass-bg); border-color: var(--good); }
-.chip.tag { color: var(--warn); border-color: var(--warn); } .chip.tag.good { color: var(--good); border-color: var(--good); }
+.chip.tag { color: var(--warn-text); border-color: var(--warn); } .chip.tag.good { color: var(--pass-text); border-color: var(--good); }
 .editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .editor-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .editor-head h2 { margin: 0; font-size: 18px; }
@@ -97,7 +97,7 @@ button[data-playing=true] { border-color: var(--accent); background: var(--ember
 .layer-row output { font: 11px var(--font-mono); min-width: 2.6em; text-align: right; }
 .layer-row button.on { background: var(--accent); color: var(--on-ember); }
 .layer-name { text-align: left; font-weight: 600; }
-.env-btn.on { color: var(--accent); font-weight: 600; }
+.env-btn.on { color: var(--ember-text); font-weight: 600; }
 .envgraph { background: var(--ground); border-radius: 6px; touch-action: none; max-width: 640px; }
 .envbg { fill: var(--ground); stroke: var(--line); }
 .envgrid { stroke: var(--line); stroke-dasharray: 3 3; }
@@ -121,7 +121,7 @@ fieldset.fx { margin-bottom: 6px; }
 .sets h2 { font-size: 15px; margin: 0 0 8px; }
 .set-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .set-tile h3 { margin: 0; font-size: 15px; }
-.set-tile a { color: var(--accent); }
+.set-tile a { color: var(--ember-text); }
 .setpage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .members { display: flex; flex-wrap: wrap; gap: 10px; }
 .member { flex: 1 1 150px; min-width: 150px; max-width: 230px; }
@@ -130,7 +130,7 @@ fieldset.fx { margin-bottom: 6px; }
 .matrix th { font-weight: 600; color: var(--dim); padding: 2px 8px; text-align: right; }
 .matrix td { padding: 2px 8px; text-align: right; background: var(--raised); }
 .matrix td.diag { background: var(--control); color: var(--dim); }
-.matrix td.bad { color: var(--bad); outline: 1px solid var(--bad); }
+.matrix td.bad { color: var(--fail-text); outline: 1px solid var(--bad); }
 .audition { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .filters label { font-size: 12px; color: var(--dim); display: flex; gap: 4px; align-items: center; }
 .filters select { background: var(--ground); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
@@ -169,7 +169,7 @@ fieldset.fx { margin-bottom: 6px; }
 .field input, .field select { color: var(--text); }
 select { background: var(--ground); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
 button.mini { padding: 1px 6px; font-size: 12px; border-radius: 4px; }
-button.mini.on, button.tab.on { border-color: var(--accent); color: var(--accent); }
+button.mini.on, button.tab.on { border-color: var(--accent); color: var(--ember-text); }
 button.tab { padding: 2px 10px; }
 .pattern-tabs { gap: 6px; align-items: center; }
 .order-rail { position: relative; height: 104px; }
@@ -187,7 +187,7 @@ button.tab { padding: 2px 10px; }
 .ruler .tick.major { height: 14px; border-color: var(--line2); }
 .loop-band { position: absolute; top: 16px; height: 11px; background: var(--sel); border: 1px solid var(--accent); border-radius: 3px; cursor: grab; touch-action: none; display: flex; justify-content: space-between; align-items: center; }
 .loop-handle { width: 8px; height: 100%; background: var(--accent); cursor: ew-resize; }
-.loop-label { font-size: 9px; color: var(--accent); pointer-events: none; }
+.loop-label { font-size: 9px; color: var(--ember-text); pointer-events: none; }
 .order-cursor { position: absolute; top: -76px; bottom: 0; width: 2px; background: var(--warn); pointer-events: none; }
 table.grid { border-collapse: collapse; font: 11px var(--font-mono); user-select: none; }
 table.grid th.chan { text-align: right; padding-right: 6px; white-space: nowrap; font-weight: 500; }
@@ -197,7 +197,7 @@ table.grid .beat { border-left-color: var(--line2); } table.grid .bar { border-l
 table.grid td.note { background: color-mix(in srgb, var(--layer-1) 40%, var(--panel)); } table.grid td.hold { background: color-mix(in srgb, var(--layer-1) 24%, var(--panel)); }
 table.grid td.hit { cursor: pointer; } table.grid td.hit.on { background: var(--warn); }
 table.grid tr.hit-row.first td, table.grid tr.hit-row.first th { border-top: 2px solid var(--line2); }
-table.grid tr.note-row { cursor: pointer; } table.grid tr.note-row.picked th { color: var(--accent); }
+table.grid tr.note-row { cursor: pointer; } table.grid tr.note-row.picked th { color: var(--ember-text); }
 table.grid .now { outline: 1px solid var(--warn); background-color: color-mix(in srgb, var(--warn) 19%, transparent); }
 .roll-row-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; align-items: start; }
 @media (max-width: 1400px) { .roll-row-layout { grid-template-columns: 1fr; } }

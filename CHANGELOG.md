@@ -102,6 +102,36 @@ All notable changes to SoundClaw are listed here. The format follows
 - **Fixed:** the piano roll threw when the playing step was in a pattern that has no row for the channel; the typed-entry field of a knob or fader
   scrolled the page, which could move the control away from a double-click.
 
+### States, accessibility and narrow windows
+- **A new project** offers three starts that make something real as you, with the commands an agent uses: a sound from a preset (N; laser,
+  pickup, jump, hit or explosion), a set of four footsteps as one family (⇧N) and a 16-bar loop in A minor (⌥N); under them, the CLI line an
+  agent would run on this project.
+- **A large project's first seconds**: rows still being worked out shimmer, and an ember line under the home header and the library counts
+  the thumbnails (`index 400 · thumbs 37 / 400`).
+- **Offline.** An amber banner with the server's address, the command that starts it on this folder, Retry and a countdown (1, 2, 4 … 30 s).
+  Open sounds keep playing; edits apply on the page at once and are queued with a count and a "not sent" list, then sent in order on
+  reconnect; refusals are listed with the server's reason. The presence pill reads "offline". A server started again on the same folder
+  keeps its token, so open pages and links keep working.
+- **Contrast** of 4.5:1 for text and 3:1 for large text and glyphs on every screen, in both themes and both densities, checked by a browser
+  test that lists what it skips. Changed to pass: dark `--text3` `#858C9C` → `#8B92A2`, light `--you-text` `#0B6F66` → `#0A635B`, light
+  `--ember-text` `#B9440A` → `#A03A08`; role colours used as text go through their `-text` tokens; the light warn button and keycaps on
+  coloured buttons; nothing meaningful is faded with opacity.
+- **Roles and keys**: envelope corners have value texts; a fresh browser opened on an item's address shows its tab; the shortcut sheet lists
+  every key, including the ones that belong to one page (lenses, the clip grid, blind A/B).
+- **Narrow windows**: no screen scrolls sideways at 1180, 1024, 900, 760 or 360 px, and the header drops what is said elsewhere, widest
+  first, so the search button stays on screen.
+- **Polish.** The numbers strip shows whole values (true peak was cut); a layered sound's device chain scrolls to the open device; drag
+  tests wait for the page to settle; the presence pill says a few words (the sentence is its tooltip) and shrinks first; the song page has
+  a velocity lane in view and a draggable divider kept per browser; session lanes are at least 180 px with one-line sticky headers and
+  scroll sideways; the review's numbers are one line each; tape spans are labelled by their width ("6 cmds", with the full label as a
+  tooltip); the mixer's master strip stays pinned while the strips scroll.
+- **Fixed:** library rows could stay "– –" without a thumbnail when the home page's cards and the library wanted the same sound (a card
+  that was never asked for gave back the row's claim); a failed thumbnail is now asked for again while in view. The numbers that come with cards reach the list together (once every 50 ms), not one
+  list rebuild per card, so a burst of cards on a large project no longer makes a long task. The composer finds the failing check in a selection
+  even before the sound's card has come (it could open without the check chip). A new project's starts
+  overflowed the page when both side panels were open. A part of a page that throws shows an error in its place instead of blanking
+  the whole page.
+
 ### The dashboard on large projects
 - **A project of 400 sounds, 100 samples and 3,000 commands opens at once.** The page used to fetch every sample and render and measure
   every sound on its own thread before it listed anything (a 60-sound slice took 88 s and froze the tab; the whole project never finished).

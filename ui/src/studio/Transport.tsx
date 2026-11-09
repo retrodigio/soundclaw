@@ -81,7 +81,7 @@ export function Transport({ store, focus, onPalette, canLoop, onPlay, onStop, on
   const song = focus?.kind === 'song' ? store.songs.find((x) => x.id === focus.id) : undefined;
   const name = store.project?.name ?? '';
   return (
-    <header className="transport" data-testid="transport">
+    <header className="transport" data-testid="transport" data-song={song ? true : undefined}>
       <div className="t-project"><Logo size={24} /><span className="t-name" data-testid="project-name" title={store.project?.dir}>{name}</span><span className="mono dim small-mono" data-testid="project-counts">{store.index.length} sounds {'·'} {store.songs.length} songs</span></div>
       <div className="t-sep" />
       <div className="t-buttons" role="group" aria-label="Transport">
@@ -90,10 +90,10 @@ export function Transport({ store, focus, onPalette, canLoop, onPlay, onStop, on
         <IconButton label="Loop" shortcut="L" pressed={looping} onClick={onLoop} disabled={!canLoop} testId="transport-loop"><Loop size={15} /></IconButton>
       </div>
       <Position store={store} focus={focus} />
-      {song && <><span className="mono t-pill" data-testid="t-tempo">{song.tempo} BPM</span><span className="mono t-pill">{song.key ?? 'no key'}</span><span className="mono t-pill">{song.time[0]}/{song.time[1]}</span></>}
+      {song && <><span className="mono t-pill" data-testid="t-tempo">{song.tempo} BPM</span><span className="mono t-pill t-pill-more">{song.key ?? 'no key'}</span><span className="mono t-pill t-pill-more">{song.time[0]}/{song.time[1]}</span></>}
       <MasterMeter store={store} focus={focus} />
       <span className="grow" />
-      <div className="t-buttons">
+      <div className="t-buttons t-undo">
         <IconButton label="Undo" shortcut={shortcutLabel('⌘Z')} onClick={() => void store.undo()} disabled={!store.canUndo()} testId="undo"><Undo /></IconButton>
         <IconButton label="Redo" shortcut={shortcutLabel('⇧⌘Z')} onClick={() => void store.redo()} disabled={!store.canRedo()} testId="redo"><Redo /></IconButton>
       </div>

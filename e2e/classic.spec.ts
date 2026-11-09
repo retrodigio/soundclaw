@@ -4,6 +4,7 @@
 
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures.ts';
+import { settledDrag } from './drag.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;
@@ -26,14 +27,7 @@ async function open(page: Page): Promise<void> {
 
 /** A dragged-down knob or corner, in small steps. */
 async function dragBy(page: Page, testid: string, dx: number, dy: number): Promise<void> {
-  const el = page.getByTestId(testid);
-  await el.scrollIntoViewIfNeeded();
-  const box = (await el.boundingBox())!;
-  const x = box.x + box.width / 2, y = box.y + box.height / 2;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x + dx, y + dy, { steps: 20 });
-  await page.mouse.up();
+  await settledDrag(page, page.getByTestId(testid), dx, dy, { steps: 20, settled: page.getByTestId('editor') });
 }
 
 /**

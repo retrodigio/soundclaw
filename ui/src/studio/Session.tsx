@@ -153,7 +153,7 @@ export function Session({ store, onOpen }: { store: Store; onOpen(id: string): v
             const qs = (by.get(l.id) ?? []).slice().reverse();
             return (
               <section key={l.id} className="lane" aria-label={l.title} data-testid={`lane-${l.id}`} data-count={qs.length}>
-                <h2 className={`lane-title tone-${l.tone}`}><span className="mono" aria-hidden>{l.glyph}</span> {l.title} <span className="mono dim" data-testid={`lane-count-${l.id}`}>{qs.length}</span></h2>
+                <h2 className={`lane-title tone-${l.tone}`}><span className="mono" aria-hidden>{l.glyph}</span> {l.title} <span className="mono dim lane-count" data-testid={`lane-count-${l.id}`}>{qs.length}</span></h2>
                 {qs.length === 0 && <p className="dim small lane-empty">Nothing here.</p>}
                 {qs.map((q) => <LaneCard key={q.id} store={store} q={q} lane={l.id} now={now} onOpen={onOpen} />)}
               </section>

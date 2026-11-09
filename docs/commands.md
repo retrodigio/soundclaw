@@ -1282,6 +1282,8 @@ person answers on the card (the request opens again), `done` finishes it with wh
 `soundclaw serve --project <folder>` speaks MCP on stdin and stdout and serves the dashboard on
 `http://127.0.0.1:<port>/?token=…` (the link is printed to stderr and returned by `project`). MCP
 is also served over HTTP at `/mcp` with the token as a bearer.
+A server started again on the same folder keeps the last one's token, so an open dashboard and its
+links keep working across a restart (the token is kept beside the lock file, readable only by you).
 
 | Tool | Does |
 |---|---|

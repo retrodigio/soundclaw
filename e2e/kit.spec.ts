@@ -3,6 +3,7 @@
 // role), the agent tick and ghost, and the themes.
 
 import { expect, test, type Page } from '@playwright/test';
+import { settledDrag } from './drag.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;
@@ -18,17 +19,7 @@ const knob = (page: Page, n: string) => page.getByTestId(`kit-knob-${n}`);
 const commits = async (page: Page) => Number(await page.getByTestId('kit-commit-count').textContent());
 const now = async (page: Page, n: string) => Number(await knob(page, n).getAttribute('aria-valuenow'));
 
-async function drag(page: Page, loc: ReturnType<typeof knob>, dx: number, dy: number, shift = false): Promise<void> {
-  await loc.scrollIntoViewIfNeeded();
-  const b = (await loc.boundingBox())!;
-  const x = b.x + b.width / 2, y = b.y + b.height / 2;
-  await page.mouse.move(x, y);
-  if (shift) await page.keyboard.down('Shift');
-  await page.mouse.down();
-  await page.mouse.move(x + dx, y + dy, { steps: 8 });
-  await page.mouse.up();
-  if (shift) await page.keyboard.up('Shift');
-}
+const drag = (page: Page, loc: ReturnType<typeof knob>, dx: number, dy: number, shift = false): Promise<void> => settledDrag(page, loc, dx, dy, { shift, steps: 8 });
 
 test('a knob is a slider with a value text; a drag writes once, Shift makes it fine, double-click resets', async ({ page }) => {
   await open(page);
@@ -142,13 +133,7 @@ test('a slider follows the same rules: drag, Shift, double-click, arrows, typed 
   await expect(s).toHaveAttribute('aria-orientation', 'horizontal');
   const val = async () => Number(await s.getAttribute('aria-valuenow'));
   expect(await val()).toBeCloseTo(0.58, 3);
-  await s.scrollIntoViewIfNeeded();
-  const b = (await s.boundingBox())!;
-  const y = b.y + b.height / 2;
-  await page.mouse.move(b.x + 40, y);
-  await page.mouse.down();
-  await page.mouse.move(b.x + 40 + 60, y, { steps: 8 });
-  await page.mouse.up();
+  await settledDrag(page, s, 60, 0, { steps: 8, at: (b) => ({ x: b.x + 40, y: b.y + b.height / 2 }) });
   expect(await val()).toBeCloseTo(0.58 + 60 / 220, 2);
   await s.dblclick();
   expect(await val()).toBe(0.5);

@@ -309,6 +309,23 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
   }, sched, PAUSE_MS), []);
   useEffect(() => () => { co.cancel(); if (release.current) clearTimeout(release.current); if (dwell.current) clearTimeout(dwell.current); }, [co]);
 
+  // the open device stays in view in its chain: the dock takes width from the chains, which then scroll sideways to it
+  useEffect(() => {
+    if (!open) return;
+    const tid = open.kind === 'fx' ? `fx-${String(open.scope)}-${open.k}` : open.kind === 'source' ? `source-open-${open.n}` : null;
+    if (!tid) return;
+    let raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(`[data-testid="${tid}"]`);
+      const chain = el?.closest<HTMLElement>('.chain');
+      if (!el || !chain) return;
+      const c = chain.getBoundingClientRect(), d = el.getBoundingClientRect();
+      const pad = 12;
+      if (d.left < c.left + pad || d.width > c.width - 2 * pad) chain.scrollLeft += d.left - c.left - pad;
+      else if (d.right > c.right - pad) chain.scrollLeft += d.right - c.right + pad;
+    }); });
+    return () => cancelAnimationFrame(raf);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const key = sound ? store.keyOf(sound) : '';
   const prevKey = useRef(key);
   useEffect(() => {

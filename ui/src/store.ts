@@ -27,7 +27,11 @@ const BIG = 44100 * 3;
 
 export type Status = 'connecting' | 'open' | 'closed';
 export type Answer = { ok: boolean; error?: string; request?: WorkRequest };
-export type RunResult = { ok: true; group: string | null; seq: number | null } | { ok: false; errors: Diag[] };
+export type RunResult = { ok: true; group: string | null; seq: number | null; /** Offline: kept in the page's queue, sent when the server is back. */ queued?: boolean } | { ok: false; errors: Diag[] };
+
+/** An edit made while the server was unreachable, waiting to be sent. */
+export interface QueuedEdit { id: number; commands: string; at: number }
+const OFFLINE_MSG = 'the SoundClaw server is not connected';
 
 /** A playback the page started: kept so tests (and curious people) can see what was played. */
 export interface Played {
@@ -214,29 +218,130 @@ export class Store {
     for (const fn of [...this.listeners]) fn();
   }
 
+  /** Offline: edits made while the server is gone, in order, sent when it is back ("not sent" until then). */
+  outbox: QueuedEdit[] = [];
+  /** Queued edits the server refused when they were sent after a reconnect, with its reasons (kept until the person dismisses them). */
+  refused: { commands: string; reason: string }[] = [];
+  /** Queued edits sent after the last reconnect (for the page's toast). */
+  sentAfterReconnect = 0;
+  /** Bumped each time the queue has been sent after a reconnect. */
+  flushes = 0;
+  /** When (ms) the next automatic reconnect is tried, and how many have failed in a row (back-off 1, 2, 4 … 30 s). */
+  retryAt = 0;
+  retries = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private outboxSeq = 0;
+  private flushing = false;
+  /** Documents with the queued edits applied, so the page plays and shows them while offline (cleared by the snapshot that comes back). */
+  private pending = new Map<string, Sound>();
+  private pendingSongs = new Map<string, SongDoc>();
+  private hashListening = false;
+
   connect(token: string): void {
     this.token = token;
-    window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.route = parseRoute(location.hash); this.releaseHoldsAway(); this.changed(); });
-    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`;
+    if (!this.hashListening) {
+      this.hashListening = true;
+      window.addEventListener('hashchange', () => { this.editing = routeSound(location.hash); this.route = parseRoute(location.hash); this.releaseHoldsAway(); this.changed(); });
+    }
+    this.open();
+  }
+
+  private open(): void {
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(this.token)}`;
     const ws = new WebSocket(url);
     this.ws = ws;
-    ws.onopen = () => { this.status = 'open'; this.changed(); };
+    ws.onopen = () => { this.status = 'open'; this.retries = 0; this.retryAt = 0; this.changed(); };
     ws.onclose = () => {
+      if (this.ws !== ws) return;
       this.status = 'closed';
+      // the server may have restarted: try again, waiting 1, 2, 4 … up to 30 s between tries
+      const wait = Math.min(30, 2 ** this.retries) * 1000;
+      this.retries++;
+      this.retryAt = Date.now() + wait;
+      this.retryTimer = setTimeout(() => { if (this.ws === ws) this.open(); }, wait);
       this.changed();
-      // The server may have restarted: try again.
-      setTimeout(() => { if (this.ws === ws) this.connect(this.token); }, 1500);
     };
     ws.onmessage = (ev) => this.receive(JSON.parse(String(ev.data)) as ServerMessage);
   }
 
-  private send(m: ClientMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(m));
+  /** Try to reach the server now (the offline banner's Retry). */
+  retryNow(): void {
+    if (this.status === 'open') return;
+    this.status = 'connecting';
+    this.changed();
+    this.open();
+  }
+
+  /** The person read the refused edits: the list goes. */
+  dismissRefused(): void {
+    this.refused = [];
+    this.sentAfterReconnect = 0;
+    this.changed();
+  }
+
+  /** Edits queued while offline are sent in order once the server is back; a refused one is listed with its reason, never dropped. */
+  private async flushOutbox(): Promise<void> {
+    if (this.flushing || !this.outbox.length) return;
+    this.flushing = true;
+    let sent = 0;
+    try {
+      while (this.outbox.length && this.status === 'open') {
+        const q = this.outbox[0]!;
+        const r = await this.sendRun(q.commands);
+        if (this.status !== 'open' && !r.ok && r.errors.some((e) => e.message === OFFLINE_MSG)) break;
+        this.outbox = this.outbox.slice(1);
+        sent++;
+        if (!r.ok) this.refused = [...this.refused, { commands: q.commands, reason: r.errors.map((e) => e.message).join('; ') || 'refused' }];
+        this.changed();
+      }
+    } finally {
+      this.flushing = false;
+      this.sentAfterReconnect = sent;
+      if (sent) this.flushes++;
+      this.changed();
+    }
+  }
+
+  /** Apply a queued edit to the page's copies of the documents it names (best effort: what cannot be applied here waits for the server). */
+  private applyLocally(commands: string): void {
+    const p = parse(commands);
+    if (p.errors.length) return;
+    const lib = new Library();
+    for (const [id, d] of this.docs) lib.set(id, cloneSound(this.pending.get(id) ?? d));
+    for (const x of this.liveSongs) lib.songs.set(x.id, this.pendingSongs.get(x.id) ?? x);
+    for (const x of this.instruments) lib.instruments.set(x.id, x);
+    try {
+      for (const c of p.commands) applyCommand(lib, c);
+    } catch {
+      return;
+    }
+    const known = new Set([...lib.keys(), ...lib.songs.keys()]);
+    for (const line of commands.split('\n')) {
+      for (const id of itemsOfCmd(line, known)) {
+        const d = lib.get(id);
+        if (d && this.docs.has(id)) this.pending.set(id, d);
+        const x = lib.songs.get(id);
+        if (x) this.pendingSongs.set(id, x);
+      }
+    }
+    this.songs = this.liveSongs.map((x) => this.pendingSongs.get(x.id) ?? this.held.get(x.id)?.song ?? x);
+    this.rebuildSounds();
+  }
+
+
+  private send(m: ClientMessage): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(m));
+    return true;
   }
 
   private receive(m: ServerMessage): void {
     switch (m.type) {
       case 'hello':
+        this.pending.clear();
+        this.pendingSongs.clear();
+        queueMicrotask(() => void this.flushOutbox());
         this.project = m.snapshot.project;
         this.agentNew = loadNew(m.snapshot.project.name);
         this.lean = m.snapshot.lean;
@@ -362,14 +467,25 @@ export class Store {
     return true;
   }
 
-  /** Commands as this person: one undo group. */
+  /** Commands as this person: one undo group. Offline, they wait in the outbox (applied to the page's copies) and are sent in order when the server is back. */
   run(commands: string): Promise<RunResult> {
     const known = new Set([...this.index.map((x) => x.id), ...this.songs.map((x) => x.id)]);
     for (const line of commands.split('\n')) for (const it of itemsOfCmd(line, known)) this.editedAt.set(it, Date.now());
+    if (this.status !== 'open' || this.ws?.readyState !== WebSocket.OPEN || this.outbox.length) {
+      this.outbox = [...this.outbox, { id: ++this.outboxSeq, commands, at: Date.now() }];
+      this.applyLocally(commands);
+      this.changed();
+      if (this.status === 'open') void this.flushOutbox();
+      return Promise.resolve({ ok: true, group: null, seq: null, queued: true });
+    }
+    return this.sendRun(commands);
+  }
+
+  private sendRun(commands: string): Promise<RunResult> {
     const id = ++this.nextId;
     return new Promise((resolve) => {
       this.waiting.set(id, resolve);
-      this.send({ type: 'run', id, commands, by: this.me });
+      if (!this.send({ type: 'run', id, commands, by: this.me })) { this.waiting.delete(id); resolve({ ok: false, errors: [{ message: OFFLINE_MSG } as Diag] }); }
     });
   }
 
@@ -377,7 +493,7 @@ export class Store {
     const id = ++this.nextId;
     return new Promise((resolve) => {
       this.answers.set(id, resolve);
-      this.send({ type: 'request', id, by: this.me, body });
+      if (!this.send({ type: 'request', id, by: this.me, body })) { this.answers.delete(id); resolve({ ok: false, error: 'The SoundClaw server is offline, so the request was not sent. Ask again when it is back.' }); }
     });
   }
 
@@ -548,15 +664,30 @@ export class Store {
   private setIndex(index: SoundSummary[]): void {
     this.index = index;
     this.rebuildSounds();
+    this.requeueCards();
+  }
+
+  /** Cards in view that are missing or for an older version of their sound go back in the queue (after a change, or a failed fetch). */
+  private requeueCards(): void {
+    let more = false;
+    for (const [id, subs] of this.cardSubs) {
+      if (!subs.size) continue;
+      const sum = this.summary(id);
+      if (!sum || this.cardData.get(id)?.key === sum.key || this.cardActive.has(`${id}|${sum.key}`) || this.cardWanted.get(id) === sum.key) continue;
+      if (Date.now() - (this.cardFailed.get(id) ?? 0) < 3000) continue;
+      this.cardWanted.set(id, sum.key);
+      more = true;
+    }
+    if (more) this.pumpCards();
   }
 
   private rebuildSounds(): void {
-    this.sounds = this.index.flatMap((x) => { const d = this.held.get(x.id)?.sound ?? this.docs.get(x.id); return d ? [d] : []; });
+    this.sounds = this.index.flatMap((x) => { const d = this.pending.get(x.id) ?? this.held.get(x.id)?.sound ?? this.docs.get(x.id); return d ? [d] : []; });
   }
 
   /** A sound's document: held, or (in a lean project) asked for; undefined until it is here. */
   doc(id: string): Sound | undefined {
-    const d = this.held.get(id)?.sound ?? this.docs.get(id);
+    const d = this.pending.get(id) ?? this.held.get(id)?.sound ?? this.docs.get(id);
     if (!d && this.lean && this.index.some((x) => x.id === id)) void this.fetchDoc(id);
     return d;
   }
@@ -1324,6 +1455,25 @@ export class Store {
     this.cardWanted.delete(id);
   }
   private cardRefs = new Map<string, number>();
+  private infoQueue = new Map<string, { key: string; info: NonNullable<SoundSummary['info']> }>();
+  private infoTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** The numbers that came with cards go into the list together, in one change. */
+  private flushInfo(): void {
+    this.infoTimer = undefined;
+    const q = this.infoQueue;
+    this.infoQueue = new Map();
+    let any = false;
+    const next = this.index.map((x) => {
+      const n = q.get(x.id);
+      if (!n || x.info || n.key !== x.key) return x;
+      any = true;
+      return { ...x, info: n.info };
+    });
+    if (!any) return;
+    this.index = next;
+    this.changed();
+  }
 
   private pumpCards(): void {
     // four at a time, the newest request first (what is in view now)
@@ -1340,13 +1490,15 @@ export class Store {
           this.cardStats.firstAt ??= Math.round(performance.now());
           for (const fn of [...(this.cardSubs.get(id) ?? [])]) fn();
           // the list had no numbers for this version of the sound yet: it has now
-          const sum = this.summary(id);
-          if (sum && sum.key === c.key && !sum.info) {
-            this.index = this.index.map((x) => (x === sum ? { ...x, info: { hash: c.hash, duration: c.duration, lufs: c.lufs, truePeakDb: c.truePeakDb, pass: c.pass, failing: c.failing, summary: c.summary } } : x));
-            this.changed();
-          }
+          // (gathered and written once a frame: a burst of cards must not rebuild the list once each)
+          this.infoQueue.set(id, { key: c.key, info: { hash: c.hash, duration: c.duration, lufs: c.lufs, truePeakDb: c.truePeakDb, pass: c.pass, failing: c.failing, summary: c.summary } });
+          this.infoTimer ??= setTimeout(() => this.flushInfo(), 50);
         })
-        .catch(() => this.cardFailed.set(id, Date.now()))
+        .catch(() => {
+          // the server was busy or away: try again in a few seconds if the card is still in view
+          this.cardFailed.set(id, Date.now());
+          setTimeout(() => this.requeueCards(), 3100);
+        })
         .finally(() => {
           this.cardActive.delete(tag);
           this.pumpCards();

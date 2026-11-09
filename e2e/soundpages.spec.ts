@@ -146,6 +146,17 @@ test('the analysis page shows the command an agent types from the project folder
   }
 });
 
+test('in the classic editor at 1440 with the inspector open, every card of the numbers strip shows its whole value', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, '#/sound/coin');
+  await expect(page.getByTestId('editor')).toHaveAttribute('data-measured', 'true');
+  await expect(page.getByTestId('inspector')).toBeVisible();
+  await expect(page.getByTestId('nstrip-truePeakDb')).toBeVisible();
+  const cut = await page.locator('[data-testid^=nstrip-] .strip-v').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1 || e.getBoundingClientRect().right > e.parentElement!.getBoundingClientRect().right + 1).map((e) => e.textContent));
+  expect(cut, 'values cut short').toEqual([]);
+  await expect(page.getByTestId('nstrip-truePeakDb').locator('.strip-v')).toHaveText(/dBTP$/);
+});
+
 test('a click or Enter on a device opens its detail panel, docked to the right, built from the studio components', async ({ page }) => {
   await open(page, '#/sound/boom');
   await expect(page.getByTestId('device-panel').or(page.locator('aside.device-panel'))).toHaveCount(0);

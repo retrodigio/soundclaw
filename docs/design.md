@@ -245,6 +245,53 @@ that opens over the page, below 900 px the library is an overlay, and there is n
   text field has focus, except Esc and ⌘K. Typed text that has two or more words and matches no action becomes "Ask the agent: … on <focused item>",
   which writes a change request.
 
+## States, accessibility and narrow windows
+
+**A new project** shows three starts instead of an empty list: a sound from a preset (laser, pickup, jump, hit or explosion; N), a set of four
+footsteps made as one family (⇧N) and a 16-bar loop in A minor with chords, a lead, a bass and drums (⌥N). Each runs the same commands an agent
+would (`sound new … preset=…`, `set new … from=…`, `song new` and its channels, patterns and section) as you, and opens what it made. Under them
+is the CLI line an agent would run on this project, and a note that the agent's results appear here live.
+
+**A large project's first seconds.** Rows whose numbers are not known yet shimmer and read "…"; a thin ember line under the home header and the
+library counts the sounds whose card the server has worked out (`index 400 · thumbs 37 / 400`) and goes away when every one is known. A card
+is asked for by whatever shows it (a library row, a home card), counted per claim, and given back only by a claimant: two views of one sound
+never cancel each other. A card that failed to come is asked for again a few seconds later while it is still in view, and so is one whose
+sound changed.
+
+**Offline.** When the websocket closes, an amber banner under the tabs says "Lost the SoundClaw server at host:port", gives the command that
+starts it again on this folder (`soundclaw serve --project <path>`, with `--port` when it is not the default), a Retry button and the time
+to the next try (1, 2, 4, 8, 16 and then every 30 s). Everything open still plays from the local render. An edit made offline is applied to
+the page's copy at once (the knob moves, the sound plays as edited) and queued; the banner counts the queue and lists it, each line "not
+sent". On reconnect the queue goes out in order as ordinary commands by you; any the server refuses (the sound was removed meanwhile, say)
+are listed with the server's reason until dismissed. Change requests are not queued: asking needs the server, and says so. The presence
+pill reads "offline". A server started again on the same folder keeps its token (it is kept beside the lock file after a stop, readable only
+by you), so an open page and its links keep working.
+
+**Contrast.** Text needs 4.5:1 against what is behind it; text of 24 px (or 18.66 px bold) and UI glyphs (one or two symbols, no letters)
+need 3:1. A browser test measures every element with text on every screen, in both themes and both densities, from the computed colours
+(backgrounds laid over one another up the tree, opacity multiplied in), and lists what it skips: disabled controls, decorative text inside
+`aria-hidden`, text over an image or a gradient, and text covered by a dialog or scrolled out of its box. Role colours used as text go
+through their `-text` tokens. Values changed to pass: dark `--text3` `#858C9C` → `#8B92A2`; light `--you-text` `#0B6F66` → `#0A635B`; light
+`--ember-text` `#B9440A` → `#A03A08`. The light theme's warn button is dark text colour on a raised ground; keycaps on a primary or warn
+button use the on-ember colour. Nothing that carries meaning is faded with opacity (a device that is off has a dashed border instead).
+
+**Roles and keys.** Tab lists hold tabs with one selected; every knob, slider, fader and envelope corner is a `slider` with a name, a value
+and a value text in units; the library is a `listbox`; the palette, the shortcut sheet and the composer are modal dialogs that keep focus
+inside and give it back on Esc; focus shows a 2 px ember ring. Checks carry a glyph and a word, authorship a shape and a name, so colour is
+never alone. The shortcut sheet is built from the registry, plus reference lines for keys that live on one page (the lenses, the clip grid,
+blind A/B), so it lists every shortcut.
+
+**Narrow windows.** At 1180, 1024, 900, 760 and 360 px no screen scrolls sideways (a test walks every screen at each). Below 1180 px the rail
+is a 44 px strip, and the header drops the agent's text from the presence pill, the song's key and metre and the search label; below 1100 px
+the song's tempo; below 900 px the library is an overlay (⌥1), the master meter and the project name go; below 720 px the page stacks and
+the presence pill and panel toggles go; below 480 px the undo buttons (⌘Z) and the play position. Wide content scrolls inside its own box:
+the session's lanes (at least 180 px each, with sticky one-line headers), the mixer's strips (the master stays pinned at the right), a
+layered sound's device chain (scrolled to the open device).
+
+**Performance**, measured by a test on a 400-sound fixture: the list paints about 0.3 s after a warm reload, no task while scrolling the
+library is over 100 ms, a layered editor of a 30 s loop opens with its longest task near 0.5 s, and meters and the playhead draw in
+`requestAnimationFrame` (the mixer's numbers are written into the page ten times a second, outside React).
+
 ## The sound pages
 
 A sound's page (`#/sound/<id>`) is the classic or the layered editor; `#/sound/<id>/analysis` is the five lenses on a page of their own. Code:
@@ -316,7 +363,8 @@ note selected in the roll lights its token (the tokens are found from the text i
 the notes under it. Typing is read again 300 ms after the last key: a problem is underlined with its message and nothing is written; text that means something new
 is one `pattern set` (the very command an agent would write), so one pause is one batch. The person's layout is kept: when the pattern changes and the text already
 means it, the text is left alone; an outside change (the roll, the agent, an undo) replaces it and puts the caret back on its line and column, unless the person is
-mid-edit, when a link offers the reload. Rows the agent wrote have a violet left border. The grid for drum hits is a tab beside the roll.
+mid-edit, when a link offers the reload. Rows the agent wrote have a violet left border. The grid for drum hits is a tab beside the roll. The roll ends in a velocity lane;
+the arrangement above is fitted to its rows when the page opens, and a divider between the two can be dragged (its height is kept per browser).
 
 **The inspector** (⌥2; closed until opened, an overlay below 1040 px) holds the instruments, helpers, song order and changes (what the agent wrote that
 nobody approved, with Approve, and the song's recent commands) and the ask box; the palette finds each ("Song: show the helpers" and so on).
@@ -374,6 +422,10 @@ your own edits are applied on top of it, and an "agent update waiting · review"
 update (the chip's link, discarding your draft, or leaving the editor) shows the item as it is. The page replays
 the tape itself for the history tape's preview and for a revert's commands; a review's before and after, parameters,
 numbers and check markers come from `GET /api/review?request=r3|group=g7`, which is `changes` with the structure kept.
+The review's numbers are kept to one line each (the value and its unit; the check's full text is the tooltip). On the history
+tape a batch's span is labelled as its width allows ("batch · 6 commands", "6 cmds", "6"), the full label in its tooltip. The presence pill
+says a few words ("listening", "claude working", "not listening", "offline") with the full sentence as its tooltip, and is the first thing
+in the header to shrink.
 
 ## The editor and human edits
 

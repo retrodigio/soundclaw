@@ -116,7 +116,7 @@ export function Palette({ store, focus, onClose, ask }: { store: Store; focus: F
             return (
               <div key={i}>
                 {head}
-                <div id={`pal-${i}`} role="option" aria-selected={i === at} className={`palette-row${r.kind === 'ask' ? ' ask-row' : ''}${r.kind === 'ask' && !r.target ? ' disabled' : ''}`} data-testid={r.kind === 'ask' ? 'palette-ask' : `palette-row-${r.kind === 'action' ? r.action.id : r.label}`}
+                <div id={`pal-${i}`} role="option" aria-selected={i === at} aria-disabled={r.kind === 'ask' && !r.target ? true : undefined} className={`palette-row${r.kind === 'ask' ? ' ask-row' : ''}${r.kind === 'ask' && !r.target ? ' disabled' : ''}`} data-testid={r.kind === 'ask' ? 'palette-ask' : `palette-row-${r.kind === 'action' ? r.action.id : r.label}`}
                   onMouseMove={() => setAt(i)} onClick={() => void run(r)}>
                   {r.kind === 'ask' && <><Spark size={14} /><span className="grow">Ask the agent: <span className="ask-text">{'“'}{r.text}{'”'}</span> {r.target ? <>on <span className="mono">{r.target.id}</span></> : <span className="dim">(open or select a sound first)</span>}</span><Kbd>{'↵'}</Kbd></>}
                   {r.kind === 'action' && <><span className="grow">{r.action.label}</span>{r.action.shortcut && <span className="keys"><Keys combo={shortcutLabel(r.action.shortcut)} /></span>}</>}
@@ -138,7 +138,9 @@ export function ShortcutSheet({ onClose }: { onClose(): void }) {
   useEffect(() => { ref.current?.querySelector<HTMLElement>('button')?.focus(); }, []);
   const groups = useMemo(() => {
     const m = new Map<string, Action[]>();
-    for (const a of actions) if (a.shortcut) { const g = m.get(a.group) ?? []; g.push(a); m.set(a.group, g); }
+    // a page's own action replaces the shell's reference line for the same key in the same group
+    const live = new Set(actions.filter((a) => a.shortcut && !a.id.startsWith('ref.')).map((a) => `${a.group}|${a.shortcut}`));
+    for (const a of actions) if (a.shortcut && !(a.id.startsWith('ref.') && live.has(`${a.group}|${a.shortcut}`))) { const g = m.get(a.group) ?? []; g.push(a); m.set(a.group, g); }
     return [...m.entries()];
   }, [actions]);
   return (

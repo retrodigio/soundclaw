@@ -61,9 +61,10 @@
 .batch-big-cell[data-state='rendering'] { border: 1px dashed var(--agent); color: var(--text2); }
 .batch-big-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
 
-.lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: var(--sp-8); }
-.lane { background: var(--ground); border-radius: var(--r-cell); padding: var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); min-height: 120px; min-width: 0; }
-.lane-title { display: flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-11); font-weight: 600; margin: 0; color: var(--text2); }
+.lanes { display: flex; gap: var(--sp-8); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; padding-bottom: 4px; }
+.lane { background: var(--ground); border-radius: var(--r-cell); padding: 0 var(--sp-8) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); min-height: 120px; flex: 1 0 180px; min-width: 180px; max-height: 520px; overflow-y: auto; scrollbar-width: thin; }
+.lane-title { display: flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-11); font-weight: 600; margin: 0 calc(-1 * var(--sp-8)); padding: var(--sp-8); color: var(--text2); white-space: nowrap; position: sticky; top: 0; z-index: 1; background: var(--ground); }
+.lane-title .lane-count { margin-left: auto; }
 .lane-title.tone-agent { color: var(--agent-text); } .lane-title.tone-warn { color: var(--warn-text); } .lane-title.tone-pass { color: var(--pass-text); }
 .lane-empty { margin: 0; }
 .lane-card { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-cell); padding: var(--sp-8); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -112,7 +113,7 @@
 .tape-span-label { pointer-events: none; }
 .tape-tick { position: absolute; font-size: 10px; color: var(--text3); }
 .tape-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ember); }
-.tape-now .mono { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--ember-text); }
+.tape-now .mono { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--ember-text); background: var(--panel); padding: 0 2px; border-radius: 2px; }
 .tape-tip { position: absolute; top: 4px; z-index: 5; width: 290px; background: var(--raised); border: 1px solid var(--line2); border-radius: var(--r-cell); padding: var(--sp-8); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
 .tape-tip-head { font-size: var(--fs-12); }
 .tape-tip-cmd { font-size: 10px; color: var(--agent-text); overflow-wrap: anywhere; }
@@ -144,7 +145,8 @@
 .rv-param, .rv-num { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-12); padding: 3px 0; border-bottom: 1px solid var(--raised); }
 .rv-param-name { flex: 1; color: var(--text2); overflow-wrap: anywhere; }
 .rv-num-k { flex: 0 0 76px; color: var(--text2); }
-.rv-num .mono { text-align: right; flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.rv-num .mono { text-align: right; flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-num-k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rv-num .dim[aria-hidden] { flex: none; }
 .rv-num .rv-glyph { flex: none; }
 .rv-param .rv-old { color: var(--text3); text-decoration: line-through; }

@@ -9,7 +9,7 @@ import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server
 import { startWatchServer, type WatchServer } from './http.ts';
 import { createMcpServer } from './mcp.ts';
 import { acquireLock, createProject, loadProject, releaseLock, type Project } from './project.ts';
-import { removeTokenFile, writeTokenFile } from './runfile.ts';
+import { lastToken, removeTokenFile, writeTokenFile } from './runfile.ts';
 import { Writer } from './writer.ts';
 
 export const VERSION = '0.1.0';
@@ -48,8 +48,9 @@ function openProject(dir: string, log: (s: string) => void): Project {
 
 export async function serve(o: ServeOptions): Promise<Served> {
   const log = o.log ?? ((s: string) => process.stderr.write(s + '\n'));
-  const token = o.token ?? randomBytes(16).toString('hex');
   const dir = resolve(o.project);
+  // a server started again on the same folder keeps the token, so a dashboard left open reconnects and sends what it queued
+  const token = o.token ?? lastToken(dir) ?? randomBytes(16).toString('hex');
   const writer = new Writer(openProject(dir, log));
   let web!: WatchServer;
   const host = { writer, url: () => web.url };

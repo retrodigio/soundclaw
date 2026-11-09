@@ -33,6 +33,10 @@ Code). Without MCP, use the `soundclaw` command line, which does the same.
    edit with sliders in the dashboard, as `human:<name>`. Carry on from their edits; **never undo
    or overwrite a person's edit silently** (if you think it is wrong, say so in a reply or a
    question first). `history` shows the raw tape (`by=human:<name>` to pick one person).
+   A person's edits made while the server was down are queued in their page and arrive, in order,
+   when it is back: a burst of `human:<name>` commands at once, so read `changes` after a
+   restart too. A new project's start buttons make real items as the person (a preset sound, a set
+   of four footsteps, a 16-bar loop): treat them like any other edit.
 3. **Keep a background wait running** on a served project, so people's requests reach you:
    `soundclaw await <project folder>` (run it in the background; it blocks, prints what people
    asked for and a cursor, then exits). When it exits, handle what it printed (`work` for a

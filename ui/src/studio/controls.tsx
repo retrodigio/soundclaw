@@ -376,7 +376,7 @@ export const authorOf = (by: string): 'agent' | 'you' => (by.startsWith('human:'
 
 /* ───────────────────────── buttons and small controls ───────────────────────── */
 
-export type ButtonKind = 'primary' | 'secondary' | 'agent' | 'quiet' | 'danger';
+export type ButtonKind = 'primary' | 'secondary' | 'agent' | 'quiet' | 'danger' | 'warn';
 export function Button({ kind = 'secondary', icon, children, onClick, disabled, title, type = 'button', testId, pressed, className }: { kind?: ButtonKind; icon?: ReactNode; children?: ReactNode; onClick?(e: React.MouseEvent<HTMLButtonElement>): void; disabled?: boolean; title?: string; type?: 'button' | 'submit'; testId?: string; pressed?: boolean; className?: string }) {
   return <button type={type} className={`btn btn-${kind}${className ? ` ${className}` : ''}`} onClick={onClick} disabled={disabled} title={title} data-testid={testId} aria-pressed={pressed}>{icon}{children}</button>;
 }

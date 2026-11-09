@@ -112,11 +112,14 @@ export function Tape({ store, filter = null, preview = null, height = 96, compac
               const first = marks.findIndex((m) => m.e.group === g);
               if (first < 0 || first + es.length < lo || first > hi) return null;
               const human = es[0]!.by.startsWith('human:');
+              // the label fits the span: the long form, a short one, the count, or nothing (the full text is the tooltip)
+              const w = Math.max(8, es.length * zoom - 2);
+              const label = w >= 124 ? `batch · ${es.length} commands` : w >= 50 ? `${es.length} cmds` : w >= 18 ? String(es.length) : '';
               return (
                 <button key={g} type="button" className={`tape-span${active.has(g) ? '' : ' undone'}${picked === g ? ' picked' : ''}`} data-by={human ? 'you' : 'agent'} data-group={g} data-testid={`tape-span-${g}`}
-                  style={{ left: PAD + first * zoom, width: Math.max(8, es.length * zoom - 2), top: 6 }} onClick={() => void pick(g)}
-                  onMouseEnter={() => setHover({ group: g, x: PAD + first * zoom })} onMouseLeave={() => setHover(null)} aria-label={`${g}: batch of ${es.length} commands by ${es[0]!.by}`}>
-                  <span className="tape-span-label">batch {'·'} {es.length} commands</span>
+                  style={{ left: PAD + first * zoom, width: w, top: 6 }} onClick={() => void pick(g)}
+                  onMouseEnter={() => setHover({ group: g, x: PAD + first * zoom })} onMouseLeave={() => setHover(null)} aria-label={`${g}: batch of ${es.length} commands by ${es[0]!.by}`} title={`${g}: batch of ${es.length} commands by ${es[0]!.by}`}>
+                  <span className="tape-span-label" data-testid={`tape-span-label-${g}`}>{label}</span>
                 </button>
               );
             })}

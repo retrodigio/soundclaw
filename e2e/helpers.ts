@@ -23,6 +23,10 @@ export interface Agent {
   background(args: string[]): { done: Promise<Done>; kill(): void };
   /** What the server has written to its error output so far. */
   log(): string;
+  /** Stop the server (the project and the page stay): the page goes offline. */
+  stop(): Promise<void>;
+  /** Start the server again on the same port (it keeps its token, so the page reconnects). */
+  restart(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -33,16 +37,26 @@ export async function startAgent(o: { build?: (dir: string) => void } = {}): Pro
   const env = { ...process.env, SOUNDCLAW_STATE_DIR: join(root, 'state') };
   if (o.build) o.build(dir);
   else execFileSync(process.execPath, [BIN, 'new', dir], { env });
-  const server = spawn(process.execPath, [BIN, 'serve', '--project', dir, '--port', '0', '--no-mcp'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   const children = new Set<ChildProcess>();
   let stderr = '';
-  server.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
-  const t0 = Date.now();
-  while (!/watch at (\S+)/.test(stderr)) {
-    if (Date.now() - t0 > 15_000) { server.kill(); throw new Error(`no URL from the server: ${stderr}`); }
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  const url = /watch at (\S+)/.exec(stderr)![1]!;
+  let server!: ChildProcess;
+  const launch = async (port: number): Promise<string> => {
+    stderr = '';
+    server = spawn(process.execPath, [BIN, 'serve', '--project', dir, '--port', String(port), '--no-mcp'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    server.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
+    const t0 = Date.now();
+    while (!/watch at (\S+)/.test(stderr)) {
+      if (Date.now() - t0 > 15_000) { server.kill(); throw new Error(`no URL from the server: ${stderr}`); }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return /watch at (\S+)/.exec(stderr)![1]!;
+  };
+  const stopServer = async (): Promise<void> => {
+    if (server.exitCode !== null || server.signalCode !== null) return;
+    server.kill('SIGTERM');
+    await new Promise((r) => server.once('exit', r));
+  };
+  const url = await launch(0);
   const run = (args: string[]): { child: ChildProcess; done: Promise<Done> } => {
     const child = spawn(process.execPath, [BIN, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child);
@@ -57,10 +71,11 @@ export async function startAgent(o: { build?: (dir: string) => void } = {}): Pro
     log: () => stderr,
     cli: (args) => run(args).done,
     background: (args) => { const r = run(args); return { done: r.done, kill: () => r.child.kill('SIGTERM') }; },
+    stop: stopServer,
+    restart: async () => { await stopServer(); await launch(Number(new URL(url).port)); },
     close: async () => {
       for (const c of children) c.kill('SIGTERM');
-      server.kill('SIGTERM');
-      await new Promise((r) => (server.exitCode !== null ? r(null) : server.once('exit', r)));
+      await stopServer();
       rmSync(root, { recursive: true, force: true });
     },
   };

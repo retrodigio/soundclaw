@@ -36,7 +36,7 @@ const commands = (page: Page) => page.locator('[data-testid=cmd-row]').evaluateA
 test('lists the sounds as cards with waveforms and the history, and follows the agent live', async ({ page }) => {
   agent = await startAgent();
   await page.goto(`${agent.url}&name=ana`);
-  await expect(page.getByTestId('empty')).toBeVisible();
+  await expect(page.getByTestId('new-project')).toBeVisible();
   await expect(page.getByTestId('connection')).toHaveAttribute('data-status', 'open');
   expect((await agent.cli(['run', agent.dir, '-e', 'sound new beep; sound set beep frequency=880 duration=0.3 volume=0.4; sound new boop; sound set boop frequency=220'])).code).toBe(0);
 

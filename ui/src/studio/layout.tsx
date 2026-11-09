@@ -1,13 +1,13 @@
 // Layout parts: a resizable edge for panels, the windowed list, and the waveform view.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyEvent, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
+import { Component, forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyEvent, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 
 /* ───────────────────────── resizing ───────────────────────── */
 
 /** The draggable edge of a panel: pointer drag or arrow keys resize, a double-click toggles. Sizes are clamped to [min, max]. */
-export function Resizer({ side, size, min, max, onSize, onToggle, label, testId }: { side: 'left' | 'right' | 'top'; size: number; min: number; max: number; onSize(v: number): void; onToggle?(): void; label: string; testId?: string }) {
+export function Resizer({ side, size, min, max, onSize, onToggle, label, testId }: { side: 'left' | 'right' | 'top' | 'bottom'; size: number; min: number; max: number; onSize(v: number): void; onToggle?(): void; label: string; testId?: string }) {
   const start = useRef<{ x: number; y: number; size: number; id: number } | null>(null);
-  const vertical = side === 'top';
+  const vertical = side === 'top' || side === 'bottom';
   const clamp = (v: number) => Math.min(max, Math.max(min, Math.round(v)));
   const down = (e: RPointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -18,13 +18,13 @@ export function Resizer({ side, size, min, max, onSize, onToggle, label, testId 
     const s = start.current;
     if (!s || s.id !== e.pointerId) return;
     // the left panel's edge is on its right: dragging right grows it; the right panel's edge is on its left; the bottom panel's on its top
-    const d = side === 'left' ? e.clientX - s.x : side === 'right' ? s.x - e.clientX : s.y - e.clientY;
+    const d = side === 'left' ? e.clientX - s.x : side === 'right' ? s.x - e.clientX : side === 'bottom' ? e.clientY - s.y : s.y - e.clientY;
     onSize(clamp(s.size + d));
   };
   const up = (e: RPointerEvent<HTMLDivElement>) => { start.current = null; delete e.currentTarget.dataset.active; };
   const key = (e: RKeyEvent<HTMLDivElement>) => {
-    const grow = side === 'left' ? 'ArrowRight' : side === 'right' ? 'ArrowLeft' : 'ArrowUp';
-    const shrink = side === 'left' ? 'ArrowLeft' : side === 'right' ? 'ArrowRight' : 'ArrowDown';
+    const grow = side === 'left' ? 'ArrowRight' : side === 'right' ? 'ArrowLeft' : side === 'bottom' ? 'ArrowDown' : 'ArrowUp';
+    const shrink = side === 'left' ? 'ArrowLeft' : side === 'right' ? 'ArrowRight' : side === 'bottom' ? 'ArrowUp' : 'ArrowDown';
     const step = e.shiftKey ? 40 : 10;
     if (e.key === grow) { e.preventDefault(); onSize(clamp(size + step)); }
     else if (e.key === shrink) { e.preventDefault(); onSize(clamp(size - step)); }
@@ -34,6 +34,25 @@ export function Resizer({ side, size, min, max, onSize, onToggle, label, testId 
     <div className={`resizer resizer-${side}`} role="separator" aria-orientation={vertical ? 'horizontal' : 'vertical'} aria-label={label} aria-valuenow={size} aria-valuemin={min} aria-valuemax={max} tabIndex={0}
       data-testid={testId} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onKeyDown={key} onDoubleClick={onToggle} />
   );
+}
+
+/* ───────────────────────── a part that failed ───────────────────────── */
+
+/** A part of the page that throws while drawing shows what went wrong in its place; the rest of the dashboard keeps working. */
+export class PartBoundary extends Component<{ name: string; children: ReactNode; /** A new value (the route) clears the failure. */ reset?: string }, { error: Error | null }> {
+  override state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  override componentDidCatch(error: Error) { console.error(`soundclaw: the ${this.props.name} failed`, error); }
+  override componentDidUpdate(prev: { reset?: string }) { if (prev.reset !== this.props.reset && this.state.error) this.setState({ error: null }); }
+  override render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="part-failed" role="alert" data-testid="part-failed" data-part={this.props.name}>
+        <b>The {this.props.name} failed to draw.</b> <span className="mono">{this.state.error.message}</span>{' '}
+        <button type="button" className="link-btn" onClick={() => this.setState({ error: null })}>Try again</button>
+      </div>
+    );
+  }
 }
 
 /* ───────────────────────── virtual list ───────────────────────── */

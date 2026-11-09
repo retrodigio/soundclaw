@@ -27,7 +27,7 @@
 :root, :root[data-theme='dark'] {
   --ground: #0B0C10; --panel: #121419; --raised: #181B22; --control: #20242D;
   --line: #2A2F3A; --line2: #3A4050;
-  --text: #ECEEF3; --text2: #A9AFBD; --text3: #858C9C;
+  --text: #ECEEF3; --text2: #A9AFBD; --text3: #8B92A2;
   --ember: #FF7A2F; --ember-text: #FF8A47; --on-ember: #0B0C10;
   --agent: #9F8BFF; --agent-text: #C9BEFF;
   --you: #4FD1C5; --you-text: #8FE6DD;
@@ -49,9 +49,9 @@
   --ground: #E9EBF0; --panel: #F6F7F9; --raised: #FFFFFF; --control: #EEF0F4;
   --line: #D5D9E1; --line2: #C3C8D2;
   --text: #14161C; --text2: #4A5162; --text3: #5A6172;
-  --ember: #E2560F; --ember-text: #B9440A; --on-ember: #14161C;
+  --ember: #E2560F; --ember-text: #A03A08; --on-ember: #14161C;
   --agent: #6B54E8; --agent-text: #4E37C9;
-  --you: #0E8F83; --you-text: #0B6F66;
+  --you: #0E8F83; --you-text: #0A635B;
   --pass: #138A55; --warn: #A86A00; --fail: #D22F43;
   /* the light theme's badge text is darker than the role colour so it reaches 4.5:1 on its tinted background */
   --pass-text: #0E6B42; --warn-text: #7A4D00; --fail-text: #A8202F;

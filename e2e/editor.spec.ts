@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures.ts';
+import { settledDrag } from './drag.ts';
 import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;
@@ -18,14 +19,7 @@ const rows = (page: Page) => page.locator('[data-testid=cmd-row]').evaluateAll((
 
 /** Drag a knob vertically: up by `up` pixels (negative: down), in small steps, and let go. */
 async function drag(page: Page, name: string, up: number): Promise<void> {
-  const dial = page.getByTestId(`knob-${name}`);
-  await dial.scrollIntoViewIfNeeded();
-  const box = (await dial.boundingBox())!;
-  const x = box.x + box.width / 2, y = box.y + box.height / 2;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x, y - up, { steps: 25 });
-  await page.mouse.up();
+  await settledDrag(page, page.getByTestId(`knob-${name}`), 0, -up, { steps: 25, settled: page.getByTestId('editor') });
 }
 
 const valueNow = (page: Page, name: string) => page.getByTestId(`knob-${name}`);
