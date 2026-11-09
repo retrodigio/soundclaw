@@ -154,7 +154,8 @@ test('the palette: ⌘K opens it, a sentence becomes a request on the focused it
   // a word finds an action with its shortcut
   await page.keyboard.press('Control+k');
   await page.getByTestId('palette-input').fill('density');
-  await expect(page.getByTestId('palette-row-view.density')).toContainText('⌘');
+  // The shortcut is shown with the platform's modifier: ⌘ on a Mac, Ctrl elsewhere.
+  await expect(page.getByTestId('palette-row-view.density')).toContainText(process.platform === 'darwin' ? '⌘' : 'Ctrl');
   await expect(page.getByTestId('palette-ask')).toHaveCount(0);
   // a sentence that matches no action is a request, and it names the item
   await page.getByTestId('palette-input').fill('make the beep brighter');
