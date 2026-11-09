@@ -37,6 +37,7 @@
   "files": [
     "dist/soundclaw.js",
     "dist/thumbs-worker.js",
+    "dist/decode-worker.js",
     "dist/ui/",
     "dist/skill/",
     "dist/LICENSE",

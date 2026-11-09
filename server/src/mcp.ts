@@ -6,14 +6,16 @@ import { existsSync, statSync } from 'node:fs';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { builtinInstruments, guideText, openRequests, scaleText } from '@soundclaw/core';
+
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
+import { gcApply, gcPlan, gcReport, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject } from './sampleimport.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { normalizePlan } from './normalize.ts';
 import { ProjectError } from './project.ts';
 import { formatErrors, plural, tapeEntryLines } from './report.ts';
-import { MCP_STEPS, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
+import { MCP_STEPS, agentName, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
 import { historyText, soundSummary } from './summary.ts';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
 import { readFileSync } from 'node:fs';
@@ -347,27 +349,55 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('sample', {
     title: 'Sample',
-    description: 'Samples for sample layers. import: copy a WAV file, or every .wav in a folder (PCM 8/16/24/32-bit or float, any rate, mixed to mono, at most 120 s each), into <project>/samples/ under a name (default: the file name); then `layer add <id> sample sample=<name> ...` uses it. list: the samples in the project.',
+    description: 'Samples: audio kept once by content in the project (samples/objects) and named on the history tape, with where it came from and its licence. import: a WAV, AIFF or FLAC file (OGG, MP3 and M4A through ffmpeg when it is installed), or every audio file in a folder (one undo group), under a name (default: the file name); channels are kept; licence defaults to unknown (set it: licence=CC0-1.0, CC-BY-4.0, own, ...); then `layer add <id> sample sample=<name> ...` plays it (side=stereo for both channels). list / show: the samples and everything about one (metadata, provenance, licence, who uses it). Change a sample with `run`: `sample set <name> licence=CC0-1.0 root=C4 tags=wood,door`, `sample rename <old> <new>`, `sample remove <name>` (the tape commands). gc: objects nothing references (a dry run unless apply; drop_history also drops those only undone or replaced states used, and lists the versions that stop rendering). upgrade: move a 0.1 project\'s samples/*.wav into the store.',
     inputSchema: z.object({
-      action: z.enum(['import', 'list']),
-      file: z.string().optional().describe('import: path of the WAV file'),
+      action: z.enum(['import', 'list', 'show', 'gc', 'upgrade']),
+      file: z.string().optional().describe('import: path of the audio file or folder'),
+      name: z.string().optional().describe('show: the sample'),
       as: z.string().optional().describe('import: the sample\'s name (letters, digits, _ and -; the case is kept)'),
+      licence: z.string().optional().describe('import: CC0-1.0, CC-BY-4.0, own, unknown (default), generated:<provider>:<plan>, proprietary:<note>'),
+      attribution: z.string().optional().describe('import: the attribution text a licence asks for'),
+      terms: z.string().optional().describe('import: a terms address'),
+      tags: z.string().optional().describe('import: comma-separated tags'),
+      source: z.enum(['file', 'library', 'recorded', 'generated', 'derived', 'bounce', 'instrument-import']).optional().describe('import: where the audio came from (default file)'),
+      origin: z.string().optional().describe('import: the origin to record (a file name or an address; default the file name)'),
+      note: z.string().optional().describe('import: a note'),
+      force: z.boolean().optional().describe('import: past the store\'s 1 GB limit'),
+      apply: z.boolean().optional().describe('gc: delete (default a dry run)'),
+      drop_history: z.boolean().optional().describe('gc: also drop objects only undone or replaced states used'),
+      by: z.string().optional().describe('the author on the tape (default agent:claude)'),
     }),
   }, (a) => w.enqueue(() => {
     try {
-      if (a.action === 'list') {
-        const list = w.samples.list();
-        return { content: [text(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, ${x.channels === 1 ? 'mono' : x.channels === 2 ? 'stereo' : `${x.channels} channels`}, sha256 ${x.sha256.slice(0, 12)}`).join('\n') : 'no samples')] };
+      if (a.action === 'list') return { content: [text(sampleListText(w))] };
+      if (a.action === 'show') return a.name ? { content: [text(sampleShowText(w, a.name))] } : fail('show needs name');
+      if (a.action === 'gc') {
+        const plan = gcPlan(w, !!a.drop_history);
+        if (a.apply) gcApply(w, plan);
+        return { content: [text(gcReport(plan, !!a.apply))] };
+      }
+      if (a.action === 'upgrade') {
+        const r = upgradeProject(w);
+        return { content: [text(`${r.moved.length ? `moved ${plural(r.moved.length, 'sample')} into the store (${r.moved.join(', ')}) as group ${r.group}` : 'nothing to upgrade'}${r.skipped.map((x) => `\nwarning: ${x}`).join('')}`)] };
       }
       if (!a.file) return fail('import needs file');
-      if (existsSync(a.file) && statSync(a.file).isDirectory()) {
-        const d = w.samples.importDir(a.file);
-        w.samplesChanged();
-        return { content: [text(`${[...d.imported.map((x) => sampleLine(x.info, x.created)), ...d.problems.map((x) => `warning: ${x}`)].join('\n')}\n${plural(d.imported.length, 'sample')} from ${a.file}`)] };
-      }
-      const r = w.samples.import(a.file, a.as);
-      w.samplesChanged();
-      return { content: [text(`${sampleLine(r.info, r.created)}\nsha256 ${r.info.sha256.slice(0, 12)}`)] };
+      const r = importPath(w, a.file, { ...(a.as ? { as: a.as } : {}), ...(a.licence ? { licence: a.licence } : {}), ...(a.attribution ? { attribution: a.attribution } : {}), ...(a.terms ? { terms: a.terms } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.source ? { source: a.source } : {}), ...(a.origin ? { origin: a.origin } : {}), ...(a.note ? { note: a.note } : {}), force: !!a.force, by: agentName(a.by) });
+      return { content: [text(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}`)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('licence', {
+    title: 'Licence check',
+    description: 'Where sounds, sets, songs, instruments and samples stand on licences: each item\'s worst state over every sample it reaches (shippable, attribution, unknown, blocked) and the samples behind it. Manifest exports (export with all, a set or pack) refuse items that reach a blocked or unknown licence unless allow_licence names it. The project\'s policy is project.json "licences": {"allow": [...], "block": [...]}; the default ships own, CC0-1.0, CC-BY-* (with ATTRIBUTION.txt) and generated audio from a paid plan, and blocks unknown, -NC, -ND and free-plan generated audio. SoundClaw records licences; it gives no legal advice.',
+    inputSchema: z.object({
+      ids: z.array(z.string()).optional().describe('Sounds, sets, songs, instruments or samples to check (default: every sound, instrument and song)'),
+      allow_licence: z.array(z.string()).optional().describe('Licence ids to let through in this check'),
+    }),
+  }, (a) => w.enqueue(() => {
+    try {
+      return { content: [text(licenceReportText(licenceCheck(w, a.ids ?? [], a.allow_licence ?? []), licencePolicyNote(w)))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -389,6 +419,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       out: z.string().optional().describe('The folder to write into'),
       pack: z.boolean().optional().describe('Pack layout: classic-marked sounds as synth.csv rows, the rest as audio, in one flat folder'),
       quality: z.number().min(-0.1).max(1).optional().describe('OGG quality'),
+      allow_licence: z.array(z.string()).optional().describe('Licence ids to let through a manifest export (all, set, pack) although the project\'s policy blocks them; written into the manifest'),
     }),
   }, (a) => w.enqueue(() => {
     try {
@@ -399,7 +430,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
         return { content: [text(names.map((id) => formatSongExport(exportSong(w, id, { format: f, loop: a.loop, stems: a.stems, loops: a.loops, stemsThroughMaster: a.stemsThroughMaster, pattern: a.pattern, out: a.out, quality: a.quality }))).join('\n'))] };
       }
       if (a.format === 'midi') return fail('error: midi is for songs');
-      return { content: [text(formatExportFiles(exportFormat(w, names, a.format ?? 'wav', { out: a.out, set: a.set, all: a.all, pack: a.pack, quality: a.quality })))] };
+      return { content: [text(formatExportFiles(exportFormat(w, names, a.format ?? 'wav', { out: a.out, set: a.set, all: a.all, pack: a.pack, quality: a.quality, allowLicence: a.allow_licence })))] };
     } catch (e) {
       return errorResult(e);
     }

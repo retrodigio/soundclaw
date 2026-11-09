@@ -9,7 +9,9 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
-import { HUMAN_RE, floatBytes, joinChannels, renderExact } from '@soundclaw/core';
+import { HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, renderExact, type SampleSource } from '@soundclaw/core';
+import { decodeInWorker } from './decode.ts';
+import { commitImports } from './sampleimport.ts';
 import { songJsonObject } from './songs.ts';
 import { reviewOf } from './changes.ts';
 import { ProjectError } from './project.ts';
@@ -131,7 +133,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi', 'upgrade'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   o.writer.samples.list(); // the samples' hashes are worked out (or read from the cache) now, not when the first page connects
@@ -220,6 +222,27 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       }).catch((e: unknown) => json(res, e instanceof ProjectError || e instanceof SyntaxError ? 400 : 500, { error: (e as Error).message }));
       return;
     }
+    if (url.pathname === '/api/samples/import' && req.method === 'POST') {
+      // An uploaded audio file: the body is the file's bytes; ?name= is its file name, ?as=, licence=, ... as `sample import` takes them, ?by=human:<name> the author.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      const q = url.searchParams;
+      const by = q.get('by') ?? '';
+      if (!HUMAN_RE.test(by)) { json(res, 400, { error: 'by is human:<name> (letters, digits, . _ -)' }); return; }
+      const tooBig = Number(req.headers['content-length'] ?? 0) > SAMPLE_LIMITS.maxFileBytes;
+      if (tooBig) { json(res, 413, { error: `the file is larger than ${SAMPLE_LIMITS.maxFileBytes / 1048576} MB` }); req.destroy(); return; }
+      const opt = (k: string): string | undefined => q.get(k) ?? undefined;
+      // a file name from a page: only the last part, no path
+      const filename = (q.get('name') ?? 'upload.wav').replace(/^.*[\\/]/, '').slice(0, 120) || 'upload.wav';
+      readBody(req, SAMPLE_LIMITS.maxFileBytes).then(async (b) => {
+        const options = { as: opt('as'), licence: opt('licence'), attribution: opt('attribution'), terms: opt('terms'), tags: opt('tags'), source: opt('source') as SampleSource | undefined, origin: opt('origin'), note: opt('note') };
+        const clean = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined));
+        const prepared = await decodeInWorker({ bytes: new Uint8Array(b), filename, options: clean });
+        const r = await o.writer.enqueue(() => commitImports(o.writer, [prepared], { by, force: false }));
+        if (r.problems.length && !r.items.length) throw new ProjectError(r.problems[0]!);
+        json(res, 200, { group: r.group, items: r.items.map((x) => ({ name: x.info.name, hash: x.info.sha256, created: x.created, notes: x.notes, sameAs: x.sameAs })), warnings: r.warnings });
+      }).catch((e: unknown) => json(res, e instanceof ProjectError ? 400 : 500, { error: (e as Error).message }));
+      return;
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, HEADERS).end();
       return;
@@ -306,6 +329,16 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
     if (url.pathname === '/api/samples') {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       json(res, 200, o.writer.samples.list());
+      return;
+    }
+    // Audio by its hash: the bytes never change, so a page may keep them for ever.
+    const om = /^\/api\/sample-object\/([0-9a-f]{64})$/.exec(url.pathname);
+    if (om) {
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      const bytes = o.writer.samples.objectBytes2(om[1]!);
+      if (!bytes) { json(res, 404, { error: `no sample object ${om[1]!.slice(0, 12)}` }); return; }
+      res.writeHead(200, { ...HEADERS, 'Content-Type': 'audio/wav', 'Cache-Control': 'private, max-age=31536000, immutable', ETag: `"${om[1]}"` });
+      res.end(Buffer.from(bytes));
       return;
     }
     const sm = /^\/api\/samples\/([A-Za-z0-9][A-Za-z0-9_-]*)\.wav$/.exec(url.pathname);

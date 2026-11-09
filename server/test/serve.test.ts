@@ -4,7 +4,7 @@
 import type { ClassicSound } from '@soundclaw/core';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { request } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PassThrough } from 'node:stream';
@@ -13,6 +13,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { decodeWav, floatsFromBytes, newSound, renderSound, samplesHash, type Sound } from '@soundclaw/core';
 import { LOCK_FILE, tokenFilePath } from '../src/index.ts';
+import { channelInts, flacBytes, makeAudio, wavBytes } from '../../core/test/audio-fixtures.ts';
 import { BIN, until } from './helpers.ts';
 
 let root: string;
@@ -188,6 +189,27 @@ describe('the server process', () => {
     ws.close();
   });
 
+  it('sample commands go through the server: an import, a change and a gc --apply from another process, and an upload from a page', async () => {
+    const s = await startServe();
+    const wav = join(root, 'kick drum.wav');
+    writeFileSync(wav, wavBytes(makeAudio('pcm16', 2, 2000, 44100, 6)));
+    const imp = await cli(['sample', 'import', dir, wav, 'licence=CC0-1.0', 'tags=drum']);
+    expect(imp.err).toBe('');
+    expect(imp.out).toMatch(/^imported sample kick_drum: 0\.045 s, 44100 Hz, pcm16, stereo/);
+    expect((await cli(['sample', 'set', dir, 'kick_drum', 'root=C2', 'note=a test kick'])).code).toBe(0);
+    const get = async (path: string) => (await fetch(`http://127.0.0.1:${s.port}${path}?token=${s.token}`)).json();
+    expect(await get('/api/samples')).toMatchObject([{ name: 'kick_drum', licence: 'CC0-1.0', licenceState: 'shippable', root: 'C2', tags: ['drum'] }]);
+    // a page's upload, through the worker thread, is a human's command
+    const up = await fetch(`http://127.0.0.1:${s.port}/api/samples/import?token=${s.token}&by=human:ana&name=snare.flac`, { method: 'POST', body: flacBytes([channelInts(makeAudio('pcm16', 1, 1500, 44100, 7), 0)], 16, 44100) });
+    expect(up.status).toBe(200);
+    const tape = readFileSync(join(dir, 'history.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { by?: string; cmd?: string });
+    expect(tape.filter((e) => e.cmd?.startsWith('sample add')).map((e) => e.by)).toEqual(['agent:claude', 'human:ana']);
+    expect((await cli(['sample', 'gc', dir, '--apply'])).out).toMatch(/nothing to remove/);
+    // read-only verbs work against the files while it runs
+    expect((await cli(['sample', 'list', dir])).out).toMatch(/^kick_drum: .*root C2.*\nsnare: /);
+    expect((await cli(['licence', 'check', dir])).out).toMatch(/0 items|no sounds/);
+  });
+
   it('a CLI call that cannot reach the server writes nothing behind its back', async () => {
     await startServe();
     // Hide the token file: the folder is locked but the token cannot be read.
@@ -221,7 +243,7 @@ describe('MCP over stdio', () => {
   it('lists the tools, runs commands, reports numbers, reads the history, renders and exports', async () => {
     const m = await connect();
     const tools = (await client!.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'history', 'import', 'measure', 'midi', 'normalize', 'project', 'render', 'request', 'run', 'sample', 'scale', 'style', 'view', 'work']);
+    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'history', 'import', 'licence', 'measure', 'midi', 'normalize', 'project', 'render', 'request', 'run', 'sample', 'scale', 'style', 'view', 'work']);
     expect((await m.call('project')).text).toMatch(/sounds: none yet/);
     const r = await m.call('run', { commands: 'sound new beep\nsound set beep frequency=880 volume=0.4' });
     expect(r.isError).toBe(false);

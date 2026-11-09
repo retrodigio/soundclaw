@@ -2,11 +2,11 @@
 // renders through the cache, numbers and checks (harsh, from the project style), export (WAV
 // only, the limiter, notes), the layers view, undo, and the classic mark.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { decodeWav, encodeWav, parse, renderChannels, samplesHash, joinChannels } from '@soundclaw/core';
-import { Writer, checkText, collectChanges, describeText, exportFormat, formatExportFiles, loadProject, soundSummary, viewSound } from '../src/index.ts';
+import { Writer, importPath, checkText, collectChanges, describeText, exportFormat, formatExportFiles, loadProject, soundSummary, viewSound } from '../src/index.ts';
 import { fixture, type Fixture } from './helpers.ts';
 
 let f: Fixture;
@@ -24,21 +24,29 @@ function wavFile(name: string, frames = 4000, rate = 22050): string {
   return file;
 }
 
+/** Import one file the way `soundclaw sample import` does. */
+const imp = (file: string, as?: string) => importPath(f.w, file, { ...(as ? { as } : {}), by: claude });
+const impOne = (file: string, as?: string) => imp(file, as).items[0]!;
+
 describe('samples', () => {
-  it('imports a WAV into samples/, by file name or as=<name>, and lists it', () => {
+  it('imports a WAV into the store, by file name or as=<name>, and lists it', () => {
     const file = wavFile('Thump Hit.wav');
-    const r = f.w.samples.import(file);
+    const r = impOne(file);
     expect(r.info.name).toBe('Thump_Hit'); // the case of the file name is kept, as a sound id's is
     expect(r.created).toBe(true);
-    expect(readFileSync(join(f.dir, 'samples', 'Thump_Hit.wav')).length).toBe(readFileSync(file).length);
-    expect(f.w.samples.import(file, 'other').info.name).toBe('other');
+    // the audio is in samples/objects/<first two hex>/<hash>.wav; the name is on the tape
+    expect(readFileSync(join(f.dir, 'samples', 'objects', r.info.sha256.slice(0, 2), `${r.info.sha256}.wav`)).length).toBe(r.info.bytes);
+    expect(f.w.tape().at(-1)!.cmd).toMatch(/^sample add Thump_Hit hash=[0-9a-f]{64} rate=22050 channels=1 frames=4000 format=pcm16/);
+    expect(impOne(file, 'other').info.name).toBe('other');
     expect(f.w.samples.list().map((s) => s.name)).toEqual(['other', 'Thump_Hit']);
     expect(f.w.samples.info('other')).toMatchObject({ rate: 22050, frames: 4000 });
     expect(f.w.snapshot().samples.map((s) => s.name)).toEqual(['other', 'Thump_Hit']);
+    // two names, one object
+    expect(readdirSync(join(f.dir, 'samples', 'objects', r.info.sha256.slice(0, 2)))).toHaveLength(1);
   });
   it('keeps the case of a name: a layer finds it by exactly that name, and a name that differs only in case is refused', () => {
     const a = wavFile('a.wav');
-    f.w.samples.import(a, 'BigBoom');
+    impOne(a, 'BigBoom');
     expect(f.w.samples.list().map((s) => s.name)).toEqual(['BigBoom']);
     expect(f.w.samples.get('BigBoom')).toBeDefined();
     expect(f.w.samples.get('bigboom')).toBeUndefined();
@@ -46,39 +54,46 @@ describe('samples', () => {
     expect(fail('layer add s sample sample=bigboom')).toMatch(/names sample 'bigboom', which is not in the project/);
     run('layer add s sample sample=BigBoom');
     expect(f.w.render('s').samples.length).toBeGreaterThan(3000);
-    expect(f.w.samples.import(a, 'BigBoom').created).toBe(false);
-    expect(() => f.w.samples.import(wavFile('b.wav', 3000), 'bigboom')).toThrow(/clashes with the sample 'BigBoom'.*ignoring case/);
-    expect(() => f.w.samples.import(a, 'BIGBOOM')).toThrow(/clashes with the sample 'BigBoom'/);
+    expect(impOne(a, 'BigBoom').created).toBe(false);
+    expect(() => imp(wavFile('b.wav', 3000), 'bigboom')).toThrow(/clashes with the sample 'BigBoom'.*ignoring case/);
+    expect(() => imp(a, 'BIGBOOM')).toThrow(/clashes with the sample 'BigBoom'/);
     expect(f.w.samples.list()).toHaveLength(1);
   });
-  it('the same file again is a no-op; another file under the same name is refused; bad names and non-WAVs are refused with a reason', () => {
+  it('the same file again is a no-op; another file under the same name is refused; bad names and non-audio files are refused with a reason', () => {
     const a = wavFile('a.wav');
-    f.w.samples.import(a, 'x');
-    expect(f.w.samples.import(a, 'x').created).toBe(false);
-    expect(() => f.w.samples.import(wavFile('b.wav', 3000), 'x')).toThrow(/exists with other content/);
-    expect(() => f.w.samples.import(a, 'Bad Name')).toThrow(/not a sample name/);
+    impOne(a, 'x');
+    const tape = f.w.tape().length;
+    expect(impOne(a, 'x').created).toBe(false);
+    expect(f.w.tape().length).toBe(tape);
+    expect(() => imp(wavFile('b.wav', 3000), 'x')).toThrow(/exists with other audio/);
+    expect(() => imp(a, 'Bad Name')).toThrow(/not a sample name/);
     writeFileSync(join(f.root, 'junk.wav'), 'not a wav at all, really');
-    expect(() => f.w.samples.import(join(f.root, 'junk.wav'), 'junk')).toThrow(/not a WAV/);
-    expect(() => f.w.samples.import(join(f.root, 'nope.wav'))).toThrow(/no file/);
+    expect(() => imp(join(f.root, 'junk.wav'), 'junk')).toThrow(/not a WAV, AIFF or FLAC/);
+    expect(() => imp(join(f.root, 'nope.wav'))).toThrow(/no file/);
   });
   it('a sample layer must name a sample in the project: the batch is refused, nothing is written', () => {
     run('sound new s voice=layered');
     const before = f.w.tape().length;
-    expect(fail('layer add s sample sample=ghost')).toMatch(/names sample 'ghost', which is not in the project \(sample import/);
+    expect(fail('layer add s sample sample=ghost')).toMatch(/names sample 'ghost', which is not in the project \(soundclaw sample import/);
     expect(fail('layer add s sample')).toMatch(/has no sample/);
     expect(f.w.tape().length).toBe(before);
-    f.w.samples.import(wavFile('ghost.wav'), 'ghost');
+    impOne(wavFile('ghost.wav'), 'ghost');
     run('layer add s sample sample=ghost');
     expect(f.w.render('s').samples.length).toBeGreaterThan(3000);
   });
-  it('the render follows the sample: a changed file renders again (the key has its hash)', () => {
-    f.w.samples.import(wavFile('a.wav'), 'a');
+  it('the render follows the sample: pointing the name at other audio renders again, and undo brings the old audio back', () => {
+    impOne(wavFile('a.wav'), 'a');
     run('sound new s voice=layered; layer add s sample sample=a');
     const first = f.w.render('s');
-    writeFileSync(join(f.dir, 'samples', 'a.wav'), encodeWav(Float32Array.from({ length: 3000 }, (_, i) => Math.sin(i * 0.3) * 0.5), 22050));
-    const second = f.w.render('s');
-    expect(second.key).not.toBe(first.key);
-    expect(second.samples.length).not.toBe(first.samples.length);
+    const second = impOne((() => { const file = join(f.root, 'c.wav'); writeFileSync(file, encodeWav(Float32Array.from({ length: 3000 }, (_, i) => Math.sin(i * 0.3) * 0.5), 22050)); return file; })(), 'c');
+    run(`sample set a hash=${second.info.sha256} rate=22050 channels=1 frames=3000 format=pcm16`);
+    const changed = f.w.render('s');
+    expect(changed.key).not.toBe(first.key);
+    expect(changed.samples.length).not.toBe(first.samples.length);
+    run('undo');
+    const back = f.w.render('s');
+    expect(back.key).toBe(first.key);
+    expect(samplesHash(back.samples)).toBe(samplesHash(first.samples));
   });
 });
 

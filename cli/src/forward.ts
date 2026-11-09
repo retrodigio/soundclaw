@@ -42,7 +42,7 @@ function writes(cmd: string, p: ReturnType<typeof parseArgs>): boolean {
   switch (cmd) {
     case 'request': return p.pos.length >= 2;
     case 'work': return p.pos[1] !== undefined;
-    case 'sample': return p.pos[0] === 'import';
+    case 'sample': return ['import', 'add', 'set', 'rename', 'remove'].includes(p.pos[0] ?? '') || (p.pos[0] === 'gc' && p.flags.has('apply'));
     case 'midi': return p.pos[0] === 'import';
     default: return true;
   }

@@ -9,7 +9,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { TAPE_FORMAT, formatPattern, parseTape, serializeInstrument, serializeSet, serializeSong, serializeSound, tapeHeader, tapeToJsonl, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
+import { TAPE_FORMAT, formatPattern, serializeSample, parseTape, serializeInstrument, serializeSet, serializeSong, serializeSound, tapeHeader, tapeToJsonl, type Library, type Sound, type TapeEntry } from '@soundclaw/core';
 
 export const PROJECT_FORMAT = 'soundclaw-project';
 export const HISTORY_FILE = 'history.jsonl';
@@ -22,6 +22,8 @@ export interface ProjectJson {
   name: string;
   /** What the checks are held to (core's Style keys: loudnessTarget, loudnessTolerance, truePeakMax, dcMax, clickMax, silenceMax, tailFloorDb); the defaults for any left out. */
   style?: Record<string, number>;
+  /** Which licences may ship: patterns over licence ids (`*` matches anything). `block` is looked at first; what a list leaves out keeps its default (see `licence check`). */
+  licences?: { allow?: string[]; block?: string[] };
 }
 
 export class ProjectError extends Error {}
@@ -111,6 +113,22 @@ export function writeSets(p: Project, lib: Library, before: Library): void {
     const prev = before.sets.get(id);
     if (prev && serializeSet(prev) === text && existsSync(setFile(p, id))) continue;
     writeFileSync(setFile(p, id), text);
+  }
+}
+
+export const sampleFile = (p: Project, name: string): string => join(p.dir, 'samples', `${name}.sample`);
+
+/** Make samples/ hold a <name>.sample for each sample the tape names (the audio is in samples/objects; these are for reading and diffs). */
+export function writeSamples(p: Project, lib: Library, before: Library): void {
+  if (!lib.samples.size && !before.samples.size) return;
+  mkdirSync(join(p.dir, 'samples'), { recursive: true });
+  // remove first: a rename that only changes case is one file on a case-insensitive disk
+  for (const n of before.samples.keys()) if (!lib.samples.has(n)) rmSync(sampleFile(p, n), { force: true });
+  for (const [n, e] of lib.samples) {
+    const text = serializeSample(e);
+    const prev = before.samples.get(n);
+    if (prev && serializeSample(prev) === text && existsSync(sampleFile(p, n))) continue;
+    writeFileSync(sampleFile(p, n), text);
   }
 }
 

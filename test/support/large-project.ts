@@ -5,7 +5,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { encodeWavChannels } from '../../core/src/wav.ts';
-import { Writer, createProject } from '../../server/src/index.ts';
+import { Writer, createProject, importPath } from '../../server/src/index.ts';
 
 export interface LargeOptions {
   sounds?: number;
@@ -60,10 +60,12 @@ export function buildLargeProject(dir: string, o: LargeOptions = {}): LargeProje
     const name = `S${String(i).padStart(3, '0')}${stereo ? '_st' : ''}`;
     const file = join(tmp, `${name}.wav`);
     writeFileSync(file, encodeWavChannels(sampleAudio(i, long ? 30 : 0.3 + (i % 7) * 0.2, stereo)));
-    w.samples.import(file, name);
     samples.push(name);
   }
-  w.samplesChanged();
+  // one folder, one undo group
+  const imported = importPath(w, tmp, { by });
+  if (imported.problems.length) throw new Error(imported.problems.join('\n'));
+  commands += imported.items.length; // each name is a line on the tape
   const ids: string[] = [];
   const nClassic = Math.round(nSounds / 4);
   for (let i = 0; i < nSounds; i++) {

@@ -5,19 +5,20 @@ import { parentPort, workerData } from 'node:worker_threads';
 import type { Sound, Style } from '@soundclaw/core';
 import { CardFiles, buildCard } from './card.ts';
 import { RenderCache } from './cache.ts';
-import { SampleStore } from './samples.ts';
+import { MapBank, ObjectStore } from './samples.ts';
 
-export interface CardJob { n: number; sound: Sound; key: string; style: Style; basis: string }
+/** `samples`: the audio the sound's sample layers name, by name and hash (a 0.1.x file by its path). */
+export interface CardJob { n: number; sound: Sound; key: string; style: Style; basis: string; samples: { name: string; hash: string; file?: string }[] }
 
 const dir = (workerData as { dir: string }).dir;
-const samples = new SampleStore(dir);
+const objects = new ObjectStore(dir);
 const renders = new RenderCache(dir);
 const files = new CardFiles(dir);
 
 parentPort!.on('message', (job: CardJob) => {
   try {
     const hit = files.read(job.key);
-    const card = hit ?? buildCard(job.sound, renders.render(job.sound, samples).channels, { key: job.key, style: job.style, basis: job.basis });
+    const card = hit ?? buildCard(job.sound, renders.render(job.sound, new MapBank(objects, (n) => job.samples.find((x) => x.name === n))).channels, { key: job.key, style: job.style, basis: job.basis });
     if (!hit) files.write(card);
     parentPort!.postMessage({ n: job.n, card });
   } catch (e) {

@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import type { Sound } from '@soundclaw/core';
+import { soundSamples, type Sound } from '@soundclaw/core';
 import { CardFiles, buildCard, liteOf } from './card.ts';
 import type { CardJob } from './thumbs-worker.ts';
 import type { CardInfo, CardLite } from './protocol.ts';
@@ -85,7 +85,7 @@ export class Thumbs {
     if (have) return Promise.resolve(have);
     let job = this.pending.get(spec.key);
     if (!job) {
-      job = { key: spec.key, ids: new Set(), job: { sound: s, key: spec.key, style: spec.style, basis: spec.basis }, high: urgent, waiters: [] };
+      job = { key: spec.key, ids: new Set(), job: { sound: s, key: spec.key, style: spec.style, basis: spec.basis, samples: this.w.samples.refs(soundSamples(s)) }, high: urgent, waiters: [] };
       this.pending.set(spec.key, job);
       (urgent ? this.high : this.low).push(job);
     } else if (urgent && !job.high) {

@@ -209,8 +209,8 @@ export function collectChanges(w: Writer, o: ChangesOptions): ChangesResult {
       const kind = !a ? 'new' : !b ? 'removed' : 'edited';
       const sc: SoundChange = { id, kind, params: paramLines(a, b), numbers: [], view: null };
       if (a && b) {
-        const ra = w.cache.render(a);
-        const rb = w.cache.render(b);
+        const ra = w.cache.render(a, w.samples.bankFor(before));
+        const rb = w.cache.render(b, w.samples.bankFor(after));
         const ma = w.measureSound(a, ra);
         const mb = w.measureSound(b, rb);
         const A = ma.analysis;
@@ -288,9 +288,10 @@ export function changesText(w: Writer, o: ChangesOptions): string {
 
 const checksOf = (cs: CheckResult[]): ReviewCheck[] => cs.map((c) => ({ name: c.name, pass: c.pass, value: c.value, at: TIMED_CHECKS.includes(c.name) ? c.ranges.map((r) => Math.round(r.from * 1000) / 1000) : [] }));
 
-function sideOf(w: Writer, s: Sound | undefined): ReviewSide | null {
+function sideOf(w: Writer, s: Sound | undefined, lib: Library): ReviewSide | null {
   if (!s) return null;
-  const r = w.cache.render(s, w.samples);
+  // the audio the sample names stood for at that point of the tape
+  const r = w.cache.render(s, w.samples.bankFor(lib));
   const m = w.measureSound(s, r);
   return { sound: s, checks: checksOf(m.checks), lufs: Number.isFinite(m.analysis.lufs) ? m.analysis.lufs : null, truePeakDb: Number.isFinite(m.analysis.truePeakDb) ? m.analysis.truePeakDb : null, duration: m.analysis.duration, centroid: m.analysis.centroid.mean || null };
 }
@@ -348,7 +349,7 @@ export function reviewOf(w: Writer, o: { request?: string; group?: string }): Re
   const now = libraryAt(entries, entries.reduce((n, e) => Math.max(n, e.seq), 0));
   const isSong = after.songs.has(item) || before.songs.has(item);
   const a = isSong ? undefined : before.get(item), b = isSong ? undefined : after.get(item);
-  const A = sideOf(w, a), B = sideOf(w, b);
+  const A = sideOf(w, a, before), B = sideOf(w, b, after);
   const rows: ReviewRow[] = [];
   if (A && B) {
     const fmt = (v: number | null, d: number, unit: string) => (v === null ? '−∞' : `${v.toFixed(d)} ${unit}`);

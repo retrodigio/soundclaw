@@ -437,10 +437,16 @@ export function exportSong(w: Writer, id: string, o: SongExportOptions): SongExp
     if (loops > 1 && o.stems && !loopRegion) throw new ProjectError(`${id} has no loop region, so --loops ${loops} has nothing to repeat for its stems (song loop ${id} <from>..<to>)`);
   }
   mkdirSync(dir, { recursive: true });
+  // a song that reaches an unknown or blocked licence exports with a warning (it is a single-file export; a manifest export would refuse it)
+  const lic = o.format === 'midi' ? null : w.itemLicence('song', id);
+  const licNote = lic && (lic.state === 'blocked' || lic.state === 'unknown')
+    ? `${id}: ${lic.state} licence (${[...new Set(lic.samples.filter((x) => x.state === 'blocked' || x.state === 'unknown').map((x) => `${x.name} ${x.licence.id}`))].join(', ')}); set it with sample set <name> licence=<id>`
+    : null;
   const put = (name: string, bytes: Uint8Array, seconds: number, kind: string, notes?: string[]): void => {
     const file = join(dir, name);
     writeFileSync(file, bytes);
-    files.push({ file, bytes: bytes.length, seconds, kind, ...(notes?.length ? { notes } : {}) });
+    const all = [...(notes ?? []), ...(licNote ? [licNote] : [])];
+    files.push({ file, bytes: bytes.length, seconds, kind, ...(all.length ? { notes: all } : {}) });
   };
   if (o.format === 'midi') {
     const bytes = songToMidi(song, o.pattern);

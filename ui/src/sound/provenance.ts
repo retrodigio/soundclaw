@@ -5,7 +5,7 @@
 // sound as it stood after each group that changed it: the versions a set's clip grid shows (the
 // replay only applies commands; nothing is measured in it). Pure functions, no DOM.
 
-import { CLASSIC_KEYS, Library, applyCommand, cloneSound, effectiveEntries, parse, renderKey, type Fx, type Layer, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { CLASSIC_KEYS, Library, applyCommand, cloneSound, effectiveEntries, parse, renderKey, soundSamples, type Fx, type Layer, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 
 /** The latest group to change something, and what it was before. */
 export interface Trail {
@@ -20,7 +20,13 @@ export interface Trail {
 }
 
 /** The sound as it stood after one group that changed it: `seq` is the group's last tape entry. */
-export interface Snapshot { seq: number; group: string; by: string; at?: string; doc: Sound; /** Its render key (the samples a sample layer names are not hashed in: they do not change on the tape). */ key: string }
+export interface Snapshot {
+  seq: number; group: string; by: string; at?: string; doc: Sound;
+  /** The audio each sample the sound plays stood for at that point of the tape (a name can be pointed at other audio later). */
+  samples: { name: string; sha256: string }[];
+  /** Its render key, the samples' hashes included. */
+  key: string;
+}
 
 /** One group that changed the sound. */
 export interface GroupInfo { group: string; by: string; at?: string; seq: number; cmds: string[]; kinds: string[] }
@@ -73,6 +79,7 @@ export function provenanceOf(tape: readonly TapeEntry[], id: string): Provenance
   let cur: string | null = null;
   let curEntries: TapeEntry[] = [];
   let prevDoc: Sound | undefined;
+  let prevSig = '';
   let seenId = false;
   let lastGroupBefore: Sound | null = null;
 
@@ -82,7 +89,10 @@ export function provenanceOf(tape: readonly TapeEntry[], id: string): Provenance
     const first = curEntries[0]!;
     const by = first.by;
     const base = { seq: curEntries.at(-1)!.seq, group: cur, by, ...(first.at ? { at: first.at } : {}) };
-    const touched = json(prevDoc) !== json(now);
+    const samples = now ? soundSamples(now).map((name) => ({ name, sha256: lib.samples.get(name)?.hash ?? 'none' })) : [];
+    const sig = json(samples);
+    // pointing a name at other audio changes what the sound is, though none of its own lines did
+    const touched = json(prevDoc) !== json(now) || (!!now && sig !== prevSig);
     // a person approving the sound
     const approves = !isAgent(by) && curEntries.some((e) => new RegExp(`^sound mark ${id} approved`).test(e.cmd));
     if (approves) out.approvedAfter = base.seq;
@@ -91,9 +101,9 @@ export function provenanceOf(tape: readonly TapeEntry[], id: string): Provenance
       const cmds = curEntries.map((e) => e.cmd).filter((c) => c.split(/\s+/).slice(0, 4).includes(id));
       out.groups.push({ group: cur, by, ...(first.at ? { at: first.at } : {}), seq: base.seq, cmds, kinds: [] });
       // a group that changed only words or a status (a mark, a moment, a class) leaves the version as it was
-      const key = renderKey(now);
-      if (out.snapshots.at(-1)?.key !== key) out.snapshots.push({ seq: base.seq, group: cur, by, ...(first.at ? { at: first.at } : {}), doc: cloneSound(now), key });
-      else out.snapshots[out.snapshots.length - 1]!.doc = cloneSound(now);
+      const key = renderKey(now, (n) => lib.samples.get(n)?.hash ?? 'none');
+      if (out.snapshots.at(-1)?.key !== key) out.snapshots.push({ seq: base.seq, group: cur, by, ...(first.at ? { at: first.at } : {}), doc: cloneSound(now), samples, key });
+      else { const last = out.snapshots[out.snapshots.length - 1]!; last.doc = cloneSound(now); last.samples = samples; }
       if (before) {
         if (now.voice === 'classic' && before.voice === 'classic') {
           for (const k of changedClassic(before, now)) {
@@ -117,11 +127,17 @@ export function provenanceOf(tape: readonly TapeEntry[], id: string): Provenance
     }
     if (approves) out.beforeAgent = null;
     prevDoc = now ? cloneSound(now) : undefined;
+    prevSig = sig;
     curEntries = [];
   };
 
   for (const e of effectiveEntries(tape)) {
-    if (cur !== e.group) { closeGroup(); cur = e.group; prevDoc = lib.get(id) ? cloneSound(lib.get(id)!) : undefined; }
+    if (cur !== e.group) {
+      closeGroup();
+      cur = e.group;
+      prevDoc = lib.get(id) ? cloneSound(lib.get(id)!) : undefined;
+      prevSig = prevDoc ? json(soundSamples(prevDoc).map((name) => ({ name, sha256: lib.samples.get(name)?.hash ?? 'none' }))) : '';
+    }
     curEntries.push(e);
     const p = parse(e.cmd);
     if (p.errors.length || p.commands.length !== 1) continue;

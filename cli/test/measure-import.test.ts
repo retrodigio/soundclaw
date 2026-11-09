@@ -191,11 +191,12 @@ describe('the rest of the output', () => {
     expect(r.out).toMatch(/imported sample Hit_One: 0.100 s/);
     expect(r.out).toMatch(/imported sample hit-two/);
     expect(r.out).toMatch(/warning: broken.wav:/);
-    expect(r.out).toMatch(/2 samples from/);
+    expect(r.out).toMatch(/2 samples as group g\d+/);
     expect(sc(['sample', 'list', proj]).out.split('\n').filter(Boolean)).toHaveLength(2);
     expect(sc(['sample', 'import', proj, dir]).out).toMatch(/already in the project: sample Hit_One/);
     expect(sc(['sample', 'import', proj, dir, 'as=x']).err).toMatch(/names one file/);
-    expect(readdirSync(join(proj, 'samples')).sort()).toEqual(['Hit_One.wav', 'hit-two.wav']);
+    // the audio is in the store, the names are .sample files written from the tape
+    expect(readdirSync(join(proj, 'samples')).sort()).toEqual(['Hit_One.sample', 'hit-two.sample', 'objects']);
   });
 
   it('--help lists the new commands', () => {

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, type ViewKind } from '@soundclaw/core';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
-  EXPORT_FORMATS, sampleLine, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
@@ -145,23 +145,45 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       (Bfxr's compression, harmonics, bit crush, its extra waves). One undo group. Warnings first, then a summary
       (exact rows are listed only for a few sounds); --quiet prints just the warnings and the summary line;
       --classic marks every imported sound classic (it stays one classic voice and exports as a synth.csv row).
-  soundclaw sample import <project> <file.wav | folder> [as=<name>]
+  soundclaw sample import <project> <file | folder> [as=<name>] [licence=<id>] [attribution="<text>"] [terms=<url>] [tags=a,b] [source=<kind>] [origin="<where from>"] [note="<text>"] [--force]
   soundclaw sample list <project>
-      Copy a WAV (PCM 8/16/24/32-bit or float, any rate, at most 120 s) into <project>/samples/ so a
-      sample layer can name it (layer add <id> sample sample=<name>). A folder: every .wav in it (as= does
-      not apply). The name defaults to the file's name, its case kept (names are unique ignoring case). A name
-      that exists with other content is refused (in a folder, reported and the others still go in). A file at
-      a rate other than 44,100 Hz is converted by a windowed sinc, and the import says so. A layer plays a
-      stereo file as the mix of its channels, or one side of it (side=left, side=right): the whole file in
-      stereo is two layers, side=left pan=-1 and side=right pan=1.
-  soundclaw export <project> [<id>...] [--all | --set <set>] [--format wav|ogg|patch|csv] [--to <dir>] [--pack] [--quality <q>]
+  soundclaw sample show <project> <name>
+  soundclaw sample add|set <project> <name> <field>=<value>...   |   sample rename <project> <name> <new>   |   sample remove <project> <name>
+  soundclaw sample gc <project> [--apply] [--drop-history]
+  soundclaw sample git-lfs
+      Samples: audio kept once, by content, in <project>/samples/objects/, and named on the history tape
+      (sample add <name> hash=...) with its provenance and licence. import reads WAV, AIFF/AIFF-C and FLAC
+      itself, and OGG, MP3 and M4A through ffmpeg when it is installed; channels are kept (a layer plays the
+      mix, side=left, side=right, or side=stereo); the root note, loop, one-shot flag and cue points a file
+      carries are read and printed. A folder is one undo group. The name defaults to the file's name (case
+      kept). The same audio under a second name adds the name, not a second copy. licence= is an SPDX id
+      (CC0-1.0, CC-BY-4.0), own, unknown (the default), generated:<provider>:<plan> or proprietary:<note>; the
+      tool never guesses one. Limits (600 s and 200 MB a file, 8-192 kHz, 1-8 channels, 120 s played, the
+      store warns at 250 MB and refuses past 1 GB without --force) are printed when hit. set changes fields
+      (root= tune= loop= loopmode= slices= tags= gain= note= licence= attribution= terms=; <field>=none
+      clears; hash= with rate, channels, frames and format points the name at other audio, and undo brings
+      the old audio back). remove is refused while a sound or instrument plays it. gc lists objects nothing
+      on the tape names (--apply deletes them; --drop-history also those only undone or replaced states
+      used, after listing the versions that then stop rendering). git-lfs prints .gitattributes lines.
+  soundclaw upgrade <project>
+      Move a 0.1 project's samples/<name>.wav files into the store as one group by system:upgrade; renders are
+      unchanged. Such files work without it.
+  soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
+      Where sounds, sets, songs, instruments and samples stand on licences: shippable, attribution, unknown or
+      blocked, and the samples behind each verdict. project.json "licences": {"allow": [...], "block": [...]} sets
+      the policy; the default ships own, CC0-1.0, CC-BY-* and generated audio from a paid plan and blocks unknown,
+      -NC, -ND and free-plan generated audio. SoundClaw records licences; it gives no legal advice.
+  soundclaw export <project> [<id>...] [--all | --set <set>] [--format wav|ogg|patch|csv] [--to <dir>] [--pack] [--quality <q>] [--allow-licence <id>]...
       Default wav: 16-bit PCM, 44,100 Hz (classic sounds as pre-rendered WAVs, trunc(s*32000), mono;
       layered sounds through a limiter at the style's true-peak ceiling, mono or stereo). ogg: Vorbis,
       variable bitrate (--quality -0.1 to 1, default 0.4). With --all, --set, --pack or ogg, manifest.json
       is written beside the files: id, file, duration, loudness, channels, loop points, set. patch: <id>.sfxr single-patch
       text; csv: one synth.csv. Without ids (or with --all), every sound; --set exports a set's members.
       --pack: a flat folder where sounds marked classic become rows of one synth.csv instead of
-      audio files. --to (or --out) names the folder (default <project>/exports/).
+      audio files. --to (or --out) names the folder (default <project>/exports/). A manifest export (--all,
+      --set, --pack) lists the samples used and writes ATTRIBUTION.txt when a licence asks for it, and refuses a
+      sound that reaches an unknown or blocked licence unless --allow-licence <id> lets it through (written into
+      the manifest); a single-file export warns.
   soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
       A song as one file (intro, body once, ending; --loops repeats the loop region), --loop its loop region
       (seamless: the tail of the loop wraps into its start; with --loops <n> the region n times over), --stems one
@@ -301,11 +323,12 @@ export const one = (p: Parsed, k: string): string | undefined => p.flags.get(k)?
 /** The options of the commands that write (valued, bare): the CLI uses them to send a command to a running server. */
 export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   run: [['by', 'e', 'source'], []],
-  export: [['out', 'to', 'format', 'set', 'quality', 'loops', 'pattern'], ['all', 'pack', 'loop', 'stems', 'stems-through-master']],
+  export: [['out', 'to', 'format', 'set', 'quality', 'loops', 'pattern', 'allow-licence'], ['all', 'pack', 'loop', 'stems', 'stems-through-master']],
   midi: [['id', 'by', 'pattern', 'to', 'out'], []],
   import: [['id', 'by'], ['quiet', 'classic']],
   normalize: [['by'], []],
-  sample: [['as', 'by'], []],
+  sample: [['as', 'by', 'licence', 'license', 'attribution', 'terms', 'tags', 'source', 'origin', 'note'], ['force', 'apply', 'drop-history']],
+  upgrade: [['by'], []],
   request: [['note', 'by', 'tag', 'like', 'target', 'again'], []],
   reply: [['by'], []],
   cancel: [['by'], []],
@@ -437,34 +460,92 @@ function cmdView(io: Io, p: Parsed): number {
   return 0;
 }
 
-/** `sample import <project> <file.wav> [as=<name>]` and `sample list <project>`. */
+/** `key=value` words after a command's positional arguments. */
+function pairsFrom(words: string[], what: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of words) {
+    const m = /^([A-Za-z][A-Za-z-]*)=(.*)$/s.exec(e);
+    if (!m) throw new UsageError(`${what}: unexpected '${e}' (<field>=<value>)`);
+    out[m[1] === 'license' ? 'licence' : m[1]!] = m[2]!;
+  }
+  return out;
+}
+
+/** The sample tape verbs, as the command language writes them (a value with spaces in quotes). */
+const wordOf = (v: string): string => (/^[^\s"\;]+$/.test(v) ? v : `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`);
+
+/** `sample import|list|show|add|set|rename|remove|gc|git-lfs`. */
 function cmdSample(io: Io, p: Parsed): number {
-  const [verb, dir, file, ...extra] = p.pos;
+  const [verb, dir, ...rest] = p.pos;
+  if (verb === 'git-lfs') { io.out(gitLfsLines()); return 0; }
+  if (!verb || !['import', 'list', 'show', 'add', 'set', 'rename', 'remove', 'gc'].includes(verb)) throw new UsageError('sample: import | list | show | add | set | rename | remove | gc | git-lfs (sample import <project> <file or folder>)');
+  if (!dir) throw new UsageError(`sample ${verb}: give a project folder`);
   if (verb === 'list') {
-    if (!dir || file) throw new UsageError('sample list: give a project folder');
-    const list = wr(io, dir).samples.list();
-    io.out(list.length ? list.map((x) => `${x.name}: ${x.seconds.toFixed(3)} s, ${x.rate} Hz, ${x.channels === 1 ? 'mono' : x.channels === 2 ? 'stereo' : `${x.channels} channels`}, ${x.bytes} bytes, sha256 ${x.sha256.slice(0, 12)}`).join('\n') + '\n' : 'no samples (sample import <project> <file.wav>)\n');
+    if (rest.length) throw new UsageError('sample list: give a project folder');
+    io.out(sampleListText(wr(io, dir)));
     return 0;
   }
-  if (verb !== 'import' || !dir || !file) throw new UsageError('sample: sample import <project> <file.wav> [as=<name>] | sample list <project>');
-  let as = one(p, 'as');
-  for (const e of extra) {
-    const m = /^as=(.+)$/.exec(e);
-    if (!m) throw new UsageError(`sample import: unexpected '${e}' (as=<name>)`);
-    as = m[1];
+  if (verb === 'show') {
+    if (rest.length !== 1) throw new UsageError('sample show: give a project folder and a sample name');
+    io.out(sampleShowText(wr(io, dir), rest[0]!));
+    return 0;
   }
+  if (verb === 'gc') {
+    if (rest.length) throw new UsageError(`sample gc: unexpected '${rest[0]}'`);
+    if (p.flags.has('apply')) assertNoServer(dir, io);
+    const w = wr(io, dir);
+    const plan = gcPlan(w, p.flags.has('drop-history'));
+    if (p.flags.has('apply')) gcApply(w, plan);
+    io.out(gcReport(plan, p.flags.has('apply')));
+    return 0;
+  }
+  const by = author(p, 'agent:claude', (n) => `agent:${n}`);
+  if (verb === 'add' || verb === 'set' || verb === 'rename' || verb === 'remove') {
+    const [name, ...more] = rest;
+    if (!name) throw new UsageError(`sample ${verb}: give a sample name`);
+    const text = verb === 'rename' || verb === 'remove' ? `sample ${verb} ${[name, ...more].join(' ')}` : `sample ${verb} ${name}${Object.entries(pairsFrom(more, `sample ${verb}`)).map(([k, v]) => ` ${k}=${wordOf(v)}`).join('')}`;
+    assertNoServer(dir, io);
+    const w = wr(io, dir);
+    const r = w.run({ commands: text, by });
+    if (!r.ok) { io.err(formatErrors('<sample>', r.errors) + '\n'); return 1; }
+    io.out(`${r.added.map((a) => a.cmd).join('\n')} (group ${r.group})\n`);
+    return 0;
+  }
+  // import
+  const [file, ...extra] = rest;
+  if (!file) throw new UsageError('sample import: give a file or folder');
+  const kv = pairsFrom(extra, 'sample import');
+  for (const k of Object.keys(kv)) if (!['as', 'licence', 'attribution', 'terms', 'tags', 'source', 'origin', 'note'].includes(k)) throw new UsageError(`sample import: no field '${k}' (as, licence, attribution, terms, tags, source, origin, note)`);
+  const pick = (k: string): string | undefined => kv[k] ?? one(p, k);
+  const licence = pick('licence') ?? one(p, 'license');
+  const opts = {
+    ...(pick('as') ? { as: pick('as')! } : {}), ...(licence ? { licence } : {}), ...(pick('attribution') ? { attribution: pick('attribution')! } : {}), ...(pick('terms') ? { terms: pick('terms')! } : {}),
+    ...(pick('tags') ? { tags: pick('tags')! } : {}), ...(pick('source') ? { source: pick('source') as 'file' } : {}), ...(pick('origin') ? { origin: pick('origin')! } : {}), ...(pick('note') ? { note: pick('note')! } : {}),
+    force: p.flags.has('force'), by,
+  };
   assertNoServer(dir, io);
   const w = wr(io, dir);
-  if (existsSync(file) && statSync(file).isDirectory()) {
-    if (as) throw new UsageError('sample import: as=<name> names one file, not a folder');
-    const d = w.samples.importDir(file);
-    w.samplesChanged();
-    io.out(`${d.imported.map((x) => sampleLine(x.info, x.created)).join('\n')}${d.imported.length ? '\n' : ''}${d.problems.map((x) => `warning: ${x}\n`).join('')}${plural(d.imported.length, 'sample')} from ${file}\n`);
-    return d.imported.length ? 0 : 1;
-  }
-  const r = w.samples.import(file, as);
-  w.samplesChanged();
-  io.out(`${sampleLine(r.info, r.created)}\nsha256 ${r.info.sha256.slice(0, 12)}\nuse it: layer add <sound> sample sample=${r.info.name} [start=<s>] [end=<s>] [pitch=<semitones>] [reverse=1] [side=left|right]\n`);
+  const r = importPath(w, file, opts);
+  const one1 = r.items.length === 1 ? r.items[0]!.info.name : null;
+  io.out(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}${one1 ? `\nuse it: layer add <sound> sample sample=${one1} [start=<s>] [end=<s>] [pitch=<semitones>] [reverse=1] [side=mix|left|right|stereo]` : ''}\n`);
+  return r.items.length ? 0 : 1;
+}
+
+function cmdUpgrade(io: Io, p: Parsed): number {
+  const [dir, ...extra] = p.pos;
+  if (!dir || extra.length) throw new UsageError('upgrade: give a project folder');
+  assertNoServer(dir, io);
+  const w = wr(io, dir);
+  const r = upgradeProject(w);
+  io.out(`${r.moved.length ? `moved ${plural(r.moved.length, 'sample')} into the store (${r.moved.join(', ')}) as group ${r.group} by system:upgrade` : 'nothing to upgrade: no 0.1 sample files'}\n${r.skipped.map((x) => `warning: ${x}\n`).join('')}`);
+  return 0;
+}
+
+function cmdLicence(io: Io, p: Parsed): number {
+  const [verb, dir, ...ids] = p.pos;
+  if (verb !== 'check' || !dir) throw new UsageError('licence: licence check <project> [<id>...] [--allow-licence <id>]...');
+  const w = wr(io, dir);
+  io.out(licenceReportText(licenceCheck(w, ids, p.flags.get('allow-licence') ?? []), licencePolicyNote(w)));
   return 0;
 }
 
@@ -683,7 +764,7 @@ function cmdExport(io: Io, p: Parsed): number {
   if (p.flags.has('all') && (ids.length || one(p, 'set'))) throw new UsageError('export: --all is every sound; name sounds or --set, not both');
   const quality = one(p, 'quality') === undefined ? undefined : Number(one(p, 'quality'));
   if (quality !== undefined && !(quality >= -0.1 && quality <= 1)) throw new UsageError('export: --quality is a number from -0.1 to 1');
-  io.out(formatExportFiles(exportFormat(wr(io, dir), ids, format, { out, set: one(p, 'set'), all: p.flags.has('all'), pack: p.flags.has('pack'), quality })) + '\n');
+  io.out(formatExportFiles(exportFormat(wr(io, dir), ids, format, { out, set: one(p, 'set'), all: p.flags.has('all'), pack: p.flags.has('pack'), quality, allowLicence: p.flags.get('allow-licence') })) + '\n');
   return 0;
 }
 
@@ -851,6 +932,8 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'check': return cmdCheck(io, parseArgs(rest, [], ['json']));
       case 'import': return cmdImport(io, parseArgs(rest, ...WRITE_OPTS.import!));
       case 'sample': return cmdSample(io, parseArgs(rest, ...WRITE_OPTS.sample!));
+      case 'upgrade': return cmdUpgrade(io, parseArgs(rest, ...WRITE_OPTS.upgrade!));
+      case 'licence': case 'license': return cmdLicence(io, parseArgs(rest, ['allow-licence'], []));
       case 'changes': return cmdChanges(io, parseArgs(rest, ['since', 'by', 'as'], ['peek']));
       case 'export': return cmdExport(io, parseArgs(rest, ...WRITE_OPTS.export!));
       case 'request': return cmdRequest(io, parseArgs(rest, ...WRITE_OPTS.request!));

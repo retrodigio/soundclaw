@@ -10,8 +10,9 @@ import { activeGroups, renderKey, AUTHOR_RE, builtinInstruments, lookupInstrumen
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
+import { isSampleOp, settleSampleAdd, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
 import type { Measured } from './ears.ts';
-import { ProjectError, appendTape, readTape, writeInstruments, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
+import { ProjectError, appendTape, readTape, writeInstruments, writeSamples, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
 import { normalizePlan } from './normalize.ts';
 import { SongBench, type SongMeasured } from './songs.ts';
 import { LEAN_AT, type BatchProgress, type CardLite, type ServerMessage, type Snapshot, type SoundSummary } from './protocol.ts';
@@ -62,7 +63,7 @@ export class Writer {
   readonly cache: RenderCache;
   /** Renders and measurements of songs. */
   readonly bench: SongBench;
-  /** The project's imported samples (samples/*.wav). */
+  /** The project's samples: names the tape gives to audio in the store (samples/objects), and 0.1.x files (samples/*.wav) not moved in yet. */
   readonly samples: SampleStore;
   /** The cards (numbers, checks, thumbnails) worked out in worker threads. */
   readonly thumbs: Thumbs;
@@ -82,7 +83,7 @@ export class Writer {
     this.now = o.now ?? utcNow;
     this.cache = new RenderCache(project.dir);
     this.bench = new SongBench(this);
-    this.samples = new SampleStore(project.dir);
+    this.samples = new SampleStore(project.dir, () => this.library.samples, project.json.licences);
     this.thumbs = new Thumbs(this);
     try {
       this.style = resolveStyle(project.json.style);
@@ -352,6 +353,25 @@ export class Writer {
     return soundExport(this.sound(id), r.samples, { ceilingDb: this.style.truePeakMax, channels: r.channels, bank: this.samples });
   }
 
+  /** How an item stands under the project's ship policy; `allow` lets licence ids through. */
+  itemLicence(kind: 'sound' | 'instrument' | 'song' | 'sample', id: string, allow: readonly string[] = []) {
+    return this.samples.itemLicence(this.sampleLibrary(), kind, id, allow);
+  }
+
+  /** The samples the tape names right now. */
+  sampleEntries(): ReadonlyMap<string, SampleEntry> {
+    return this.library.samples;
+  }
+
+  /** The library as it is now with the samples of a 0.1.x project that are not on the tape yet (for licence reports: read only). */
+  sampleLibrary(): Library {
+    const legacy = this.samples.all().filter((x) => x.legacy);
+    if (!legacy.length) return this.library;
+    const lib = copyLibrary(this.library);
+    for (const x of legacy) lib.samples.set(x.entry.name, x.entry);
+    return lib;
+  }
+
   /** Tell the watchers the project's samples changed. */
   samplesChanged(): void {
     this.emit({ type: 'samples', samples: this.samples.list() });
@@ -493,12 +513,25 @@ export class Writer {
       if (trial.problems.length) {
         return { ok: false, errors: [{ line: c.line, col: 1, message: `${c.op} ${target.group} would leave a later change without what it works on (${trial.problems[0]!.message}); ${c.op === 'undo' ? 'undo the later changes first' : 'redo the earlier undo first'}` }] };
       }
+      // a sound or instrument must not be left playing a sample that this undo takes away
+      const gone: string[] = [];
+      for (const [kind, id, snd] of [...[...trial.library].map(([k, v]) => ['sound', k, v] as const), ...[...trial.library.instruments].map(([k, v]) => ['instrument', k, v.voice] as const)]) {
+        for (const n of soundSamples(snd)) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.push(`${kind} ${id} plays sample '${n}'`);
+      }
+      if (gone.length) return { ok: false, errors: [{ line: c.line, col: 1, message: `${c.op} ${target.group} would take away a sample that is still played (${gone.slice(0, 3).join('; ')}${gone.length > 3 ? '; …' : ''}): change those first` }] };
       next = trial.library;
     } else {
       next = copyLibrary(this.library);
       next.guide = this.musicGuide().guide;
-      for (const c of parsed.commands) {
+      for (const c0 of parsed.commands) {
+        // a sample's date and author are written into its command, so a replay holds them as words and numbers
+        const c: Parsed = isSampleOp(c0.op) ? ({ ...settleSampleAdd(c0, req.by, at), line: c0.line } as Parsed) : c0;
         try {
+          if (isSampleOp(c.op)) {
+            const sc = c as unknown as SampleCommand;
+            const h = sc.op === 'sample-add' || sc.op === 'sample-set' ? sc.fields.hash : undefined;
+            if (h && !this.samples.hasObject(h)) throw new Error(`hash ${h} is not in the sample store (samples/objects): import the audio first (soundclaw sample import), then name it`);
+          }
           if (c.op === 'normalize') {
             // measured against the batch so far, and put on the tape as the plain commands it found
             const plan = this.measuring(next, () => normalizePlan(this, c.args));
@@ -546,9 +579,9 @@ export class Writer {
         if (snd.voice !== 'layered' || snd === this.library.get(id)) continue;
         snd.layers.forEach((l, i) => {
           const name = l.kind === 'sample' ? String(l.p.sample) : '';
-          if (l.kind === 'sample' && (!name || !this.samples.info(name))) {
+          if (l.kind === 'sample' && (!name || !(next.samples.has(name) || this.samples.info(name)))) {
             const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
-            errors.push({ line: at?.line ?? 1, col: 1, message: `${id} layer ${i + 1} ${name ? `names sample '${name}', which is not in the project` : 'has no sample'} (sample import <project> <file.wav> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
+            errors.push({ line: at?.line ?? 1, col: 1, message: `${id} layer ${i + 1} ${name ? `names sample '${name}', which is not in the project` : 'has no sample'} (soundclaw sample import <project> <file> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
           }
         });
       }
@@ -573,6 +606,7 @@ export class Writer {
     writeSets(this.project, next, before);
     writeInstruments(this.project, next, before);
     writeSongs(this.project, next, before);
+    writeSamples(this.project, next, before);
     const text = (lib: Library, id: string) => (lib.has(id) ? serializeSound(lib.get(id)!) : null);
     const touched = [...new Set([...before.keys(), ...next.keys()])].filter((id) => text(before, id) !== text(next, id)).sort();
     const setText = (lib: Library, id: string) => (lib.sets.has(id) ? serializeSet(lib.sets.get(id)!) : null);
@@ -586,6 +620,7 @@ export class Writer {
       this.emit({ type: 'batch', by: req.by, group, entries: added, index: this.index(), sounds: lean ? touched.filter((id) => next.has(id)).map((id) => next.get(id)!) : this.sounds(), removed: touched.filter((id) => !next.has(id)), lean, history: this.historyState(), sets: this.sets(), songs: this.songs().map(songToJson), instruments: this.instruments() });
     }
     this.hub.marks(req.by, added, at);
+    if (this.listeners.size && [...new Set([...before.samples.keys(), ...next.samples.keys()])].some((n) => JSON.stringify(before.samples.get(n)) !== JSON.stringify(next.samples.get(n)))) this.samplesChanged();
     return { ok: true, group, added, touched, touchedSets, touchedSongs, touchedInstruments, warnings };
   }
 }

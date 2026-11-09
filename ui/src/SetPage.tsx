@@ -49,7 +49,7 @@ export function SetPage({ store, set }: { store: Store; set: SetDoc }) {
   const cols: ColumnModel[] = [...Array.from({ length: nVersions }, (_, i) => ({ label: `v${i + 1}` })), ...(agentCol ? [{ label: 'agent', agent: true, title: 'Proposed by the agent, not yet approved' }] : [])];
 
   const cellOf = (m: Member, v: Version): CellModel => {
-    const c = store.cell(v.doc);
+    const c = store.cell(v.doc, v.samples);
     return {
       key: `${m.s.id}@${v.seq}`, id: m.s.id, seq: v.seq, label: v.label, name: `${m.s.id} · ${v.label}`, current: v.current, proposed: v.proposed, by: v.by,
       lufs: c ? c.lufs : undefined, kind: c ? loudKind(c.lufs, target, tolerance) : 'checking', duration: c?.duration,

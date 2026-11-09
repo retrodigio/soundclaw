@@ -2,13 +2,13 @@
 // and kept), the views as PNG files, describe, check, and the classic voice's export and import.
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   CHECK_NAMES, SAMPLE_RATE, audibleLayers, readSampleWav, resample, resampleMethod, sha256Hex, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
   pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, fmtStep, loopView, seamNumbers, setView, formatSpread, type Analysis, type CheckResult, type LoudnessRule, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
-import { Library, applyCommand, bindingRules, momentLine, momentOf, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
+import { attributionText, itemSamples, licenceIds, reachedSamples, Library, applyCommand, bindingRules, momentLine, momentOf, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
 import { encodeOgg } from './ogg.ts';
 import { ProjectError } from './project.ts';
 import { plural } from './report.ts';
@@ -382,6 +382,8 @@ export interface ExportOptions {
   pack?: boolean;
   /** OGG quality, -0.1 to 1 (default 0.4). */
   quality?: number;
+  /** Licence ids let through for this export even though the project's policy blocks them (written into the manifest). */
+  allowLicence?: string[];
 }
 
 export interface ManifestSound {
@@ -401,6 +403,9 @@ export interface ManifestSound {
   loop: { start: number; end: number; startSeconds: number; endSeconds: number } | null;
   /** The set it belongs to, if any. */
   set: string | null;
+  /** The licences of the samples it reaches, and where it stands under the project's ship policy. */
+  licences: string[];
+  licence: string;
   status: string;
   /** True: the sound is a row of synth.csv (a sound marked classic, in the pack layout). */
   synth: boolean;
@@ -436,8 +441,22 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
   const names = fromSet ?? (ids.length ? ids : w.sounds().map((s) => s.id));
   if (!names.length) throw new ProjectError('there are no sounds to export');
   const dir = resolve(o.out ?? join(w.project.dir, 'exports'));
-  mkdirSync(dir, { recursive: true });
   const notes: string[] = [];
+  // Licences: a manifest export (--all, --set, --pack) refuses what reaches a blocked or unknown licence unless it is let through; a single file warns.
+  const allow = o.allowLicence ?? [];
+  const lic = new Map(names.map((id) => [id, w.itemLicence('sound', id, allow)] as const));
+  const bad = [...lic.values()].filter((x) => x.state === 'blocked' || x.state === 'unknown');
+  const gated = !!(o.all || o.set || o.pack);
+  if (bad.length && gated) {
+    throw new ProjectError([
+      `export refused: ${bad.length === 1 ? 'a sound reaches' : `${bad.length} sounds reach`} a licence the project does not ship:`,
+      ...bad.slice(0, 12).flatMap((x) => [`  ${x.id} (${x.state})`, ...x.samples.filter((s) => s.state === 'blocked' || s.state === 'unknown').map((s) => `    sample ${s.name}: ${s.reason}`)]),
+      ...(bad.length > 12 ? [`  … and ${bad.length - 12} more`] : []),
+      'Set the licence (sample set <name> licence=<id>), or let it through for this export with --allow-licence <id> (written into the manifest).',
+    ].join('\n'));
+  }
+  if (bad.length) for (const x of bad) notes.push(`${x.id}: ${x.state} licence (${[...new Set(x.samples.filter((s) => s.state === 'blocked' || s.state === 'unknown').map((s) => `${s.name} ${s.licence.id}`))].join(', ')}); a manifest export would refuse it`);
+  mkdirSync(dir, { recursive: true });
   const base = (id: string, file: string, bytes: number, format: ExportFormat): ExportedFile => {
     const r = w.render(id);
     let peak = 0;
@@ -476,7 +495,7 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
       id, file, format: fmt, duration: n / 44100, samples: n, sampleRate: 44100, channels,
       loudness: Number.isFinite(a.lufs) ? Math.round(a.lufs * 100) / 100 : null, truePeak: Number.isFinite(a.truePeakDb) ? Math.round(a.truePeakDb * 100) / 100 : null,
       loop: s.voice === 'layered' && s.loop ? { start: 0, end: n, startSeconds: 0, endSeconds: n / 44100 } : null,
-      set: setOf(id), status: s.status, synth,
+      set: setOf(id), licences: licenceIds(lic.get(id)!.samples), licence: lic.get(id)!.state, status: s.status, synth,
     };
   };
   const audio: string[] = [];
@@ -518,7 +537,15 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
     }
     const mf = join(dir, 'manifest.json');
     manifest.sort((a, b) => (a.id < b.id ? -1 : 1));
-    if (wantManifest) writeFileSync(mf, JSON.stringify({ format: 'soundclaw-manifest', version: 1, project: w.project.json.name, sounds: manifest, sets: w.sets().filter((x) => manifest.some((m) => x.members.includes(m.id))).map((x) => ({ id: x.id, members: x.members, target: x.target })) }, null, 2) + '\n');
+    // the samples used (name, hash, licence, attribution, source), and ATTRIBUTION.txt when a licence asks for it
+    const reached = reachedSamples(w.sampleLibrary(), manifest.flatMap((m) => itemSamples(w.sampleLibrary(), 'sound', m.id)));
+    const attribution = attributionText(reached);
+    const atFile = join(dir, 'ATTRIBUTION.txt');
+    if (wantManifest) {
+      if (attribution) { writeFileSync(atFile, attribution); notes.push(`ATTRIBUTION.txt written (${reached.filter((r) => r.licence.attribution || /^CC-BY/.test(r.licence.id)).length} samples ask for attribution)`); }
+      else rmSync(atFile, { force: true });
+    }
+    if (wantManifest) writeFileSync(mf, JSON.stringify({ format: 'soundclaw-manifest', version: 1, project: w.project.json.name, ...(allow.length ? { allowedLicences: allow } : {}), samples: reached.map((r) => { const e = w.samples.entry(r.name); return { name: r.name, hash: r.hash, licence: r.licence.id, ...(r.licence.attribution ? { attribution: r.licence.attribution } : {}), ...(r.licence.terms ? { terms: r.licence.terms } : {}), source: e?.prov.source ?? 'file', ...(e?.prov.origin ? { origin: e.prov.origin } : {}) }; }), sounds: manifest, sets: w.sets().filter((x) => manifest.some((m) => x.members.includes(m.id))).map((x) => ({ id: x.id, members: x.members, target: x.target })) }, null, 2) + '\n');
     if (!files.length) throw new ProjectError('nothing to export');
     return { files, notes, manifest: wantManifest ? mf : null };
   }

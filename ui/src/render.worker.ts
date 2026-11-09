@@ -2,7 +2,7 @@
 // the samples a sound names (once; the page's token travels with each request), keeps what it has
 // rendered by the render key, and answers with the channels and the hash of their samples.
 
-import { renderParts, peaks, analyze, integratedLoudness, truePeak, fullScaleOf, joinChannels, loudnessCurve, measuredChannels, melSpectrogram, mixdown, specMax, SPEC_RANGE_DB, type PitchFrame, readSampleWav, renderChannels, renderKey, runChecks, samplesHash, type Analysis, type CheckResult, type MelSpec, type SampleBank, type SampleData, type Sound, type Style } from '@soundclaw/core';
+import { renderParts, peaks, analyze, integratedLoudness, truePeak, fullScaleOf, joinChannels, loudnessCurve, measuredChannels, melSpectrogram, mixdown, specMax, SPEC_RANGE_DB, type PitchFrame, decodeAudio, pcmToSampleData, renderChannels, renderKey, runChecks, samplesHash, type Analysis, type CheckResult, type MelSpec, type SampleBank, type SampleData, type Sound, type Style } from '@soundclaw/core';
 
 export interface RenderRequest {
   id: number;
@@ -68,11 +68,10 @@ async function ensure(name: string, sha: string, token: string): Promise<void> {
   const k = `${name}:${sha}`;
   let p = fetching.get(k);
   if (!p) {
-    p = fetch(`/api/samples/${name}.wav?token=${encodeURIComponent(token)}`)
+    p = fetch(`/api/sample-object/${sha}?token=${encodeURIComponent(token)}`)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`sample ${name}: ${r.status}`))))
       .then((buf) => {
-        const w = readSampleWav(new Uint8Array(buf));
-        held.set(name, { sha, data: { rate: w.rate, data: w.data, ...(w.left && w.right ? { left: w.left, right: w.right } : {}) } });
+        held.set(name, { sha, data: pcmToSampleData(decodeAudio(new Uint8Array(buf), { lenient: true }).audio) });
       })
       .finally(() => fetching.delete(k));
     fetching.set(k, p);

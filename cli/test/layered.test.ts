@@ -48,12 +48,12 @@ describe('samples', () => {
     writeFileSync(file, encodeWav(Float32Array.from({ length: 2000 }, (_, i) => Math.sin(i * 0.2) * (1 - i / 2000)), 22050));
     const a = sc(['sample', 'import', proj, file]);
     expect(a.code, a.err).toBe(0);
-    expect(a.out).toMatch(/^imported sample My_Click: 0\.091 s, 22050 Hz, mono\n  resampled 22050 -> 44100 Hz with a Blackman-windowed sinc.*\nsha256 [0-9a-f]{12}/);
-    expect(existsSync(join(proj, 'samples', 'My_Click.wav'))).toBe(true);
+    expect(a.out).toMatch(/^imported sample My_Click: 0\.091 s, 22050 Hz, pcm16, mono\n  resampled 22050 -> 44100 Hz with a Blackman-windowed sinc.*\n1 sample as group g\d+\nuse it: layer add/);
+    expect(existsSync(join(proj, 'samples', 'My_Click.sample'))).toBe(true);
     expect(sc(['sample', 'import', proj, file, 'as=tick']).out).toContain('sample tick:');
     expect(sc(['sample', 'import', proj, file, '--as', 'tock']).out).toContain('sample tock:');
     expect(sc(['sample', 'import', proj, file, 'as=tick']).out).toMatch(/^already in the project: sample tick/);
-    expect(sc(['sample', 'list', proj]).out).toMatch(/^My_Click: 0\.091 s, 22050 Hz, mono, \d+ bytes, sha256 [0-9a-f]{12}\ntick:/);
+    expect(sc(['sample', 'list', proj]).out).toMatch(/^My_Click: 0\.091 s, 22050 Hz, mono, pcm16, \? unknown \(unknown\), file, hash [0-9a-f]{12}\ntick:/);
     const r = sc(['run', proj, '-e', 'sound new s voice=layered; layer add s sample sample=tick pitch=7; layer add s sample sample=nope']);
     expect(r.code).toBe(1);
     expect(r.err).toContain("names sample 'nope', which is not in the project");
@@ -101,7 +101,7 @@ describe('views and export', () => {
     const h = sc(['run', '--help']).out;
     for (const w of ['sound new <id> voice=layered', 'sound layer-up <id>', 'sound classic <id> on|off', 'layer add <id>', 'env <id> <target>', 'fx add <id> [layer=<n>]']) expect(h, w).toContain(w);
     expect(sc(['view', '--help']).out).toContain('view <project> <id> layers');
-    expect(sc(['sample', '--help']).out).toContain('sample import <project> <file.wav | folder> [as=<name>]');
+    expect(sc(['sample', '--help']).out).toContain('sample import <project> <file | folder> [as=<name>]');
     expect(sc(['check', '--help']).out).toContain('harsh');
   });
 });

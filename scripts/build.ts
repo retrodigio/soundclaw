@@ -16,8 +16,8 @@ if (!existsSync(join(UI, 'index.html'))) throw new Error('ui/dist is missing: ru
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 const result = await build({
-  // the card service's worker thread is a second file next to the bundle (the server starts it by name)
-  entryPoints: { soundclaw: join(REPO, 'cli', 'bin', 'soundclaw.js'), 'thumbs-worker': join(REPO, 'server', 'src', 'thumbs-worker.ts') },
+  // the card service's and the upload reader's worker threads are files next to the bundle (the server starts them by name)
+  entryPoints: { soundclaw: join(REPO, 'cli', 'bin', 'soundclaw.js'), 'thumbs-worker': join(REPO, 'server', 'src', 'thumbs-worker.ts'), 'decode-worker': join(REPO, 'server', 'src', 'decode-worker.ts') },
   outdir: OUT,
   entryNames: '[name]',
   outExtension: { '.js': '.js' },

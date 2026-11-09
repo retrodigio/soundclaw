@@ -116,3 +116,44 @@ describe('the clip grid\'s versions', () => {
     expect(g.versions.map((v) => [v.label, v.seq, v.current])).toEqual([['v1', 1, false], ['v2', 3, false], ['v3', 4, true]]);
   });
 });
+
+describe('versions of a sound that plays a sample', () => {
+  const H1 = 'a'.repeat(64);
+  const H2 = 'b'.repeat(64);
+  const add = (name: string, hash: string) => `sample add ${name} hash=${hash} rate=44100 channels=1 frames=1000 format=pcm16`;
+
+  it('a name pointed at other audio is a new version, and each version keeps the audio the name stood for then', () => {
+    reset();
+    const tape = [
+      e('agent:claude', 'g1', add('knock', H1)),
+      e('agent:claude', 'g2', add('knock2', H2)),
+      e('agent:claude', 'g3', 'sound new door voice=layered seed=1'),
+      e('agent:claude', 'g4', 'layer add door sample sample=knock'),
+      e('human:ana', 'g5', `sample set knock hash=${H2} rate=44100 channels=1 frames=1000 format=pcm16`),
+      e('human:ana', 'g6', 'sample set knock root=C4'), // metadata: not a different render
+    ];
+    const p = provenanceOf(tape, 'door');
+    expect(p.snapshots.map((s) => [s.seq, s.samples])).toEqual([
+      [3, []],
+      [4, [{ name: 'knock', sha256: H1 }]],
+      [5, [{ name: 'knock', sha256: H2 }]],
+    ]);
+    expect(new Set(p.snapshots.map((s) => s.key)).size).toBe(3);
+    // the grid shows v1 with its old audio and v2 with the new
+    const g = gridVersions(p, 4);
+    expect(g.versions.map((v) => [v.label, v.samples.map((x) => x.sha256 === H1 ? 'old' : x.sha256 === H2 ? 'new' : '-').join('')])).toEqual([['v1', ''], ['v2', 'old'], ['v3', 'new']]);
+  });
+  it('undoing the repoint brings the old audio back as a version that is the same render as before', () => {
+    reset();
+    const tape = [
+      e('agent:claude', 'g1', add('knock', H1)),
+      e('agent:claude', 'g2', 'sound new door voice=layered seed=1'),
+      e('agent:claude', 'g3', 'layer add door sample sample=knock'),
+      e('human:ana', 'g4', add('other', H2)),
+      e('human:ana', 'g5', `sample set knock hash=${H2} rate=44100 channels=1 frames=1000 format=pcm16`),
+      e('human:ana', 'g6', 'undo group=g5'),
+    ];
+    const p = provenanceOf(tape, 'door');
+    expect(p.snapshots.map((s) => s.samples.map((x) => x.sha256).join())).toEqual(['', H1]);
+  });
+});

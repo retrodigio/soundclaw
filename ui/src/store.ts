@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, readSampleWav, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { BatchProgress, CardInfo, ClientMessage, Review, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
 import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
@@ -745,11 +745,10 @@ export class Store {
       const key = `${info.name}:${info.sha256}`;
       let p = this.fetching.get(key);
       if (!p) {
-        p = fetch(`/api/samples/${info.name}.wav?token=${encodeURIComponent(this.token)}`)
+        p = fetch(`/api/sample-object/${info.sha256}?token=${encodeURIComponent(this.token)}`)
           .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
           .then((buf) => {
-            const w = readSampleWav(new Uint8Array(buf));
-            this.sampleData.set(info.name, { sha: info.sha256, data: { rate: w.rate, data: w.data, ...(w.left && w.right ? { left: w.left, right: w.right } : {}) } });
+            this.sampleData.set(info.name, { sha: info.sha256, data: pcmToSampleData(decodeAudio(new Uint8Array(buf), { lenient: true }).audio) });
           })
           .catch(() => undefined)
           .finally(() => { this.fetching.delete(key); this.renders.clear(); this.measures.clear(); this.changed(); });
@@ -1186,13 +1185,15 @@ export class Store {
   private cells = new Map<string, CellReply>();
   private celling = new Set<string>();
   /** A version's cell (small peaks, loudness, true peak) from the measuring worker; null until it arrives. */
-  cell(doc: Sound): CellReply | null {
-    const key = this.keyOf(doc);
+  cell(doc: Sound, samples?: readonly { name: string; sha256: string }[]): CellReply | null {
+    // an earlier version of a sound renders with the audio its names stood for then (the worker fetches that audio by hash)
+    const held = samples ? samples.map((x) => ({ ...(this.samples.find((s) => s.name === x.name) ?? { name: x.name, rate: 44100, frames: 0, seconds: 0, channels: 1, bytes: 0 }), sha256: x.sha256 })) as SampleInfo[] : this.samples;
+    const key = samples ? renderKey(doc, (n) => samples.find((x) => x.name === n)?.sha256 ?? this.sampleBank.hash(n) ?? 'missing') : this.keyOf(doc);
     const have = this.cells.get(key);
     if (have) return have;
-    if (this.ready(doc) && !this.celling.has(key)) {
+    if ((samples || this.ready(doc)) && !this.celling.has(key)) {
       this.celling.add(key);
-      void this.renderer.cell(doc, this.samples, this.token)
+      void this.renderer.cell(doc, held, this.token)
         .then((r) => { this.cells.set(key, r); this.hashes.set(key, r.hash); if (this.cells.size > 200) this.cells.delete(this.cells.keys().next().value!); })
         .catch(() => undefined)
         .finally(() => { this.celling.delete(key); this.changed(); });
