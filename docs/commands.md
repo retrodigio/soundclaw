@@ -1309,7 +1309,7 @@ soundclaw library tag cellar doors/creak_04.wav hinge,rusty      # add tags to a
 soundclaw library list [--json]    soundclaw library remove <id> [--yes]
 ```
 
-**Where things are kept.** The list of libraries and the tags you add are settings in `~/.soundclaw` (or `$SOUNDCLAW_CONFIG_DIR`, or `$XDG_CONFIG_HOME/soundclaw`); the
+**Where things are kept.** The list of libraries and the tags you add are settings in `~/.soundclaw` (or `$SOUNDCLAW_CONFIG_DIR`; `$XDG_CONFIG_HOME` is not read, because MCP clients drop it and a CLI and an MCP-started server would then read different settings; settings an earlier version kept in `$XDG_CONFIG_HOME/soundclaw` or `~/.config/soundclaw` are copied in where `~/.soundclaw` has none, and the old files stay); the
 index is a cache in the system's cache folder (macOS `~/Library/Caches/soundclaw`; Linux `$XDG_CACHE_HOME/soundclaw`, else `~/.cache/soundclaw`; Windows
 `%LOCALAPPDATA%\soundclaw\cache`; `$SOUNDCLAW_CACHE_DIR` overrides it) and can be deleted and built again. A cache an earlier version kept in `~/.soundclaw/cache` is moved
 there once. Nothing about a library is written into a

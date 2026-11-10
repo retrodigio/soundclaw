@@ -9,7 +9,7 @@
 //   tags       <config>/library-tags/<id>.json    tags a person or agent added to files (not regenerable, so not a cache)
 //   index      <cache>/library/<id>.index.jsonl   one header line, then one line per file
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { cpus, homedir } from 'node:os';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,12 +29,39 @@ import type { Writer } from './writer.ts';
 
 // ---- where things live ---------------------------------------------------------------------------------------------
 
-/** User settings: SOUNDCLAW_CONFIG_DIR, else $XDG_CONFIG_HOME/soundclaw, else ~/.soundclaw. */
+/**
+ * User settings: SOUNDCLAW_CONFIG_DIR, else ~/.soundclaw. Not $XDG_CONFIG_HOME: MCP clients start servers with a short list of environment variables
+ * (the MCP SDK passes HOME, PATH, USER and a few more), so a server and a CLI in the user's shell would otherwise read different settings (as the token
+ * files, see stateDir, would have). Settings an earlier version kept in $XDG_CONFIG_HOME/soundclaw (or ~/.config/soundclaw, where that variable points by
+ * default) are copied in, file by file, where ~/.soundclaw has none of its own, so nothing is lost and nothing already there is overwritten.
+ */
 export function configDir(): string {
   const env = process.env.SOUNDCLAW_CONFIG_DIR;
   if (env) return resolve(env);
+  const dir = join(homedir(), '.soundclaw');
   const xdg = process.env.XDG_CONFIG_HOME;
-  return xdg ? join(xdg, 'soundclaw') : join(homedir(), '.soundclaw');
+  for (const from of [xdg ? join(xdg, 'soundclaw') : null, join(homedir(), '.config', 'soundclaw')]) if (from) migrateLegacySettings(from, dir);
+  return dir;
+}
+
+const migrated = new Set<string>();
+/** Copy the settings files under `from` that `to` lacks (once per pair in a process); a folder that is not there, or a copy that fails, is skipped. */
+export function migrateLegacySettings(from: string, to: string): void {
+  const key = `${from}\0${to}`;
+  if (migrated.has(key) || resolve(from) === resolve(to)) return;
+  migrated.add(key);
+  const walk = (rel: string): void => {
+    let names: string[];
+    try { names = readdirSync(join(from, rel)); } catch { return; }
+    for (const n of names) {
+      const r = join(rel, n);
+      try {
+        if (statSync(join(from, r)).isDirectory()) walk(r);
+        else if (!existsSync(join(to, r))) { mkdirSync(join(to, rel), { recursive: true }); copyFileSync(join(from, r), join(to, r)); }
+      } catch { /* a file that cannot be copied stays where it was */ }
+    }
+  };
+  walk('');
 }
 
 /**

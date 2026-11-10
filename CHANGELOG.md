@@ -6,6 +6,12 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Settings
+- **Settings no longer depend on `XDG_CONFIG_HOME`.** MCP stdio clients drop that variable, so a CLI and an MCP-started server could read different settings
+  (libraries, library tags, generation settings and spend). They are now in `~/.soundclaw`, or `SOUNDCLAW_CONFIG_DIR`, whatever the environment says, as the token
+  files moved to `~/.soundclaw/run`. Files an earlier version wrote to `$XDG_CONFIG_HOME/soundclaw` (or `~/.config/soundclaw`) are copied in where `~/.soundclaw` has
+  none; nothing is overwritten and the old files stay.
+
 ### Normalize and effects
 - **`normalize` no longer clips a sparse sound.** When gain 4 is not enough, the rest of the level now goes in front of the master limiter (a new
   `limit` parameter `gain`, 0 to 48 dB, added before limiting; `normalize` adds a `limit ceiling=-1` at the end of the master chain when it has
