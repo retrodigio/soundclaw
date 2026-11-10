@@ -11,7 +11,9 @@ machine, and can be edited and checked by a person and an agent alike.
 > voice (layers, FM, plucks, samples, envelopes, effects, stereo), sets and loops, and the music core
 > (instruments, a text pattern grid, songs with game layers, MIDI, and the views and checks for music),
 > with composition helpers that write notes on the tape, and the music editor (pattern grid, piano roll, instruments, song order,
-> loop region). Expect the commands and documents to change.
+> loop region). Since 0.2, sampled sources too: a sample store with provenance and licences, editing and ears for recordings, sample
+> libraries, AI generation with capped costs, sampled instruments with SFZ and SoundFont 2 import, and recordings, rooms and grains in
+> songs and sounds. Expect the commands and documents to change.
 
 ## What works today
 
@@ -26,7 +28,28 @@ machine, and can be edited and checked by a person and an agent alike.
   `synth.csv`.
 - **Samples with provenance.** Audio files (WAV, AIFF, FLAC, and OGG, MP3 or M4A through ffmpeg) are kept once, by content, in the
   project; their names, where they came from and their licence are on the history tape, so undo covers them. A sound, instrument or song
-  knows the licences it reaches, and a manifest export lists them, writes `ATTRIBUTION.txt` and refuses what may not ship.
+  knows the licences it reaches, and a manifest export lists them, writes `ATTRIBUTION.txt` and refuses what may not ship. Anything
+  measured or fetched is worked out once, when the command runs, and written on the tape as numbers: a replay or a render never decodes a
+  compressed file, measures or calls out, so a sound made from recordings renders to the same bytes in Node and the browser.
+- **Editing and ears for recordings.** `sample derive` (trim, fade, normalize, silence-trim, reverse, pitch, time stretch by WSOLA or a
+  phase vocoder written in core, crossfaded loops, slices, mixes), `sample slice` at onsets, `sample loop … find` with the seam numbers,
+  `sample bounce` to freeze a render. `describe`, `view` and `compare` take `sample:<name>`: noise floor, harmonicity, pitch with
+  confidence, onsets, tempo, dry or roomy, in numbers and words. One numbers query (`"creak" dur=0.8-2.5 centroid<2.5k pitched=no
+  licence=shippable`) filters samples, searches libraries and ranks generated takes.
+- **Sample libraries.** Folders of recordings stay outside projects: `library add` registers one with its licence, `library index`
+  measures every file once on worker threads, `library search` and `library similar` ("recordings like the synth door I made") find
+  files by words and numbers, and `library use` copies one in with its provenance.
+- **Generation, capped.** `generate <project> sfx "<prompt>" takes=3` makes sound effects with ElevenLabs and keeps each take as a
+  sample with its prompt, credits and licence. Every cap (per call, per project, per day) is checked before the first call, a project's
+  cap is 0 until a person sets one, the key is read only from the environment and never written, and every call is in a ledger. A free
+  `fake` provider makes stand-in audio for trying it out.
+- **Sampled instruments.** Zones by key and velocity with loops, release samples, round robins, velocity crossfades and choke groups,
+  beside synth layers; built from single notes (roots measured), from slices, or imported from SFZ and SoundFont 2 files (every opcode
+  or generator that could not be carried is named). `check` finds holes, zones out of tune, level steps and loop seams; SFZ export takes
+  an instrument to a DAW.
+- **Recordings in songs and sounds.** Audio channels hold clips fitted to the song's tempo; `convolve` runs a layer, a sound or a
+  song's send bus through a recorded room; `grain` cuts beds and textures from a short recording; any layered recipe takes a `sample=`
+  to lay over its synth body.
 - **The layered voice.** Up to 8 layers per sound (classic, oscillators, FM, Karplus-Strong plucks, imported
   samples, stereo ones included), breakpoint envelopes on any parameter, filters and effects per layer and on a master chain, stereo, a
   limiter on export, recipes for footsteps, UI clicks, doors and magic, and an editor with a layer list, an envelope
@@ -51,7 +74,7 @@ machine, and can be edited and checked by a person and an agent alike.
   mel spectrogram, the pitch track, or two sounds compared; `describe` says it in words; `check`
   flags clips, loudness, DC, clicks, cut tails and harsh 2-5 kHz with the exact time ranges, and `work done` waits
   for them to pass.
-- **Deterministic rendering.** A sound renders to 44,100 Hz mono samples by pure TypeScript, the
+- **Deterministic rendering.** A sound renders to 44,100 Hz samples (mono, or stereo) by pure TypeScript, the
   same samples in Node and in the browser (tested), cached by the content hash of the document, and
   exported as 16-bit WAV.
 - **A live dashboard.** `soundclaw serve` opens a studio in the browser: a library, the sounds that need attention, an
@@ -89,6 +112,23 @@ machine, and can be edited and checked by a person and an agent alike.
 
 ![A song: the arrangement over the piano roll and its pattern text](docs/screens/song.png)
 ![The mixer: strips with live meters, the masking lane and the master](docs/screens/mixer.png)
+
+- **Samples.** The library's Samples tab browses the project's samples, the registered libraries (48 files a page, auditioned
+  without a copy) and the takes generation made, each row with a small waveform, its numbers, where it came from and its licence as a
+  glyph and a word. A sample's page has the waveform, spectrogram, pitch and loop-seam lenses with handles for the trim, the loop and
+  the slices (each gesture one command), and its provenance. Drop files on the window to import them, record from the microphone, or
+  generate takes with the estimate and the budget shown before anything is spent.
+
+![The Samples tab beside a sample's page: each sample's waveform, numbers, source and licence; the slice markers, the numbers and where the audio came from](docs/screens/samples.png)
+![A sample's loop lens: the seam with its numbers, the loop points and the provenance](docs/screens/sample-page.png)
+![The generation dialog: the prompt, the takes and the cost before anything is generated](docs/screens/generate.png)
+
+- **Instruments and recordings in songs.** A sampled instrument's page draws its key-map, keys across and velocity up, each zone a
+  box wearing its check; dragging an edge or dropping a sample on a key writes one command, and the instrument plays from the
+  computer keyboard or a MIDI keyboard. An audio channel's clips sit in the arrangement, sized and drawn from their recordings.
+
+![An instrument's key-map: zones as boxes with their checks, and the zone table](docs/screens/instrument.png)
+![A song with an audio channel: clips in the arrangement and a clip's settings](docs/screens/song-audio.png)
 
 - **The agent layer.** Select a range, bars, a knob or a device and press R to ask for changes pinned to it; the session page
   shows what the agent is doing and every request in lanes; a review page shows before and after (waveforms, parameters, numbers,
@@ -140,6 +180,14 @@ Open the link: the sound is a card. Press play. Ask for changes, and run `soundc
 to receive the request. `soundclaw describe demo.sclaw zap` says what it sounds like in numbers and
 words, `soundclaw view demo.sclaw zap spec` draws its spectrogram, and `soundclaw export demo.sclaw`
 writes `exports/zap.wav`.
+
+Recordings go in the same way, with their licence (it stays `unknown`, and blocks a manifest export, until one is given):
+
+```sh
+npx soundclaw sample import demo.sclaw creak.wav licence=own
+npx soundclaw run demo.sclaw -e 'sound new door voice=layered preset=door sample=creak'
+npx soundclaw describe demo.sclaw sample:creak
+```
 
 ## Documentation
 
