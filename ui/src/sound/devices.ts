@@ -2,7 +2,7 @@
 // curve, echoes...), the two or three values worth showing, and the commands for moving a device
 // within a chain, to another layer, or copying it. Pure functions, no DOM.
 
-import { FX_SPECS, envCommand, type Env, type Fx, type FxKind, type LayeredSound, type PSpec, type Value } from '@soundclaw/core';
+import { FX_SPECS, envCommand, type Env, type Fx, type FxKind, type LayeredSound, type PSpec, type SampleData, type Value } from '@soundclaw/core';
 
 export const SW = 150, SH = 26;
 const f = (n: number): string => n.toFixed(1);
@@ -126,6 +126,29 @@ const unitText = (sp: PSpec, v: Value): string => {
   if (sp.unit) return `${Number(v.toPrecision(3))} ${sp.unit}`;
   return String(Number(v.toPrecision(3)));
 };
+
+/** What a convolution's response looks like: its size over the time the effect rings for (after the predelay), or a flat line when the sample is not here. */
+export function irSketch(smp: SampleData | undefined, p: Record<string, Value>): string {
+  const len = clamp(num(p.len, 2), 0.05, 12), pre = clamp(num(p.predelay, 0), 0, 0.5);
+  const x = (u: number): number => 2 + u * (SW - 4);
+  const y = (u: number): number => SH - 3 - clamp(u, 0, 1) * (SH - 6);
+  if (!smp) return line([[x(0), y(0)], [x(1), y(0)]]);
+  const n = Math.min(smp.data.length, Math.max(1, Math.round(len * smp.rate)));
+  const B = 60;
+  const peaks: number[] = [];
+  let top = 1e-9;
+  for (let b = 0; b < B; b++) {
+    const from = Math.floor((n * b) / B), to = Math.max(from + 1, Math.floor((n * (b + 1)) / B));
+    let m = 0;
+    for (let i = from; i < to && i < n; i++) { const v = Math.abs(smp.data[i]!); if (v > m) m = v; }
+    peaks.push(m);
+    if (m > top) top = m;
+  }
+  const preU = pre / (pre + len);
+  const pts: [number, number][] = [[x(0), y(0)], [x(preU), y(0)]];
+  peaks.forEach((v, b) => pts.push([x(preU + (b / (B - 1)) * (1 - preU)), y(0.92 * Math.sqrt(v / top))]));
+  return line(pts);
+}
 
 /** The two or three values a card shows: the effect's first parameters. */
 export function mainValues(kind: FxKind, p: Record<string, Value>): { k: string; v: string }[] {

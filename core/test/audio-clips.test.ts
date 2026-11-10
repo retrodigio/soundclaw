@@ -2,7 +2,7 @@
 // and rendered to the same bytes whether the channel is cached or not.
 
 import { describe, expect, it } from 'vitest';
-import { SAMPLE_RATE, parse, songDirectSamples, songSamples, songText, type Library, type PartStore } from '../src/index.ts';
+import { SAMPLE_RATE, busReturns, parse, songDirectSamples, songSamples, songText, type Library, type PartStore } from '../src/index.ts';
 import { SINE, library, render } from './music-helpers.ts';
 import { AUDIO_BANK, crossingsHz, firstOver, rms } from './audio-material.ts';
 
@@ -192,5 +192,13 @@ describe('the convolution send bus', () => {
     const wet = render(lib('song fx add s convolve ir=room mix=0.4 len=0.4\n'), 's', { bank: AUDIO_BANK });
     expect(Buffer.from(wet.mix[0].buffer).equals(Buffer.from(dry.mix[0].buffer))).toBe(false);
     expect(rms(wet.mix[0], 0, 8 * SR)).toBeGreaterThan(0);
+  });
+  it('a room whose response is not at hand returns nothing (not the dry signal)', () => {
+    const l = lib('song send s convolve ir=room len=0.5\nsong channel set s loops convolve=1\n');
+    const r = render(l, 's', { bank: AUDIO_BANK });
+    const song = l.songs.get('s')!;
+    expect(busReturns(song, r.parts, r.length, false)).toBeNull();
+    const ret = busReturns(song, r.parts, r.length, false, AUDIO_BANK)!;
+    expect(rms(ret[0], 0, r.length)).toBeGreaterThan(0);
   });
 });

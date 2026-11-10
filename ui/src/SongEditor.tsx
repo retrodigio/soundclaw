@@ -15,7 +15,8 @@ import { LiveText, Mixer, MeterModeToggle } from './song/Mixer.tsx';
 import { PatternText } from './song/PatternText.tsx';
 import { Field, PatternGrid, SongOrderPanel } from './song/parts.tsx';
 import { useSongClock, useSongReport } from './song/hooks.tsx';
-import { barSeconds, channelColour, laneFlags, patternAuthors, type Clip, type LaneFlag } from './song/model.ts';
+import { ClipInspector } from './song/AudioClips.tsx';
+import { barSeconds, channelColour, clipAuthors, laneFlags, patternAuthors, type Clip, type LaneFlag } from './song/model.ts';
 import { AuthorDot, authorOf, Button, Segmented, Tabs } from './studio/controls.tsx';
 import { useActions, type Action } from './studio/registry.ts';
 import { Resizer } from './studio/layout.tsx';
@@ -143,6 +144,10 @@ export function SongEditor({ store, id, view }: { store: Store; id: string; view
   const { at: playingAt, nowRef } = useSongClock(store, song, playing && view !== 'mixer', root);
   const report = useSongReport(store, song);
   const authors = useMemo(() => patternAuthors(store.tape, id), [store.tape, id]);
+  const agentClips = useMemo(() => clipAuthors(store.tape, id), [store.tape, id]);
+  const [aclip, setAclip] = useState<{ ch: string; id: number } | null>(null);
+  const aclipChannel = song && aclip ? song.channels.find((x) => x.name === aclip.ch) : undefined;
+  const aclipOpen = aclip ? aclipChannel?.clips?.find((k) => k.id === aclip.id) : undefined;
 
   let arr: Arr | null = null;
   if (song) { try { arr = arrange(song); } catch { arr = null; } }
@@ -302,10 +307,11 @@ export function SongEditor({ store, id, view }: { store: Store; id: string; view
       {header}
       <div className="song-grid" data-inspector={inspector || undefined}>
         <div className="song-main" style={{ ['--arr-h' as string]: `${arrShown}px` }}>
-          <Arrangement store={store} song={song} arr={arr} report={report} authors={authors} channel={channel?.name ?? null} pattern={pattern?.name ?? null} intensity={intensity}
+          <Arrangement store={store} song={song} arr={arr} report={report} authors={authors} agentClips={agentClips} aclip={aclip} onAclip={setAclip} channel={channel?.name ?? null} pattern={pattern?.name ?? null} intensity={intensity}
             onChannel={(c) => { if (song.channels.find((x) => x.name === c)?.inst) { setChan(c); setSelected(new Set()); } }}
             onClip={(cl: Clip) => { setPatName(cl.pattern); if (song.channels.find((x) => x.name === cl.channel)?.inst) setChan(cl.channel); setSelected(new Set()); setCursor(cl.t0); }}
             cursor={cursor} onCursor={setCursor} nowRef={nowRef} playing={playing} bars={bars} onBars={setBars} flag={flagId} onFlag={pickFlag} send={send} />
+          {song && aclipChannel && aclipOpen && <ClipInspector song={song} channel={aclipChannel} clip={aclipOpen} send={send} onClose={() => setAclip(null)} />}
           <div className="song-divider"><Resizer side="bottom" size={arrShown} min={ARR_MIN} max={ARR_MAX} onSize={setArrH} onToggle={() => setArrH(arrShown > ARR_DEFAULT ? ARR_DEFAULT : ARR_MAX)} label="Resize the arrangement and the editor under it" testId="song-divider" /></div>
           <div className="row pattern-tabs" data-testid="pattern-tabs">
             <span className="dim">patterns</span>

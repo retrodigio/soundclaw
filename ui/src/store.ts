@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { sampleKeyPart, decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songDirectSamples, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { sampleKeyPart, decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songDirectSamples, songFromJson, soundSamples, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { BatchProgress, CardInfo, ClientMessage, Review, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
 import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
@@ -1037,7 +1037,7 @@ export class Store {
 
   /** Are the samples the sound names here yet? (Until then it renders its sample layers as silence, and the render is not kept.) */
   private ready(s: Sound): boolean {
-    return s.voice !== 'layered' || s.layers.every((l) => l.kind !== 'sample' || !l.p.sample || !!this.sampleBank.get(String(l.p.sample)));
+    return s.voice !== 'layered' || soundSamples(s).every((n) => !!this.sampleBank.get(n));
   }
 
   /** The sound's channels (one, or two when a layer is panned), rendered by core here in the browser (kept by the document's content key). */

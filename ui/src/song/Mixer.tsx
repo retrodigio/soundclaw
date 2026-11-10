@@ -39,6 +39,7 @@ export const dbToGain = (db: number): number => (db <= -59.5 ? 0 : Number((10 **
 /** Does the channel play anything in the stretch the mixer is about (the loop region, else the song), at this intensity? */
 export function soundsHere(song: SongDoc, arr: Arrangement | null, ch: Channel, intensity: number | null): boolean {
   if (!layersAt(song, intensity).has(ch.layer)) return false;
+  if (ch.clips) return ch.clips.length > 0;
   if (!arr) return true;
   return arr.instances.some((i) => (arr.loop ? i.inLoop : true) && (i.pattern.channels.find((c) => c.name === ch.name)?.cells.some((c) => c.kind !== 'rest' && c.kind !== 'hold') ?? false));
 }
@@ -93,7 +94,7 @@ export function Mixer({ store, song, report, intensity, compact, onInserts }: Pr
   const numbers = report?.numbers;
   const links = maskLinks(report);
   const masking = report?.checks?.find((c) => c.name === 'masking');
-  const buses = (['reverb', 'delay'] as const).filter((k) => song[k]);
+  const buses = (['reverb', 'delay', 'convolve'] as const).filter((k) => song[k]);
   const sends = buses;
   const agent = (key: string): { prev?: number } | false => { const t = trails.get(key); return t ? (t.prev === null ? {} : { prev: t.prev }) : false; };
   const stripCls = (name: string, extra = ''): string => `mx-strip${g.solo.has(name) ? ' solo' : ''}${g.mute.has(name) ? ' mute' : ''}${extra}`;
@@ -127,10 +128,10 @@ export function Mixer({ store, song, report, intensity, compact, onInserts }: Pr
   const channelStrip = (c: Channel) => {
     const silent = !soundsHere(song, arr, c, intensity);
     const rep = numbers?.channels?.find((x) => x.name === c.name);
-    const lufs = rep && rep.lufs !== null && Number.isFinite(rep.lufs) && rep.notes > 0 ? rep.lufs : null;
+    const lufs = rep && rep.lufs !== null && Number.isFinite(rep.lufs) && (rep.notes > 0 || !!c.clips?.length) ? rep.lufs : null;
     const own = c.inst ? store.lookupInstrument(c.inst) : undefined;
     const inserts: string[] = own ? [...new Set(own.voice.layers.flatMap((l) => l.fx.map(fxChip)))] : [];
-    const rows = [...(c.inst ? [c.inst] : [`kit${c.kit && Object.keys(c.kit).length ? '' : ' default'}`]), ...inserts];
+    const rows = [...(c.clips ? [`audio · ${c.clips.length} clip${c.clips.length === 1 ? '' : 's'}`] : c.inst ? [c.inst] : [`kit${c.kit && Object.keys(c.kit).length ? '' : ' default'}`]), ...inserts];
     const dbNow = gainToDb(c.gain);
     return (
       <div key={c.name} data-strip={c.name} className={stripCls(c.name, compact ? ' compact' : '')} data-testid={`strip-${c.name}`} data-silent={silent || undefined} data-layer={c.layer} data-audible={store.songAudible(song).includes(c.name)}>
@@ -165,12 +166,12 @@ export function Mixer({ store, song, report, intensity, compact, onInserts }: Pr
     );
   };
 
-  const busStrip = (kind: 'reverb' | 'delay') => {
+  const busStrip = (kind: 'reverb' | 'delay' | 'convolve') => {
     const fx = song[kind]!;
     const params = FX_SPECS[kind].filter((s) => s.name !== 'mix' && !s.choices && !s.text).slice(0, 3);
     return (
       <div key={kind} data-strip={kind} className="mx-strip bus" data-testid={`strip-bus-${kind}`}>
-        <div className="mx-head" style={{ borderTopColor: 'var(--line2)' }}><b className="mx-name">{kind}</b><span className="mono mx-stem">bus · {kind === 'reverb' ? 'space' : 'echo'}</span></div>
+        <div className="mx-head" style={{ borderTopColor: 'var(--line2)' }}><b className="mx-name">{kind}</b><span className="mono mx-stem">bus · {kind === 'reverb' ? 'space' : kind === 'convolve' ? `room ${String(song.convolve?.p.ir || 'none')}` : 'echo'}</span></div>
         {!compact && (
           <>
             <div className="mx-inserts"><span className="mx-ins first">{fxChip(fx)}</span></div>

@@ -9,6 +9,7 @@ import type { Arrangement as Arr, SongDoc } from '@soundclaw/core';
 import type { Store } from '../store.ts';
 import { Badge } from '../studio/controls.tsx';
 import { Playhead, type NowRef } from './hooks.tsx';
+import { AudioClips } from './AudioClips.tsx';
 import {
   barSeconds, channelColour, clipsOf, flaggedChecks, laneFlags, layersAt, sectionSpans, seamOf, trackGroups,
   type Clip, type LaneFlag, type PatternAuthors, type SongReport,
@@ -22,6 +23,11 @@ interface Props {
   arr: Arr | null;
   report: SongReport | null;
   authors: PatternAuthors;
+  /** The audio clips the agent placed or changed and nobody approved (`channel#number`). */
+  agentClips: Set<string>;
+  /** The audio clip selected (its settings are shown under the arrangement), if any. */
+  aclip: { ch: string; id: number } | null;
+  onAclip(c: { ch: string; id: number } | null): void;
   channel: string | null;
   pattern: string | null;
   intensity: number | null;
@@ -48,7 +54,7 @@ function Sketch({ clip }: { clip: Clip }) {
   );
 }
 
-export function Arrangement({ store, song, arr, report, authors, channel, pattern, intensity, onChannel, onClip, cursor, onCursor, nowRef, playing, bars, onBars, flag, onFlag, send }: Props) {
+export function Arrangement({ store, song, arr, report, authors, agentClips, aclip, onAclip, channel, pattern, intensity, onChannel, onClip, cursor, onCursor, nowRef, playing, bars, onBars, flag, onFlag, send }: Props) {
   const total = Math.max(arr?.total ?? 1, 0.001);
   const barSec = barSeconds(song);
   const nBars = Math.max(1, Math.floor(total / barSec + 1e-6));
@@ -115,7 +121,8 @@ export function Arrangement({ store, song, arr, report, authors, channel, patter
     const c = song.channels.find((x) => x.name === ch)!;
     const silent = !heard.has(c.layer);
     return (
-      <div className="arr-time arr-lane" style={{ height: h, ['--clip' as string]: color }} data-silent={silent || undefined}>
+      <div className={`arr-time arr-lane${c.clips ? ' audio' : ''}`} style={{ height: h, ['--clip' as string]: color }} data-silent={silent || undefined}>
+        {c.clips && <AudioClips store={store} song={song} channel={c} total={total} agentClips={agentClips} selected={aclip?.ch === ch ? aclip.id : null} onSelect={(id) => onAclip(id === null ? null : { ch, id })} send={send} />}
         {row.map((cl) => {
           const agent = authors.rows.has(`${cl.pattern}/${ch}`);
           const here = pattern === cl.pattern && channel === ch;
@@ -143,7 +150,8 @@ export function Arrangement({ store, song, arr, report, authors, channel, patter
     );
   };
 
-  const buses = (['reverb', 'delay'] as const).filter((k) => song[k]);
+  const buses = (['reverb', 'delay', 'convolve'] as const).filter((k) => song[k]);
+  const audioName = (): string => { let n = 1; while (song.channels.some((x) => x.name === (n === 1 ? 'audio' : `audio${n}`))) n++; return n === 1 ? 'audio' : `audio${n}`; };
   return (
     <section className="arr" data-testid="arrangement" data-ask-surface aria-label="Arrangement" style={{ ['--nbars' as string]: nBars }}>
       <div className="arr-row arr-rulerrow">
@@ -226,7 +234,7 @@ export function Arrangement({ store, song, arr, report, authors, channel, patter
       <div className="arr-row arr-sends" data-testid="track-sends">
         <div className="arr-head"><span className="arr-name dim">sends</span>{buses.length === 0 && <span className="dim small">none set up</span>}</div>
         <div className="arr-time arr-lane" style={{ height: 28 }}>
-          <span className="arr-buses">{buses.map((k) => <span key={k} className="chip tag mono" data-testid={`bus-${k}`}>{k}</span>)}</span>
+          <span className="arr-buses">{buses.map((k) => <span key={k} className="chip tag mono" data-testid={`bus-${k}`}>{k}</span>)}<span className="spacer" /><button type="button" className="mini" data-testid="add-audio-channel" title="Add a channel that plays recordings: then drop a sample from the library on its lane" onClick={() => send([`song channel add ${song.id} ${audioName()} audio`])}>+ audio channel</button></span>
         </div>
       </div>
       <div className="arr-overlay" aria-hidden>

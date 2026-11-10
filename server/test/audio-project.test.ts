@@ -1,12 +1,12 @@
 // Audio in sounds and songs on a project: impulse responses, grains and clips name samples of the store; what is measured when a command runs is
 // written onto the tape as numbers; the guards keep a sample that is read from going away; licences travel to the song and the sound.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { itemLicence, pcmFromFloats, renderKey, soundSamples } from '@soundclaw/core';
-import { importPath } from '../src/index.ts';
-import { wavBytes } from '../../core/test/audio-fixtures.ts';
+import { itemLicence, joinChannels, pcmFromFloats, renderKey, samplesHash, soundSamples } from '@soundclaw/core';
+import { Writer, createProject, importPath, loadProject, upgradeProject } from '../src/index.ts';
+import { makeAudio as makePcm, wavBytes } from '../../core/test/audio-fixtures.ts';
 import { clickTrain, room, tone } from '../../core/test/audio-material.ts';
 import { fixture, type Fixture } from './helpers.ts';
 
@@ -132,5 +132,39 @@ describe('grains and recipes on a project', () => {
     expect(soundSamples(s)).toEqual(['loop90']);
     expect(tape().find((t) => t.startsWith('sound new s'))).toBe('sound new s voice=layered preset=door seed=3 sample=loop90');
     expect(fail('sound new t voice=layered preset=door seed=3 sample=nowhere')).toMatch(/names sample 'nowhere'/);
+  });
+});
+
+describe('a 0.1.x project', () => {
+  it('opens and renders as before; a room, grains and a clip can use its files before and after it is upgraded, and no earlier render changes', () => {
+    const dir = join(f.root, 'old.sclaw');
+    createProject(dir);
+    mkdirSync(join(dir, 'samples'), { recursive: true });
+    // the samples a 0.1.x project holds: files in samples/, nothing on the tape
+    writeFileSync(join(dir, 'samples', 'mono_22k.wav'), wavBytes(makePcm('pcm16', 1, 6000, 22050, 1)));
+    writeFileSync(join(dir, 'samples', 'stereo_44k.wav'), wavBytes(makePcm('pcm16', 2, 8000, 44100, 2)));
+    const w = new Writer(loadProject(dir));
+    run('sound new mix voice=layered seed=3\nlayer add mix sample sample=mono_22k pitch=2\nlayer add mix sample sample=stereo_44k side=left pan=-1', w);
+    const hash = (x: Writer, id: string): string => samplesHash(joinChannels(x.render(id).channels));
+    const before = hash(w, 'mix');
+    // the files are not on the tape, and a room, grains and a clip name them: the room's length is the file's (6000 frames at 22,050 Hz is 0.28 s, rounded up)
+    const r = run('sound new roomy voice=layered seed=4\nlayer add roomy osc wave=sine dur=0.2\nfx add roomy layer=1 convolve ir=mono_22k mix=0.5\nsound new bed voice=layered seed=5\nlayer add bed grain sample=stereo_44k dur=0.5 density=30\ninstrument new sine kind=osc\nsong new s tempo=120\nsong channel add s lead inst=sine\nsong channel add s loops audio\npattern s.a steps=16 tpb=4\n  lead: C5 - - - - - - - - - - - - - - -\nsong section add s a a x2\nsong clip add s loops mono_22k at=1 from-tempo=100', w);
+    expect(r.ok).toBe(true);
+    const lines = readFileSync(join(dir, 'history.jsonl'), 'utf8').trim().split('\n').map((l) => (JSON.parse(l) as { cmd?: string }).cmd ?? '');
+    expect(lines).toContain('fx add roomy layer=1 convolve ir=mono_22k mix=0.5 len=0.28');
+    expect(hash(w, 'mix')).toBe(before);
+    const roomy = hash(w, 'roomy'), bed = hash(w, 'bed');
+    expect(w.render('roomy').channels[0]!.length).toBeGreaterThan(Math.round(0.2 * 44100));
+    // a new process reads the same project: the same renders
+    const again = new Writer(loadProject(dir));
+    expect([hash(again, 'mix'), hash(again, 'roomy'), hash(again, 'bed')]).toEqual([before, roomy, bed]);
+    // upgraded: the files go into the store, and every render is the same sample for sample
+    upgradeProject(w);
+    expect([hash(w, 'mix'), hash(w, 'roomy'), hash(w, 'bed')]).toEqual([before, roomy, bed]);
+    const reopened = new Writer(loadProject(dir));
+    expect([hash(reopened, 'mix'), hash(reopened, 'roomy'), hash(reopened, 'bed')]).toEqual([before, roomy, bed]);
+    // the song's clip reaches the upgraded sample, and its licence (unknown until set) is the song's
+    expect(itemLicence(reopened.sampleLibrary(), 'song', 's').samples.map((x) => [x.name, x.licence.id])).toEqual([['mono_22k', 'unknown']]);
+    expect(reopened.sampleLibrary().songs.get('s')!.channels[1]!.clips![0]).toMatchObject({ sample: 'mono_22k', stretch: 'tempo', fromTempo: 100 });
   });
 });

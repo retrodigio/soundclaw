@@ -64,8 +64,8 @@ body { overflow: hidden; background: var(--ground); color: var(--text); font: 40
 .library-in { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .library-in .tabs-c { padding: var(--sp-8) var(--sp-4) 0; border-bottom: 1px solid var(--line); gap: 0; overflow-x: auto; scrollbar-width: none; }
 .library-in .tabs-c::-webkit-scrollbar { display: none; }
-.library-in .tabs-c [role='tab'] { padding: 7px 5px; flex: 1 0 auto; text-align: center; }
-.library-in .tab-n { margin-left: 3px; font-size: 10px; }
+.library-in .tabs-c [role='tab'] { padding: 7px 3px; flex: 1 0 auto; text-align: center; }
+.library-in .tab-n { margin-left: 2px; font-size: 10px; }
 .lib-filter { padding: 10px; display: flex; flex-direction: column; gap: var(--sp-8); border-bottom: 1px solid var(--line); }
 .lib-search { display: flex; align-items: center; gap: var(--sp-6); background: var(--ground); border: 1px solid var(--line); border-radius: var(--r-cell); padding: 0 var(--sp-8); height: var(--ctl-h); color: var(--text3); }
 .lib-search:focus-within { border-color: var(--ember); }

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { midiFreq, pcmFromFloats, sinRad } from '../core/src/index.ts';
 import { wavBytes } from '../core/test/audio-fixtures.ts';
+import { clickTrain, room } from '../core/test/audio-material.ts';
 import { hitsFloats, toneFloats } from '../core/test/sample-golden-table.ts';
 import { wavOf } from '../server/test/library-fixtures.ts';
 import type { Agent } from './helpers.ts';
@@ -105,6 +106,7 @@ export async function makeExample(a: Agent): Promise<void> {
   await run('sound set jump punch=0.4', 'human:ana');
   await makeSamples(a);
   await makeInstrument(a);
+  await makeAudio(a);
 }
 
 /**
@@ -166,6 +168,41 @@ export async function makeInstrument(a: Agent): Promise<void> {
   await cli(['run', a.dir, '-e', script, '--by', 'agent:claude']);
 }
 
+/**
+ * Audio in sounds and songs, all made by test code: a rain bed of grains cut from a noise recording, a door through a room (an impulse response), and a song with an
+ * audio channel: a loop made at 90 bpm fitted to the song's 120 (the person's) and a recording the agent placed (violet), with the room as a send.
+ */
+export async function makeAudio(a: Agent): Promise<void> {
+  const cli = async (args: string[]) => { const r = await a.cli(args); if (r.code !== 0) throw new Error(`${args.join(' ')}: ${r.err || r.out}`); return r; };
+  const files = join(a.root, 'audio');
+  mkdirSync(files, { recursive: true });
+  writeFileSync(join(files, 'rain_src.wav'), wavOf('rain', 5, 1.6));
+  writeFileSync(join(files, 'room_ir.wav'), wavBytes(pcmFromFloats([room(0.9, 3, 44100)], 44100, 'pcm16')));
+  writeFileSync(join(files, 'loop_90.wav'), wavBytes(pcmFromFloats([clickTrain(8, 60 / 90, 0.15)], 44100, 'pcm16')));
+  await cli(['sample', 'import', a.dir, join(files, 'rain_src.wav'), 'licence=CC0-1.0', 'tags=rain']);
+  await cli(['sample', 'import', a.dir, join(files, 'room_ir.wav'), 'licence=own', 'tags=room']);
+  await cli(['sample', 'import', a.dir, join(files, 'loop_90.wav'), 'licence=CC-BY-4.0', 'attribution=invented for the tests', 'tags=loop']);
+  const person = `sound new rain_bed voice=layered seed=3
+layer add rain_bed grain sample=rain_src dur=4 density=30 size=0.08 position=0.5 spread=0.3
+fx add rain_bed layer=1 filter type=lp cutoff=5000
+sound new door_room voice=layered seed=4
+layer add door_room osc wave=brown dur=0.25 filter=lp cutoff=900
+env door_room 1.amp "0:0 0.003:1 0.25:0@exp"
+fx add door_room layer=1 convolve ir=room_ir mix=0.45
+song new audio_loop tempo=120
+song channel add audio_loop bass inst=triangle_bass gain=0.5
+song channel add audio_loop loops audio gain=0.9
+pattern audio_loop.a steps=16 tpb=4 bar=8
+  bass: C2 . . . G2 . . . | C2 . . . G2 . . .
+song section add audio_loop A a x4
+song send audio_loop convolve ir=room_ir
+song channel set audio_loop loops convolve=0.25
+song clip add audio_loop loops loop_90 at=1 len=2 from-tempo=90
+`;
+  await cli(['run', a.dir, '-e', person, '--by', 'human:ana']);
+  await cli(['run', a.dir, '-e', 'song clip add audio_loop loops rain_src at=3.1 len=1 gain=0.6', '--by', 'agent:claude']);
+}
+
 export interface Screen {
   name: string;
   hash: string;
@@ -201,6 +238,10 @@ export const SCREENS: Screen[] = [
   { name: 'ab', hash: '#/set/footsteps_grass', ready: 'set-page', act: async (p) => { await p.getByTestId('ab-card').scrollIntoViewIfNeeded(); await p.getByTestId('ab-matched').waitFor({ timeout: 20_000 }); } },
   { name: 'audition', hash: '#/audition', ready: 'audition' },
   { name: 'song', hash: '#/song/battle_loop', ready: 'song-editor' },
+  { name: 'song-audio', hash: '#/song/audio_loop', ready: 'song-editor', act: async (p) => { await p.getByTestId('aclip-loops-1').waitFor(); await p.getByTestId('aclip-loops-1').click(); await p.getByTestId('aclip-inspector').waitFor(); } },
+  { name: 'mixer-audio', hash: '#/song/audio_loop/mixer', ready: 'song-editor', act: async (p) => { await p.getByTestId('strip-loops').waitFor(); await p.getByTestId('strip-bus-convolve').waitFor(); } },
+  { name: 'sound-grain', hash: '#/sound/rain_bed', ready: 'editor', act: async (p) => { await p.getByTestId('source-open-1').click(); await p.getByTestId('grain-map').waitFor(); } },
+  { name: 'sound-convolve', hash: '#/sound/door_room', ready: 'editor', act: async (p) => { await p.getByTestId('fx-1-1').click(); await p.getByTestId('fx-panel-1-1').waitFor(); } },
   { name: 'mixer', hash: '#/song/battle_loop/mixer', ready: 'song-editor' },
   { name: 'session', hash: '#/session', ready: 'session' },
   { name: 'review', hash: '#/review/r1', ready: 'review-item' },

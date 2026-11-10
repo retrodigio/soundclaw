@@ -364,6 +364,8 @@ export function busReturns(song: SongDoc, parts: readonly ChannelAudio[], N: num
   for (const kind of SEND_KINDS) {
     const bus = song[kind];
     if (!bus) continue;
+    // a room whose response is not at hand returns nothing (a convolution without its response would let the dry signal through)
+    if (kind === 'convolve' && !bank?.get(String(bus.p.ir))) continue;
     const feed: [Float64Array, Float64Array] = [new Float64Array(wrap ? 2 * N : N), new Float64Array(wrap ? 2 * N : N)];
     let any = false;
     for (const p of parts) {

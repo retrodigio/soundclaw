@@ -18,7 +18,8 @@ import { LoudnessClass } from './LoudnessClass.tsx';
 import type { StripPeaks } from './render.worker.ts';
 import { AskComposer } from './sound/Inspector.tsx';
 import { LensPanel, type Axis } from './sound/Lenses.tsx';
-import { SH, SW, chainOf, dropDeviceCommands, envSketch, mainValues, sketch, type Scope } from './sound/devices.ts';
+import { SH, SW, chainOf, dropDeviceCommands, envSketch, irSketch, mainValues, sketch, type Scope } from './sound/devices.ts';
+import { GrainMap } from './sound/GrainMap.tsx';
 import { agentSet, answeredNote, type Trail } from './sound/provenance.ts';
 import type { RunResult, Store } from './store.ts';
 import { Badge, Button, Knob, Segmented, Slider, IconButton } from './studio/controls.tsx';
@@ -87,7 +88,7 @@ function Control({ ckey, spec, value, samples, hasEnv, soundId, onMove, onPrevie
     );
   }
   if (spec.text) {
-    const isSample = spec.name === 'sample';
+    const isSample = spec.name === 'sample' || spec.name === 'ir';
     return (
       <div className="pc wide" data-testid={`row-${tid}`} title={spec.help}>
         <label htmlFor={`c-${tid}`} className="cap">{spec.name}</label>
@@ -474,6 +475,8 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
     const isOpen = open?.kind === 'fx' && open.scope === scope && open.k === k;
     const chain = chainOf(sound, scope);
     const vals = mainValues(f.kind, f.p);
+    const irSmp = f.kind === 'convolve' ? store.sampleBank.get(String(f.p.ir)) : undefined;
+    if (f.kind === 'convolve' && !irSmp && vals[0]) vals[0] = { ...vals[0], v: `${vals[0].v} (missing)` };
     const prevKind = byAgent && trail && typeof trail.prev === 'object' && !('salt' in trail.prev) ? (trail.prev as Fx) : null;
     return (
       <div key={`${sc}-${k}`} className="dev-wrap">
@@ -483,7 +486,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
           onClick={() => { if (suppressClick.current) return; if (scope !== 'M') { setSel(scope); setEnvTarget(`${scope}.fx${k}.${FX_SPECS[f.kind].find((x) => x.env)?.name ?? 'mix'}`); } setOpen(isOpen ? null : { kind: 'fx', scope, k }); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } }}>
           <div className="dev-title"><span className="dev-name">{f.kind}</span>{byAgent && <Spark size={11} />}<span className="spacer" /><span className="dev-n mono">{k}</span></div>
-          <svg className="dev-sketch" viewBox={`0 0 ${SW} ${SH}`} preserveAspectRatio="none" width="100%" height="26" aria-hidden><path d={sketch(f.kind, f.p)} /></svg>
+          <svg className="dev-sketch" viewBox={`0 0 ${SW} ${SH}`} preserveAspectRatio="none" width="100%" height="26" aria-hidden><path d={f.kind === 'convolve' ? irSketch(irSmp, f.p) : sketch(f.kind, f.p)} /></svg>
           <div className="dev-vals">{vals.map((v) => <div key={v.k}><span className="dev-k">{v.k}</span><span className="mono dev-v" data-by={byAgent && prevKind && prevKind.p[v.k] !== f.p[v.k] ? 'agent' : undefined}>{v.v}</span></div>)}</div>
           {note && <span className="dev-note" data-testid={`fx-note-${sc}-${k}`}>{note}</span>}
           {byAgent && !note && <span className="dev-note dim">changed by the agent</span>}
@@ -528,8 +531,9 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
           <div className="pc wide" data-testid="layer-source" title="the layer's source">
             <span className="cap">source</span>
             <Segmented label="Source" value={l.kind} testId="ctl-source" onChange={(k) => void now(`layer set ${id} ${n} source=${k}`)}
-              options={SOURCE_KINDS.filter((k) => k !== 'sample' || samples.length || l.kind === 'sample').map((k) => ({ value: k, label: k, testId: `ctl-source-${k}` }))} />
+              options={SOURCE_KINDS.filter((k) => (k !== 'sample' && k !== 'grain') || samples.length || l.kind === k).map((k) => ({ value: k, label: k, testId: `ctl-source-${k}` }))} />
           </div>
+          {l.kind === 'grain' && <GrainMap layer={l} smp={store.sampleBank.get(String(l.p.sample))} testId="grain-map" />}
           <div className="pc-grid">
             {numeric.filter((sp) => !['filter', 'cutoff', 'q'].includes(sp.name)).map((sp) =>
               controlFor(`L:${n}:${sp.name}`, sp, l.p[sp.name], !!l.envs[sp.name], sp.env ? toEnv(`${n}.${sp.name}`, l.p[sp.name] as number, !!l.envs[sp.name]) : undefined))}
@@ -618,6 +622,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
               <div className={`device source${srcOpen ? ' open' : ''}`} data-testid={`source-open-${n}`} tabIndex={0} role="button" aria-expanded={srcOpen} aria-label={`Layer ${n} source: ${layerLabel(l)}. Enter opens its parameters.`}
                 onClick={() => select(n)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); select(n); } }}>
                 <div className="dev-title"><span className="dev-name">{l.kind === 'ks' ? 'pluck' : l.kind}</span><span className="spacer" /><span className="dev-n mono">src</span></div>
+                {l.kind === 'grain' && <GrainMap layer={l} smp={store.sampleBank.get(String(l.p.sample))} compact testId={`grain-card-${n}`} />}
                 <div className="dev-vals">{layerSpecs(l.kind).filter((sp) => ['wave', 'freq', 'dur', 'sample', 'ops', 'pitch'].includes(sp.name)).slice(0, 3).map((sp) => <div key={sp.name}><span className="dev-k">{sp.name}</span><span className="mono dev-v">{String(showValue(l.kind, sp.name, l.p[sp.name] ?? sp.default))}</span></div>)}</div>
               </div>
               <svg className="dev-arrow" width="18" height="10" viewBox="0 0 18 10" aria-hidden><path d="M2 5 H14 M11 2 L14 5 L11 8" /></svg>
@@ -670,8 +675,8 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
             {menu === 'layer' && (
               <div className="dev-menu" role="menu" data-testid="layer-menu">
                 {SOURCE_KINDS.map((k) => (
-                  <button key={k} type="button" role="menuitem" data-testid={`add-layer-${k}`} disabled={sound.layers.length >= MAX_LAYERS || (k === 'sample' && !samples.length)} title={k === 'sample' && !samples.length ? 'import a sample first: soundclaw sample import <project> <file.wav>' : undefined}
-                    onClick={() => { setMenu(null); void now(`layer add ${id} ${k}${k === 'sample' ? ` sample=${samples[0]}` : ''}`).then(() => select(sound.layers.length + 1)); }}>{k}</button>
+                  <button key={k} type="button" role="menuitem" data-testid={`add-layer-${k}`} disabled={sound.layers.length >= MAX_LAYERS || ((k === 'sample' || k === 'grain') && !samples.length)} title={(k === 'sample' || k === 'grain') && !samples.length ? 'import a sample first: soundclaw sample import <project> <file.wav>' : undefined}
+                    onClick={() => { setMenu(null); void now(`layer add ${id} ${k}${k === 'sample' || k === 'grain' ? ` sample=${samples[0]}` : ''}`).then(() => select(sound.layers.length + 1)); }}>{k}</button>
                 ))}
               </div>
             )}

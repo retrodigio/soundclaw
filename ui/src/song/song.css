@@ -188,3 +188,27 @@ button.mx-ins { cursor: pointer; }
 .song-divider .resizer { position: absolute; left: 0; right: 0; top: 0; bottom: 0; height: auto; width: auto; cursor: row-resize; border-radius: 4px; }
 .song-divider .resizer::after { content: ''; position: absolute; left: 50%; top: 3px; width: 36px; height: 2px; margin-left: -18px; border-radius: 1px; background: var(--line2); }
 .song-divider .resizer:hover::after, .song-divider .resizer[data-active]::after, .song-divider .resizer:focus-visible::after { background: var(--ember); }
+
+/* audio clips: a block for each recording on an audio channel */
+.aclips { position: absolute; inset: 0; }
+.aclips.drop { background: var(--you-bg, color-mix(in srgb, var(--you) 12%, transparent)); outline: 1.5px dashed var(--you); outline-offset: -2px; }
+.aclip { position: absolute; top: 3px; bottom: 3px; border-radius: 5px; background: color-mix(in srgb, var(--clip) 20%, transparent); border: 1px solid var(--clip); overflow: hidden; box-sizing: border-box; cursor: grab; touch-action: none; min-width: 6px; }
+.aclip:hover { background: color-mix(in srgb, var(--clip) 30%, transparent); }
+.aclip.sel { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.aclip.dragging { cursor: grabbing; opacity: 0.85; }
+.aclip.agent { background: var(--agent-bg); border: 1px dashed var(--agent); }
+.aclip.missing { border-style: dotted; }
+.aclip:focus-visible { outline: 2px solid var(--focus, var(--you)); outline-offset: 1px; }
+.aclip-name { position: absolute; left: 5px; top: 1px; font-size: 10px; color: var(--text); white-space: nowrap; z-index: 1; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; }
+.aclip.agent .aclip-name { color: var(--agent-text); }
+.aclip-wave { position: absolute; left: 0; right: 0; bottom: 0; top: 12px; width: 100%; height: calc(100% - 12px); }
+.aclip-wave rect { fill: var(--clip); opacity: 0.85; }
+.aclip.agent .aclip-wave rect { fill: var(--agent); }
+.aclip-badge { position: absolute; right: 4px; top: 1px; font-size: 9px; color: var(--text2); background: color-mix(in srgb, var(--panel) 80%, transparent); border-radius: 3px; padding: 0 3px; z-index: 1; white-space: nowrap; }
+.aclip-drop { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--you); z-index: 3; pointer-events: none; }
+.aclip-inspector { display: flex; flex-wrap: wrap; gap: var(--sp-8) var(--sp-12); align-items: flex-end; padding: var(--sp-8) var(--sp-12); border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--panel); }
+.aclip-inspector .aci-title { align-self: center; margin-right: var(--sp-8); }
+.aci-field { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-11, 11px); }
+.aci-field.aci-check { flex-direction: row; align-items: center; gap: var(--sp-4); align-self: center; }
+.aci-field .txt, .aci-field .sel { height: 24px; }
+.arr-buses { width: 100%; }

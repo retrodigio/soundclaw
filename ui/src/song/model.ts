@@ -256,6 +256,35 @@ export function patternAuthors(tape: readonly TapeEntry[], songId: string): Patt
   return { rows, patterns, approvedSeq, touched };
 }
 
+/**
+ * Which audio clips the agent last placed or changed and nobody has approved: keys `<channel>#<number>`. A clip is the agent's when the latest live
+ * command that touched it was the agent's, and neither `song mark … approved` nor a person's edit of it came after. The number of an added clip is
+ * worked out the way the song does (one more than the largest in the song), from the live commands in order.
+ */
+export function clipAuthors(tape: readonly TapeEntry[], songId: string): Set<string> {
+  const live = activeGroups(tape);
+  const last = new Map<string, { agent: boolean; seq: number }>();
+  const ids = new Map<string, number[]>();
+  let approvedSeq = -1;
+  const next = (): number => 1 + Math.max(0, ...[...ids.values()].flat());
+  for (const e of tape) {
+    if (!live.has(e.group)) continue;
+    const w = words(e.cmd.split('\n')[0]!);
+    if (w[0] === 'song' && w[1] === 'mark' && w[2] === songId && w[3] === 'approved') { approvedSeq = e.seq; continue; }
+    if (w[0] === 'song' && (w[1] === 'new' || w[1] === 'remove') && w[2] === songId) { last.clear(); ids.clear(); continue; }
+    if (w[0] === 'song' && w[1] === 'channel' && w[2] === 'remove' && w[3] === songId && w[4]) { for (const k of [...last.keys()]) if (k.startsWith(`${w[4]}#`)) last.delete(k); ids.delete(w[4]); continue; }
+    if (w[0] !== 'song' || w[1] !== 'clip' || w[3] !== songId || !w[4]) continue;
+    const ch = w[4];
+    const agent = !isHuman(e.by);
+    if (w[2] === 'add') { const id = next(); ids.set(ch, [...(ids.get(ch) ?? []), id]); last.set(`${ch}#${id}`, { agent, seq: e.seq }); }
+    else if (w[2] === 'set' && w[5]) last.set(`${ch}#${w[5]}`, { agent, seq: e.seq });
+    else if (w[2] === 'remove' && w[5]) { last.delete(`${ch}#${w[5]}`); ids.set(ch, (ids.get(ch) ?? []).filter((x) => x !== Number(w[5]))); }
+  }
+  const out = new Set<string>();
+  for (const [k, v] of last) if (v.agent && v.seq > approvedSeq) out.add(k);
+  return out;
+}
+
 export interface ParamTrail { by: 'agent' | 'you'; seq: number; value: number; prev: number | null }
 
 /**
@@ -280,7 +309,7 @@ export function paramTrails(tape: readonly TapeEntry[], songId: string): Map<str
     if (w[0] !== 'song') continue;
     if (w[1] === 'mark' && w[2] === songId && w[3] === 'approved') { approvedSeq = e.seq; continue; }
     if ((w[1] === 'channel' && (w[2] === 'set' || w[2] === 'add')) && w[3] === songId && w[4]) {
-      for (const [k, v] of pairs(w.slice(5))) if (['gain', 'pan', 'reverb', 'delay'].includes(k)) push(`${w[4]}.${k}`, e, v);
+      for (const [k, v] of pairs(w.slice(5))) if (['gain', 'pan', 'reverb', 'delay', 'convolve'].includes(k)) push(`${w[4]}.${k}`, e, v);
     } else if (w[1] === 'send' && w[2] === songId && w[3]) {
       for (const [k, v] of pairs(w.slice(4))) push(`bus.${w[3]}.${k}`, e, v);
     } else if (w[1] === 'fx' && w[2] === 'set' && w[3] === songId && w[4]) {

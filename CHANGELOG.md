@@ -106,6 +106,11 @@ All notable changes to SoundClaw are listed here. The format follows
   listens to the recording once and writes the one it found. Audio channels have the gain, pan, game layer and sends of any channel and render and cache like the others (a partial render is
   the render of the whole to the byte, the same in Node and the browser); loops fold a clip that runs past the end onto the start. The song carries the clips' licences, a clip's sample cannot
   be removed while it is there, and a rename follows.
+- **Audio in sounds and songs on the dashboard.** An audio channel has a lane of clips in the arrangement: a block for each recording, sized by it and drawn from it, with a badge for the tempo
+  fit and the pitch, the agent's in violet and dashed. A click selects a clip and opens its settings (each field is one `song clip set`), a drag or the arrow keys move it along the beats, a sample
+  dragged from the Samples tab onto the lane places one, and *+ audio* adds an audio channel. The mixer has a strip for the channel and one for the convolution bus. A convolve device card draws the
+  response it uses and its panel picks the response from the project's samples; a grain layer has a card and a map (the sample, the band the grains are taken from, how many sound at once).
+  The page renders a song with clips and a room to the bytes Node renders.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.

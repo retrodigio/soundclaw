@@ -89,7 +89,7 @@ export function InstrumentPanel({ store, song }: { store: Store; song: SongDoc }
                     <select data-testid={`chan-inst-${c.name}`} value={c.inst} onChange={(e) => send(`song channel set ${song.id} ${c.name} inst=${e.target.value}`)}>
                       {[...new Set([c.inst, ...choices])].map((x) => <option key={x} value={x}>{x}{(BUILTIN_NAMES as readonly string[]).includes(x) && !store.instruments.some((i) => i.id === x) ? ' (built-in)' : ''}</option>)}
                     </select>
-                  ) : <span className="dim">drum kit{c.kit && Object.keys(c.kit).length ? ` (${Object.entries(c.kit).map(([k, v]) => `${k}:${v}`).join(', ')})` : ''}</span>}
+                  ) : c.clips ? <span className="dim" data-testid={`chan-audio-${c.name}`}>audio · {c.clips.length} clip{c.clips.length === 1 ? '' : 's'}</span> : <span className="dim">drum kit{c.kit && Object.keys(c.kit).length ? ` (${Object.entries(c.kit).map(([k, v]) => `${k}:${v}`).join(', ')})` : ''}</span>}
                 </td>
                 <td><Knob label="" min={0} max={2} step={0.01} value={c.gain} testid={`chan-gain-${c.name}`} onCommit={(v) => send(`song channel set ${song.id} ${c.name} gain=${Number(v.toFixed(2))}`)} /></td>
                 <td><Knob label="" min={-1} max={1} step={0.01} value={c.pan} testid={`chan-pan-${c.name}`} onCommit={(v) => send(`song channel set ${song.id} ${c.name} pan=${Number(v.toFixed(2))}`)} /></td>

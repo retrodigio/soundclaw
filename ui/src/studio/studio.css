@@ -215,3 +215,12 @@ button.chip-c:hover { border-color: var(--line2); color: var(--text); }
 .loud-stack { display: flex; flex-direction: column; gap: var(--sp-12); }
 .fader-demo { align-items: flex-end; gap: var(--sp-24); }
 .kit-vlist { height: 200px; border: 1px solid var(--line); border-radius: var(--r-cell); background: var(--ground); }
+
+/* the grain map: the sample, where the grains are taken, how many sound at once */
+.grain-map svg { display: block; background: var(--ground); border: 1px solid var(--line); border-radius: var(--r-cell); }
+.grain-map .gm-wave { fill: var(--text3, var(--text2)); opacity: 0.8; }
+.grain-map .gm-band { fill: var(--you); opacity: 0.2; }
+.grain-map .gm-pos { stroke: var(--you); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.grain-map[data-missing] svg { border-style: dashed; }
+.grain-map .gm-words { margin: var(--sp-4) 0 0; }
+.device.source .grain-map { margin: 2px 0; }

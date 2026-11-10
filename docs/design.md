@@ -218,6 +218,17 @@ averages the minimum over the window, so the gain is at most what each sample ne
 (60.3 dB under its peak, with a 3 ms fade when an effect's tail was cut), never inside a layer's own source, so a classic voice in a layer
 keeps its length and `layer-up` keeps the samples.
 
+**Audio inside sounds and songs.** Three renderers read samples through the same bank a sample layer uses, and follow the determinism rule: `convolve` (an
+effect: a uniformly partitioned FFT convolution in `core/src/convolve.ts`, blocks of 2048 frames, the radix-2 FFT and fdlibm sine of the stretcher, fixed
+order, so the same bytes in Node and the browser), `grain` (a source: Hann-windowed grains cut around a position, the positions and gaps drawn from the
+layer's seed in a fixed order, so a cloud is the same everywhere), and audio clips (a channel kind of a song: each clip is the sample layer the renderer
+already has, with the windowed sinc and the time stretch, fitted to the song's tempo and placed on its bar and beat, `core/src/clips.ts` and
+`renderAudioChannel` in `songrender.ts`). Whatever has to be measured is measured when the command runs and written into it: `fx add convolve` writes the
+response's length, `song clip add … stretch=tempo` the tempo it listened for. The render key holds the hash of every sample read (a response, the sample
+of a grain layer, a clip), so pointing a name at other audio renders again and undo brings the old audio back, and a channel's cache key holds each
+clip's place, settings and sample hash and the tempo, so a partial render of a song is the render of the whole to the byte. Licences travel with the
+samples: a sound, an instrument and a song carry those of every response, grain source and clip they read.
+
 ## The server
 
 `soundclaw serve --project <folder>` is one process: MCP on stdin/stdout for the agent, an HTTP
@@ -466,7 +477,7 @@ the mixer, `#/song/<id>/mixer` (also the bottom panel's Mixer tab). `ui/src/song
 
 **The arrangement** is a row per channel, ordered by game layer (the stem tag and a rule between layers), on a bar ruler. The sections are markers; the
 loop region is a band with two handles (an end or the whole band snaps to the sections' edges, one `song loop` per drag) and the seam check's verdict is a
-badge at its end. Each placement of a pattern in which a channel plays is a clip with a sketch of its notes. A clip is violet and dashed while the agent
+badge at its end. Each placement of a pattern in which a channel plays is a clip with a sketch of its notes. An **audio channel** has a lane of audio clips instead (`ui/src/song/AudioClips.tsx`): a block for each recording, as long as the recording is once its audio has been fetched, with a sketch of its waveform (the part that plays), the tempo fit and pitch as a badge, and the agent's in violet and dashed (`clipAuthors` reads the tape as `patternAuthors` does). A click selects a clip and opens its settings, a drag moves it along the beats and the arrow keys a beat (one `song clip set` each), and a sample dragged from the Samples tab onto the lane is one `song clip add` at the beat under it. A clip is violet and dashed while the agent
 wrote its row and nobody has approved it: `patternAuthors` reads the tape (undone groups left out) and calls a `pattern/channel` row the agent's when the
 latest command that changed it was an agent's (a `pattern set` counts the rows whose cells differ from what the tape last said, a note edit its row, a
 helper its channel) and neither `song mark … approved` nor a person's edit of that row came after. Song checks are drawn from the server's report

@@ -169,7 +169,7 @@ export function PatternGrid({ song, pattern, channel, cursorStep, send, onChanne
             }
             return (
               <tr key={ch.name} className={`note-row${channel === ch.name ? ' picked' : ''}`} data-testid={`grid-row-${ch.name}`} onClick={() => onChannel(ch.name)}>
-                <th className="chan" title={`${ch.name}: ${ch.inst}; click to open it in the piano roll`}>{ch.name}</th>
+                <th className="chan" title={ch.clips ? `${ch.name}: audio clips (no notes)` : `${ch.name}: ${ch.inst}; click to open it in the piano roll`}>{ch.name}</th>
                 {steps.map((s) => {
                   const c = cells[s];
                   return <td key={s} className={`cell${c?.kind === 'hold' ? ' hold' : c?.kind === 'notes' ? ' note' : ''}${barCls(s)}${cursorStep === s ? ' now' : ''}`} data-testid={`cell-${ch.name}-${s}`}>{c && c.kind !== 'rest' && c.kind !== 'hold' ? formatCell(c).replace(/~.*$/, '~') : ''}</td>;
