@@ -6,7 +6,7 @@
 //   elevenlabs  ElevenLabs' sound effects (POST /v1/sound-generation) and music (POST /v1/music) endpoints; the key comes from
 //               ELEVENLABS_API_KEY in the environment of the process that calls, and is never written anywhere
 
-import { pcmFromFloats, sha256Text, sinRad, type PcmAudio } from '@soundclaw/core';
+import { pcmChannels, pcmFromFloats, sha256Text, sinRad, type PcmAudio } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
 
 export type GenKind = 'sfx' | 'music';
@@ -162,6 +162,23 @@ export function fakeAudio(req: GenRequest): PcmAudio {
   return pcmFromFloats([out], rate, 'pcm16');
 }
 
+/**
+ * With SOUNDCLAW_FAKE_LONGER=<factor> (a test and demo knob, like a real provider that returns takes longer than asked) the take is
+ * `factor` times as long: the audio that was asked for, 60% of the way in, in a faint bed of noise.
+ */
+function fakeLonger(a: PcmAudio): PcmAudio {
+  const f = Number(process.env.SOUNDCLAW_FAKE_LONGER);
+  if (!(f > 1) || !Number.isFinite(f)) return a;
+  const x = pcmChannels(a)[0]!;
+  const n = Math.round(x.length * f);
+  const at = Math.round((n - x.length) * 0.6);
+  const out = new Float32Array(n);
+  const rnd = noise(12345);
+  for (let i = 0; i < n; i++) out[i] = rnd() * 0.001;
+  out.set(x, at);
+  return pcmFromFloats([out], a.rate, 'pcm16');
+}
+
 const KIND_LIMITS: Record<GenKind, KindLimits> = {
   sfx: { minDuration: 0.5, maxDuration: 30, defaultDuration: 2, maxPrompt: 1000, loop: true, influence: true },
   music: { minDuration: 10, maxDuration: 300, defaultDuration: 30, maxPrompt: 2000, loop: false, influence: false },
@@ -178,7 +195,7 @@ export const fakeProvider: Provider = {
   outputFormat: () => 'pcm_44100',
   rate: () => 0,
   async generate(req, ctx) {
-    const a = fakeAudio(req);
+    const a = fakeLonger(fakeAudio(req));
     const credits = estimateTake(fakeProvider, req.kind, req.duration, ctx.settings);
     return { bytes: a.data, container: 'pcm16', rate: a.rate, channels: a.channels, format: 'pcm_44100', request: `fake-${sha256Text(`${req.prompt}\n${req.take}`).slice(0, 12)}`, credits };
   },

@@ -226,7 +226,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       forgets a library and its index; tags added by hand go with it, so then it needs --yes. use copies one file into the
       project's store (a tape command, one undo group) as source=library, origin <library>:<path>, with the
       library's licence; the library itself never enters the project.
-  soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=1..4] [loop=yes] [influence=<0-1>] [as=<name>] [want="<numbers query>"] [like=<sound|sample:name>] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]
+  soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=1..4] [loop=yes] [influence=<0-1>] [as=<name>] [want="<numbers query>"] [like=<sound|sample:name|file>] [trim=yes] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]
   soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>] [--estimate]
   soundclaw generate --ledger [<project>] [--json]
   soundclaw generate config [<key>=<value>...]
@@ -241,7 +241,8 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       dashboard; no MCP tool and no command of the language sets a cap: an agent asks) and of the daily cap
       across projects (3000). Estimates use credits per second (sound effects 10, music 27.4); the charge logged is
       the provider's cost header, else the change in the account's counter. --estimate prints the cost and the
-      budget and calls nothing. want= and like= rank the takes; each prints its numbers and words. The key is read
+      budget and calls nothing. want= and like= rank the takes (like= with the level matched); each prints its numbers and words. trim=yes cuts a take
+      that comes back longer than duration= to it, around its loudest part (or the part closest to like=). The key is read
       from ELEVENLABS_API_KEY in the environment of the process that calls (a running server's, when one owns the
       project) and is never written anywhere. Paid providers are refused when CI or SOUNDCLAW_NO_PAID=1 is set; the
       music endpoint is held until generate config elevenlabs.music=on. Every command is logged in the project's

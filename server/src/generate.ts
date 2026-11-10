@@ -10,7 +10,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
-  SAMPLE_NAME_RE, bandEnergies, describeSample, matchQuery, measureSample, parseQuery, pcmChannels, pcmHash, rangeCentre, sampleAddText, sha256Hex, similarDistance, similarVector,
+  SAMPLE_NAME_RE, bandEnergies, describeSample, loudestWindow, matchQuery, measureSample, parseQuery, pcmChannels, pcmFromFloats, pcmHash, rangeCentre, windowStarts, sampleAddText, sha256Hex, similarDistance, similarVector,
   type PcmAudio, type Query, type SampleEntry, type SampleMeasure,
 } from '@soundclaw/core';
 import { compareSide } from './ears.ts';
@@ -276,8 +276,10 @@ export interface GenerateOptions {
   as?: string;
   /** A numbers query the takes are ranked against. */
   want?: string;
-  /** A sound or sample:<name> the takes are ranked by closeness to. */
+  /** A sound, sample:<name> or audio file the takes are ranked by closeness to. */
   like?: string;
+  /** Cut each take that comes back longer than `duration` to `duration`, around its loudest part (or the part closest to `like=`). */
+  trim?: boolean;
   provider?: string;
   tags?: string;
   by: string;
@@ -380,10 +382,10 @@ export function planGeneration(w: Writer, o: GenerateOptions, cfg: GenerationCon
   if (provider.paid && provider.keyVar && !refusals.length && !process.env[provider.keyVar]) refusals.push(`${provider.keyVar} is not set in the environment of the process that calls (${process.argv.includes('serve') ? `the soundclaw server for this project, pid ${process.pid}` : 'this soundclaw command'}); the key is read from there only, never from a file`);
   const format = provider.outputFormat(o.kind, settings);
   const params: Record<string, unknown> = {
-    duration, ...(o.kind === 'sfx' ? { loop } : {}), ...(o.influence !== undefined ? { influence: o.influence } : {}), format,
+    duration, ...(o.kind === 'sfx' ? { loop } : {}), ...(o.influence !== undefined ? { influence: o.influence } : {}), format, ...(o.trim ? { trim: true } : {}),
     ...(o.composition !== undefined ? { composition: o.composition } : {}),
   };
-  const paramsText = [`duration=${duration}`, ...(o.kind === 'sfx' ? [`loop=${loop ? 'yes' : 'no'}`] : []), ...(o.influence !== undefined ? [`influence=${o.influence}`] : []), `format=${format}`, ...(o.composition !== undefined ? ['composition=yes'] : [])].join(' ');
+  const paramsText = [`duration=${duration}`, ...(o.kind === 'sfx' ? [`loop=${loop ? 'yes' : 'no'}`] : []), ...(o.influence !== undefined ? [`influence=${o.influence}`] : []), `format=${format}`, ...(o.trim ? ['trim=yes'] : []), ...(o.composition !== undefined ? ['composition=yes'] : [])].join(' ');
   return {
     provider, settings, o, kind: o.kind, prompt, duration, takes, loop, ...(o.influence !== undefined ? { influence: o.influence } : {}), model, names, firstTake, perTake, total, budget,
     licence: 'id' in lic ? lic.id : 'unknown', params, paramsText, refusals, ...(want ? { want } : {}), ...(like ? { like } : {}),
@@ -419,6 +421,8 @@ export interface TakeResult {
   distance?: number;
   /** With like=: the distance as it is, loudness included. */
   distanceWithLevel?: number;
+  /** With trim=yes: the take came back `from` seconds long and was cut to `to`, starting `at` seconds in. */
+  trimmed?: { from: number; to: number; at: number; by: 'loudest' | 'like' };
   rank?: number;
 }
 
@@ -439,6 +443,37 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
   const run = queue.then(fn, fn);
   queue = run.catch(() => undefined);
   return run;
+}
+
+/**
+ * `trim=yes`: a take longer than the duration asked for (a provider's habit) is cut to that duration, from the start that holds its loudest
+ * part, or with `like=` from the one whose sounds-like distance (level matched) to the reference is least. The cut ends are faded over 3 ms so
+ * they do not click. A take no longer than asked (within 2 %) is left as it is.
+ */
+export function trimTake(audio: PcmAudio, seconds: number, like?: { vector: number[] }): { audio: PcmAudio; trimmed: NonNullable<TakeResult['trimmed']> } | null {
+  const win = Math.round(seconds * audio.rate);
+  if (win < 2 || audio.frames <= win * 1.02) return null;
+  const chs = pcmChannels(audio, 600);
+  const loud = loudestWindow(chs, win);
+  let start = loud;
+  let by: 'loudest' | 'like' = 'loudest';
+  const cut = (a: number): PcmAudio => pcmFromFloats(chs.map((c) => c.slice(a, a + win)), audio.rate, audio.format);
+  if (like) {
+    let best = Infinity;
+    for (const a of [...new Set([loud, ...windowStarts(audio.frames, win)])]) {
+      const piece = cut(a);
+      const d = similarDistance(like.vector, similarVector(measureSample(pcmChannels(piece, 120), piece.rate), bandEnergies(monoAt44(piece, 20))), true);
+      if (d < best - 1e-9) { best = d; start = a; }
+    }
+    by = 'like';
+  }
+  const out = chs.map((c) => c.slice(start, start + win));
+  const fade = Math.min(Math.round(audio.rate * 0.003), Math.floor(win / 2));
+  for (const c of out) {
+    if (start > 0) for (let i = 0; i < fade; i++) c[i] = c[i]! * (i / fade);
+    if (start + win < audio.frames) for (let i = 0; i < fade; i++) c[win - 1 - i] = c[win - 1 - i]! * (i / fade);
+  }
+  return { audio: pcmFromFloats(out, audio.rate, audio.format), trimmed: { from: audio.frames / audio.rate, to: win / audio.rate, at: start / audio.rate, by } };
 }
 
 /** A take's bytes as stored audio. */
@@ -503,9 +538,16 @@ export function runGeneration(w: Writer, o: GenerateOptions): Promise<GenerateRe
     const at = w.stamp();
     const records: TakeRecord[] = [];
     const prepared: (Prepared & { take: number; credits: number; request?: string })[] = [];
+    const trims = new Map<string, NonNullable<TakeResult['trimmed']>>();
     for (const x of outs) {
       try {
-        const { audio, notes } = takeAudio(x.out, x.name);
+        const got = takeAudio(x.out, x.name);
+        const notes = got.notes;
+        let audio = got.audio;
+        if (plan.o.trim && plan.kind === 'sfx') {
+          const t = trimTake(audio, plan.duration, plan.like);
+          if (t) { audio = t.audio; trims.set(x.name, t.trimmed); }
+        }
         const hash = pcmHash(audio);
         const entry: SampleEntry = {
           name: x.name, hash, rate: audio.rate, channels: audio.channels, frames: audio.frames, format: audio.format,
@@ -560,7 +602,7 @@ export function runGeneration(w: Writer, o: GenerateOptions): Promise<GenerateRe
       if (!committed.has(p.name)) continue;
       const chs = pcmChannels(p.audio, 120);
       const m = measureSample(chs, p.audio.rate);
-      const t: TakeResult = { name: p.name, take: p.take, hash: p.hash, credits: p.credits, ...(p.request ? { request: p.request } : {}), measure: m, words: describeSample(m) };
+      const t: TakeResult = { name: p.name, take: p.take, hash: p.hash, credits: p.credits, ...(p.request ? { request: p.request } : {}), measure: m, words: describeSample(m), ...(trims.has(p.name) ? { trimmed: trims.get(p.name)! } : {}) };
       if (plan.like) {
         const v = similarVector(m, bandEnergies(monoAt44(p.audio, 20)));
         t.distance = similarDistance(plan.like.vector, v, true);
@@ -582,7 +624,7 @@ function takeLine(t: TakeResult, plan: GeneratePlan): string {
   const rank = t.rank !== undefined ? `${t.rank}. ` : '';
   const fit = t.fits === undefined ? '' : t.fits ? '  fits want' : `  misses ${t.failed!.join(', ')}`;
   const like = t.distance !== undefined ? `  distance ${t.distance.toFixed(2)} from ${plan.like!.label} (level matched; ${t.distanceWithLevel!.toFixed(2)} with the level)` : '';
-  return `${rank}${t.name}  ${m.duration.toFixed(3)} s  ${f1(m.lufs)} LUFS  peak ${f1(m.peakDb)} dBFS  centroid ${Math.round(m.centroid)} Hz  attack ${m.attackMs.toFixed(1)} ms  pitch ${m.pitched && m.pitch ? m.pitch.note : 'none'}  ${round(t.credits)} credits${t.request ? `  request ${t.request}` : ''}${fit}${like}\n   ${t.words.join(' ')}`;
+  return `${rank}${t.name}  ${m.duration.toFixed(3)} s  ${f1(m.lufs)} LUFS  peak ${f1(m.peakDb)} dBFS  centroid ${Math.round(m.centroid)} Hz  attack ${m.attackMs.toFixed(1)} ms  pitch ${m.pitched && m.pitch ? m.pitch.note : 'none'}  ${round(t.credits)} credits${t.request ? `  request ${t.request}` : ''}${fit}${like}${t.trimmed ? `  trimmed from ${t.trimmed.from.toFixed(2)} s to ${t.trimmed.to.toFixed(2)} s, from ${t.trimmed.at.toFixed(2)} s in (${t.trimmed.by === 'like' ? `the part closest to ${plan.like!.label}` : 'around its loudest part'})` : ''}\n   ${t.words.join(' ')}`;
 }
 
 export function generateText(r: GenerateResult, projectArg = '<project>'): string {
@@ -606,7 +648,7 @@ export function generateJson(r: GenerateResult): Record<string, unknown> {
   return {
     provider: r.plan.provider.id, endpoint: r.plan.provider.endpoint(r.plan.kind), model: r.plan.model, kind: r.plan.kind, prompt: r.plan.prompt, estimate: r.plan.total, charge: r.charge, chargeFrom: r.chargeFrom,
     licence: r.plan.licence, group: r.group, errors: r.errors,
-    takes: r.takes.map((t) => ({ name: t.name, hash: t.hash, credits: t.credits, request: t.request ?? null, rank: t.rank ?? null, fits: t.fits ?? null, distance: t.distance === undefined ? null : round(t.distance), distanceWithLevel: t.distanceWithLevel === undefined ? null : round(t.distanceWithLevel), dur: round(t.measure.duration), lufs: Number.isFinite(t.measure.lufs) ? round(t.measure.lufs) : null, centroid: Math.round(t.measure.centroid), attack: round(t.measure.attackMs), words: t.words.join(' ') })),
+    takes: r.takes.map((t) => ({ name: t.name, hash: t.hash, credits: t.credits, request: t.request ?? null, rank: t.rank ?? null, fits: t.fits ?? null, distance: t.distance === undefined ? null : round(t.distance), distanceWithLevel: t.distanceWithLevel === undefined ? null : round(t.distanceWithLevel), trimmedFrom: t.trimmed ? round(t.trimmed.from) : null, dur: round(t.measure.duration), lufs: Number.isFinite(t.measure.lufs) ? round(t.measure.lufs) : null, centroid: Math.round(t.measure.centroid), attack: round(t.measure.attackMs), words: t.words.join(' ') })),
   };
 }
 
@@ -625,6 +667,7 @@ export function againOptions(w: Writer, name: string, by: string): GenerateOptio
   const d = num(params.duration);
   if (d !== undefined) o.duration = d;
   if (params.loop === true || params.loop === 'yes') o.loop = true;
+  if (params.trim === true || params.trim === 'yes') o.trim = true;
   const inf = num(params.influence);
   if (inf !== undefined) o.influence = inf;
   if (e.prov.model) o.model = e.prov.model;
@@ -697,7 +740,7 @@ export async function generateFromBody(w: Writer, b: GenerateBody, projectArg = 
 // ---- reading options from words -------------------------------------------------------------------------------------------
 
 /** The `key=value` words of `generate` (CLI and HTTP), checked. */
-export const GENERATE_KEYS = ['duration', 'takes', 'loop', 'influence', 'model', 'as', 'want', 'like', 'provider', 'tags', 'composition'];
+export const GENERATE_KEYS = ['duration', 'takes', 'loop', 'influence', 'model', 'as', 'want', 'like', 'trim', 'provider', 'tags', 'composition'];
 
 export function optionsFromPairs(kind: string, prompt: string, kv: Record<string, string>, by: string): GenerateOptions {
   for (const k of Object.keys(kv)) if (!GENERATE_KEYS.includes(k)) throw new ProjectError(`generate: no field '${k}' (${GENERATE_KEYS.join(', ')})`);
@@ -715,6 +758,10 @@ export function optionsFromPairs(kind: string, prompt: string, kv: Record<string
   if (kv.loop !== undefined) {
     if (!['yes', 'no', 'on', 'off', '1', '0', 'true', 'false'].includes(kv.loop)) throw new ProjectError('loop is yes or no');
     o.loop = ['yes', 'on', '1', 'true'].includes(kv.loop);
+  }
+  if (kv.trim !== undefined) {
+    if (!['yes', 'no', 'on', 'off', '1', '0', 'true', 'false'].includes(kv.trim)) throw new ProjectError('trim is yes or no');
+    o.trim = ['yes', 'on', '1', 'true'].includes(kv.trim);
   }
   for (const k of ['model', 'as', 'want', 'like', 'provider', 'tags'] as const) if (kv[k] !== undefined) o[k] = kv[k];
   if (kv.composition !== undefined) {

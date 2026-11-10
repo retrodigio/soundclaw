@@ -1387,7 +1387,7 @@ soundclaw generate config elevenlabs.plan=creator         # your settings
 ```
 
 `generate <project> sfx|music "<prompt>" [duration=<s>] [takes=1..4] [loop=yes] [influence=<0-1>] [as=<name>] [want="<numbers query>"]
-[like=<sound|sample:name|file>] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]`
+[like=<sound|sample:name|file>] [trim=yes] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]`
 
 | Setting | Sound effects | Music |
 |---|---|---|
@@ -1407,7 +1407,9 @@ call with the recorded prompt and parameters (from the ledger, else the provenan
 
 **Each take comes back with its numbers** (length, loudness, peak, centroid, attack, pitch, credits, request id) and its words, as `describe` gives them.
 `want="<numbers query>"` ranks the takes: those that fit first, then the closest. `like=<sound | sample:name | the path of an audio file>` (a reference outside the project, a WAV, or an OGG with ffmpeg) ranks them by the sounds-like distance of
-`library similar` **with the level matched**: a take's loudness says nothing about whether it is the sound you asked for, so it is left out of the ranking (each take's line gives the distance both ways, `distance 4.03 … (level matched; 4.44 with the level)`; `--json` has `distance` and `distanceWithLevel`). `want=` ranks on the numbers you name, so it depends on level only when you name `lufs`, `peak` or `rms`. Listen before you build on one, and remove the takes you do not keep (`sample remove`; the audio stays until `sample gc`).
+`library similar` **with the level matched**: a take's loudness says nothing about whether it is the sound you asked for, so it is left out of the ranking (each take's line gives the distance both ways, `distance 4.03 … (level matched; 4.44 with the level)`; `--json` has `distance` and `distanceWithLevel`). `want=` ranks on the numbers you name, so it depends on level only when you name `lufs`, `peak` or `rms`.
+
+**`trim=yes`**: a provider may return takes longer than the `duration` asked for (about twice, in a field test). With `trim=yes` each take longer than `duration` (by more than 2 %) is cut to `duration` before it is stored, from the start that holds its loudest part (the window with the most energy, looked at every 256 frames), or with `like=` the start whose part is closest to the reference by the level-matched sounds-like distance. The cut ends fade over 3 ms; the take line says `trimmed from 2.00 s to 1.00 s, from 0.60 s in (around its loudest part)`, `--json` has `trimmedFrom`, the provenance's params say `trim=yes` and `--again` repeats it. Sound effects only; a take no longer than asked is left as it came. The fake provider returns takes `N` times as long when `SOUNDCLAW_FAKE_LONGER=N` is set (its audio sits 60 % of the way into a faint bed of noise): the way to try `trim` with no key. Listen before you build on one, and remove the takes you do not keep (`sample remove`; the audio stays until `sample gc`).
 
 **Costs are capped before the call.** A command is worked out first: the provider, the names, and an estimate per take (credits per second: sound
 effects 10, music 27.4, measured from the provider's cost header; `elevenlabs.rate.sfx` and `.rate.music` change them). Any of these refuses the whole

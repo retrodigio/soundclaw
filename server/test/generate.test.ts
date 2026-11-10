@@ -19,7 +19,7 @@ const KEY = 'sk_stubkey0123456789abcdefSTUB';
 const claude = 'agent:claude';
 let f: Fixture;
 let stub: Stub | null = null;
-const ENV = ['SOUNDCLAW_CONFIG_DIR', 'ELEVENLABS_API_KEY', 'CI', 'SOUNDCLAW_NO_PAID'] as const;
+const ENV = ['SOUNDCLAW_CONFIG_DIR', 'ELEVENLABS_API_KEY', 'CI', 'SOUNDCLAW_NO_PAID', 'SOUNDCLAW_FAKE_LONGER'] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -296,6 +296,49 @@ describe('like= ranking', () => {
     expect(similarDistance(a, b)).toBeGreaterThan(0.5);
     expect(similarDistance(a, b, true)).toBe(0);
     expect(similarDistance(a, b.map((v, i) => (i === 3 ? 1.5 : v)), true)).toBeGreaterThan(0.5);
+  });
+});
+
+describe('trim=yes: takes that come back longer than asked', () => {
+  const frames = (name: string): number => f.w.samples.entry(name)!.frames;
+  it('the fake provider returns takes twice as long (SOUNDCLAW_FAKE_LONGER=2); trim=yes cuts each to the duration around its loudest part', async () => {
+    const plain = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 2, duration: 1, as: 'plain' }));
+    process.env.SOUNDCLAW_FAKE_LONGER = '2';
+    const long = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 2, duration: 1, as: 'long' }));
+    expect(long.takes.map((t) => frames(t.name))).toEqual([88200, 88200]); // as the provider sends them
+    expect(long.takes.every((t) => t.trimmed === undefined)).toBe(true);
+    const cut = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 2, duration: 1, as: 'cut', trim: true }));
+    expect(cut.takes.map((t) => frames(t.name)).sort()).toEqual([44100, 44100]);
+    for (const t of cut.takes) {
+      expect(t.trimmed).toMatchObject({ from: 2, to: 1, by: 'loudest' });
+      expect(t.trimmed!.at).toBeGreaterThan(0.55); // the loud part sits 0.6 s in, in a bed of faint noise
+      expect(t.trimmed!.at).toBeLessThan(0.62);
+      expect(t.measure.duration).toBeCloseTo(1, 3);
+    }
+    // it kept the part that was asked for: as loud as the same take generated at the length asked
+    const asked = new Map(plain.takes.map((t) => [t.take, t.measure.lufs] as const));
+    delete process.env.SOUNDCLAW_FAKE_LONGER;
+    for (const t of cut.takes) expect(Math.abs(t.measure.lufs - (asked.get(t.take) ?? asked.get(t.take - 2) ?? t.measure.lufs))).toBeLessThan(3);
+    const text = generateText(cut);
+    expect(text).toMatch(/trimmed from 2\.00 s/);
+    expect(text).toMatch(/trimmed from 2\.00 s to 1\.00 s, from 0\.\d\d s in \(around its loudest part\)/);
+    expect((generateJson(cut).takes as { trimmedFrom: number }[])[0]!.trimmedFrom).toBe(2);
+    // the provenance says so, and generating again remembers it
+    expect(f.w.samples.entry(cut.takes[0]!.name)!.prov.params).toContain('trim=yes');
+    expect(againOptions(f.w, cut.takes[0]!.name, claude).trim).toBe(true);
+  });
+  it('with like= the part closest to the reference is kept; a take no longer than asked is left alone; trim=no and the default do nothing', async () => {
+    process.env.SOUNDCLAW_FAKE_LONGER = '2';
+    f.w.run({ commands: 'sound new ref voice=classic preset=hit seed=3', by: claude });
+    const r = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 2, duration: 1, as: 'near', trim: true, like: 'ref' }));
+    expect(r.takes.every((t) => t.trimmed?.by === 'like' && frames(t.name) === 44100)).toBe(true);
+    expect(generateText(r)).toMatch(/the part closest to ref\)/);
+    delete process.env.SOUNDCLAW_FAKE_LONGER;
+    const exact = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 1, duration: 1, as: 'exact', trim: true }));
+    expect(exact.takes[0]!.trimmed).toBeUndefined();
+    expect(frames(exact.takes[0]!.name)).toBe(44100);
+    expect(optionsFromPairs('sfx', 'x', { trim: 'no' }, claude).trim).toBe(false);
+    expect(() => optionsFromPairs('sfx', 'x', { trim: 'maybe' }, claude)).toThrow(/trim is yes or no/);
   });
 });
 

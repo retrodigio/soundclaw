@@ -520,7 +520,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('generate', {
     title: 'Generate audio',
-    description: 'Make sound effects (or music) from a prompt with an AI provider and keep each take as a sample (<as>_t1, <as>_t2, ...: numbered after takes already there) with its provenance (provider, model, prompt, parameters, take, request id, credits) and the licence the provider\'s plan gives, as one undo group. Every cap is checked before the first call, and nothing is called if one would be passed: one take at most the per-call maximum (300 credits by default), the whole command within what is left of the project\'s cap (project.json "generation": {"capCredits": n}; 0 by default, so paid generation is off until a person sets one) and of the user\'s daily cap (3000). estimate: true prints the cost and the budget and calls nothing: use it first. Paid providers are refused in CI and with SOUNDCLAW_NO_PAID=1; provider "fake" makes test audio for free. Each take comes back with its numbers and words; want (a numbers query) and like (a sound or sample:<name>) rank them. Write the prompt as a sound designer would: the source, the action, the material, the space ("the slow creak of an old wooden door hinge, close, dry, no reverb"). again: a generated sample\'s prompt and parameters for new takes (not the same audio). action ledger: what this project has spent; config: the user\'s generation settings.',
+    description: 'Make sound effects (or music) from a prompt with an AI provider and keep each take as a sample (<as>_t1, <as>_t2, ...: numbered after takes already there) with its provenance (provider, model, prompt, parameters, take, request id, credits) and the licence the provider\'s plan gives, as one undo group. Every cap is checked before the first call, and nothing is called if one would be passed: one take at most the per-call maximum (300 credits by default), the whole command within what is left of the project\'s cap (project.json "generation": {"capCredits": n}; 0 by default, so paid generation is off until a person sets one) and of the user\'s daily cap (3000). estimate: true prints the cost and the budget and calls nothing: use it first. Paid providers are refused in CI and with SOUNDCLAW_NO_PAID=1; provider "fake" makes test audio for free. Each take comes back with its numbers and words; want (a numbers query) and like (a sound, sample:<name> or an audio file path; level matched) rank them; trim: true cuts takes the provider made longer than asked back to the duration, around the loudest part. Write the prompt as a sound designer would: the source, the action, the material, the space ("the slow creak of an old wooden door hinge, close, dry, no reverb"). again: a generated sample\'s prompt and parameters for new takes (not the same audio). action ledger: what this project has spent; config: the user\'s generation settings.',
     inputSchema: z.object({
       action: z.enum(['generate', 'ledger', 'config']).optional().describe('generate (default), ledger, config'),
       kind: z.enum(['sfx', 'music']).optional().describe('sfx (default) or music (held until the user turns it on)'),
@@ -532,7 +532,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       model: z.string().optional().describe('the provider\'s model id (default: its sound effects or music model)'),
       as: z.string().optional().describe('the takes are <as>_t1, ... (default: words of the prompt)'),
       want: z.string().optional().describe('a numbers query to rank the takes by, like "dur=1.5-2.5 centroid<2.5k attack<40ms"'),
-      like: z.string().optional().describe('a sound or sample:<name> to rank the takes by closeness to'),
+      like: z.string().optional().describe('a sound, sample:<name> or the path of an audio file to rank the takes by closeness to (the level is matched: loudness is left out of the distance)'),
+      trim: z.boolean().optional().describe('cut each take that comes back longer than duration to duration, around its loudest part (or, with like, the part closest to it)'),
       provider: z.string().optional().describe('elevenlabs or fake (default: the user\'s setting, else elevenlabs)'),
       tags: z.string().optional().describe('comma-separated tags for the takes'),
       composition: z.string().optional().describe('music: a composition plan as JSON text, instead of the prompt'),
@@ -547,6 +548,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       const pairs: Record<string, string> = {};
       for (const k of ['duration', 'takes', 'influence', 'model', 'as', 'want', 'like', 'provider', 'tags', 'composition'] as const) if (a[k] !== undefined) pairs[k] = String(a[k]);
       if (a.loop !== undefined) pairs.loop = a.loop ? 'yes' : 'no';
+      if (a.trim !== undefined) pairs.trim = a.trim ? 'yes' : 'no';
       const body = a.again
         ? { again: a.again, pairs: Object.fromEntries(Object.entries(pairs).filter(([k]) => k === 'takes' || k === 'as')), estimate: !!a.estimate, by: agentName(a.by) }
         : { kind: a.kind ?? 'sfx', prompt: a.prompt ?? '', pairs, estimate: !!a.estimate, by: agentName(a.by) };

@@ -542,3 +542,35 @@ export function sampleFeatureVector(m: SampleMeasure): number[] {
     fin(m.noiseFloorDb, -120) / 60,
   ];
 }
+
+
+// ---- choosing a window of a longer take ----------------------------------------------------------------------------
+
+/** Start frames to try for a window of `win` frames in `total` frames: spread evenly (at most `max`), the first and the last possible included. */
+export function windowStarts(total: number, win: number, max = 16): number[] {
+  const last = Math.max(0, total - win);
+  const n = Math.max(1, Math.min(max, last + 1));
+  const out = new Set<number>();
+  for (let i = 0; i < n; i++) out.add(n === 1 ? 0 : Math.round((i * last) / (n - 1)));
+  return [...out].sort((a, b) => a - b);
+}
+
+/** The start frame of the loudest window of `win` frames (the most energy summed over the channels; the first when equal), looking every 256 frames. */
+export function loudestWindow(chs: readonly Float32Array[], win: number): number {
+  const total = chs[0]?.length ?? 0;
+  if (total <= win) return 0;
+  const prefix = new Float64Array(total + 1);
+  for (let i = 0; i < total; i++) {
+    let e = 0;
+    for (const c of chs) e += c[i]! * c[i]!;
+    prefix[i + 1] = prefix[i]! + e;
+  }
+  const last = total - win;
+  let best = 0, bestE = -1;
+  for (let a = 0; ; a = Math.min(last, a + 256)) {
+    const e = prefix[a + win]! - prefix[a]!;
+    if (e > bestE + 1e-12) { bestE = e; best = a; }
+    if (a >= last) break;
+  }
+  return best;
+}

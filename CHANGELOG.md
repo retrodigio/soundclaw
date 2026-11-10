@@ -21,6 +21,9 @@ All notable changes to SoundClaw are listed here. The format follows
 - **`describe`, `measure` and `view` take a reference file path** where they take a sound, as `compare` and `view … compare` already did (and
   `generate … like=`), so a reference that may not be shipped need not be imported to be read. The numbers, words and views are the sample's; nothing is
   written to the project.
+- **`generate … trim=yes`** cuts each take that comes back longer than the requested duration (a provider's habit: about twice) to that duration, around
+  its loudest part, or with `like=` the part closest to the reference. The cut ends fade over 3 ms; the take line and `--json` say what was cut. The fake provider
+  returns longer takes when `SOUNDCLAW_FAKE_LONGER=<factor>` is set.
 - **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
   (to 24), from the threshold and ratio the effect has then; the document holds the number.
 

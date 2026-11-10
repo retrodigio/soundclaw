@@ -162,3 +162,20 @@ describe('sample ears', () => {
     expect(Date.now() - t0).toBeLessThan(15_000);
   }, 60_000);
 });
+
+describe('choosing a window of a longer take', () => {
+  it('loudestWindow finds the start with the most energy; windowStarts spreads candidates and keeps both ends', async () => {
+    const { loudestWindow, windowStarts } = await import('../src/index.ts');
+    const x = new Float32Array(10000);
+    for (let i = 6000; i < 7000; i++) x[i] = 0.5;
+    const a = loudestWindow([x], 2000);
+    expect(a).toBeGreaterThan(5000);
+    expect(a).toBeLessThanOrEqual(6000);
+    expect(loudestWindow([x], 20000)).toBe(0); // no longer than the window: all of it
+    const s = windowStarts(10000, 2000, 5);
+    expect(s[0]).toBe(0);
+    expect(s[s.length - 1]).toBe(8000);
+    expect(s).toHaveLength(5);
+    expect(windowStarts(100, 100)).toEqual([0]);
+  });
+});
