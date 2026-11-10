@@ -203,7 +203,7 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
 export const SOUND_SPECS: readonly PSpec[] = [
   { ...num('duration', 0.01, MAX_DURATION, 0, 's', 'length of the sound; `auto` (the default) is as long as the layers and their tails'), optional: true },
   num('gain', 0, 4, 1, '', 'master level (before the master chain)'),
-  num('out', -48, 48, 0, 'dB', 'output level in dB, after the master chain (0 = off); `normalize` uses it when gain 4 is not enough'),
+  num('out', -48, 48, 0, 'dB', 'output level in dB, after the master chain (0 = off); older `normalize` runs put the rest of the level here; it now goes in front of the master limiter (`limit gain=`, below), so the peaks are held'),
   num('seed', 0, 4294967295, 1, '', 'the sound\'s noise seed (layers derive theirs from it)', false, true),
 ];
 
