@@ -38,7 +38,7 @@ describe('measure, check, describe and render as JSON', () => {
     expect(j.format).toBe('soundclaw-measure');
     expect(j.sounds.map((s: any) => s.id)).toEqual(['a', 'b', 'quiet']);
     const a = j.sounds[0];
-    expect(Object.keys(a).sort()).toEqual(['binding', 'checks', 'class', 'description', 'id', 'moment', 'numbers', 'pass', 'status', 'voice']);
+    expect(Object.keys(a).sort()).toEqual(['binding', 'checks', 'class', 'description', 'id', 'moment', 'numbers', 'pass', 'status', 'summary', 'voice']);
     expect(a.class).toMatchObject({ name: 'standard', target: -16, tolerance: 1, basis: 'class standard' });
     expect(j.sounds[1].class).toMatchObject({ name: 'ui', target: -28, tolerance: 3 });
     expect(a.checks.map((c: any) => c.name)).toEqual(['clip', 'loudness', 'dc', 'click', 'tail', 'harsh']);

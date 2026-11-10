@@ -368,7 +368,7 @@ export function measureSample(input: readonly Float32Array[], rate: number, opts
 
   const times = silent ? [] : findOnsets(x, rate);
   const hnrDb = silent ? -Infinity : hnrOf(mix44, 44100);
-  const pitch = silent ? null : pitchOf(a, x, rate);
+  const pitch = silent ? null : pitchOf(a, mix44, 44100);
   const pitched = !!pitch && pitch.confidence >= PITCHED_CONFIDENCE && hnrDb > PITCHED_HNR_DB;
   const lra = duration >= 3 && !a.silent ? loudnessRange(at44) : null;
 
