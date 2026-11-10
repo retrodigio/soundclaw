@@ -930,7 +930,10 @@ export class Store {
       src.start(0, offset);
       if (this.editStarted !== null) { this.lastEditToSound = Math.round(performance.now() - this.editStarted); this.editStarted = null; }
       const playedRegion = mode === 'full' && region ? { a: region.start - r.window.start, len: region.end - region.start } : null;
-      this.meters.begin({ song, render: r, mix: [mix[0], mix[1]], mixKey: all ? 'all' : audible.join(','), wrap: mode === 'loop', audible }, { perf: performance.now(), pos: offset, length: r.length / 44100, mode, region: playedRegion });
+      const irName = song.convolve ? String(song.convolve.p.ir) : '';
+      const irSample = irName ? this.sampleBank.get(irName) : undefined;
+      const ir = irSample ? { name: irName, hash: this.sampleBank.hash(irName) ?? irName, sample: irSample } : null;
+      this.meters.begin({ song, render: r, mix: [mix[0], mix[1]], mixKey: all ? 'all' : audible.join(','), wrap: mode === 'loop', audible, ir }, { perf: performance.now(), pos: offset, length: r.length / 44100, mode, region: playedRegion });
       this.changed();
     } catch (e) {
       this.songBusy = null;

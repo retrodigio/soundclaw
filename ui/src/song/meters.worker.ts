@@ -2,9 +2,9 @@
 // that changed), and it keeps a small track per channel: the peak of every 1/60 s block and the
 // K-weighted energy of it. While a song plays it reads those tracks at the playhead and posts the
 // levels about thirty times a second. The page draws them in requestAnimationFrame without touching
-// React state. The send buses are run here too.
+// React state. The send buses are run here too; the room (convolution) bus is given its response's audio.
 
-import { busReturns, kWeighting, type ChannelAudio, type SongDoc } from '@soundclaw/core';
+import { busReturns, kWeighting, type ChannelAudio, type SampleBank, type SampleData, type SongDoc } from '@soundclaw/core';
 
 const RATE = 44100;
 const BLOCK = 735; // 60 blocks a second
@@ -20,6 +20,8 @@ export interface LoadMessage {
   /** Every channel of the render, in the order the levels come back; `audio` only for the ones the worker does not hold. */
   parts: { name: string; layer: string; key: string; audio?: [Float32Array, Float32Array] }[];
   mix: [Float32Array, Float32Array] | null;
+  /** The room bus's response (the sample its `ir` names), or null when the song has no room or the page has not fetched it. */
+  ir: { name: string; hash: string; sample: SampleData } | null;
 }
 export interface PlayMessage {
   op: 'play';
@@ -91,18 +93,20 @@ function load(m: LoadMessage): void {
   const busKeys: { name: string; track: string | null; part: boolean }[] = [];
   const parts: ChannelAudio[] = m.parts.flatMap((p) => { const a = raw.get(p.key); return a ? [{ name: p.name, layer: p.layer, key: p.key, channels: a }] : []; });
   const N = parts[0]?.channels[0].length ?? 0;
-  for (const kind of ['reverb', 'delay'] as const) {
-    const k = `${m.key}|${kind}`;
+  const ir = m.ir;
+  const bank: SampleBank | undefined = ir ? { get: (n) => (n === ir.name ? ir.sample : undefined), hash: (n) => (n === ir.name ? ir.hash : undefined) } : undefined;
+  for (const kind of ['reverb', 'delay', 'convolve'] as const) {
+    const k = `${m.key}|${kind}${kind === 'convolve' && ir ? `|${ir.hash}` : ''}`;
     keep.add(k);
     if (m.song[kind] && N && !tracks.has(k)) {
-      const only = { ...m.song, reverb: kind === 'reverb' ? m.song.reverb : null, delay: kind === 'delay' ? m.song.delay : null } as SongDoc;
-      const ret = busReturns(only, parts, N, m.wrap);
+      const only = { ...m.song, reverb: null, delay: null, convolve: null, [kind]: m.song[kind] } as SongDoc;
+      const ret = busReturns(only, parts, N, m.wrap, bank);
       if (ret) tracks.set(k, trackOf(Float32Array.from(ret[0]), Float32Array.from(ret[1])));
     }
     busKeys.push({ name: kind, track: tracks.has(k) ? k : null, part: false });
   }
   // the audio itself is kept only for the buses, which run over all the channels at once
-  const keepRaw = !!(m.song.reverb || m.song.delay);
+  const keepRaw = !!(m.song.reverb || m.song.delay || m.song.convolve);
   for (const k of [...raw.keys()]) if (!keep.has(k) || !keepRaw) raw.delete(k);
   for (const k of [...tracks.keys()]) if (!keep.has(k)) tracks.delete(k);
   slots = [...m.parts.map((p) => ({ name: p.name, track: p.key, part: true })), { name: 'master', track: m.mixKey, part: false }, ...busKeys];

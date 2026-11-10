@@ -3,7 +3,7 @@
 // here. Meters read the latest values in requestAnimationFrame (`reader`), so nothing in React
 // changes at meter rate. The hub only does work while a mixer is mounted (`want`).
 
-import type { SongDoc, SongRender } from '@soundclaw/core';
+import type { SampleData, SongDoc, SongRender } from '@soundclaw/core';
 import type { LoadMessage, MeterIn, MeterOut, PlayMessage } from './meters.worker.ts';
 
 export type MeterMode = 'peak' | 'lufs';
@@ -15,6 +15,8 @@ interface Job {
   mixKey: string;
   wrap: boolean;
   audible: string[];
+  /** The room bus's response, for its meter. */
+  ir?: { name: string; hash: string; sample: SampleData } | null;
   play: Omit<PlayMessage, 'op' | 'audible'> | null;
 }
 
@@ -92,7 +94,7 @@ export class MeterHub {
     const w = this.start();
     const key = `${j.render.key}|${j.mixKey}`;
     // the worker keeps a channel's audio only when the song has a bus; a song that gained one needs it all again
-    const needRaw = !!(j.song.reverb || j.song.delay);
+    const needRaw = !!(j.song.reverb || j.song.delay || j.song.convolve);
     if (needRaw && !this.heldRaw) this.held.clear();
     this.heldRaw = needRaw;
     const parts = j.render.parts.map((p) => ({ name: p.name, layer: p.layer, key: p.key, ...(this.held.has(p.key) ? {} : { audio: p.channels }) }));
@@ -103,7 +105,8 @@ export class MeterHub {
     this.slot.set('master', n);
     this.slot.set('bus:reverb', n + 1);
     this.slot.set('bus:delay', n + 2);
-    const load: LoadMessage = { op: 'load', key, mixKey: j.mixKey, song: j.song, wrap: j.wrap, parts, mix: j.mix };
+    this.slot.set('bus:convolve', n + 3);
+    const load: LoadMessage = { op: 'load', key, mixKey: j.mixKey, song: j.song, wrap: j.wrap, parts, mix: j.mix, ir: j.ir ?? null };
     // the mix is sent once per distinct key
     if (this.loadedKey === key) load.mix = null;
     w.postMessage(load satisfies MeterIn);

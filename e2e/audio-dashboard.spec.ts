@@ -171,6 +171,22 @@ test('the mixer has a strip for the audio channel and the convolution bus, with 
   await expect(page.getByTestId('knob-loops-convolve')).toBeVisible();
 });
 
+test('the convolution bus meter moves while the song plays', async ({ page }) => {
+  test.setTimeout(90_000);
+  await start();
+  await open(page, '#/song/audio_loop/mixer');
+  await expect(page.getByTestId('strip-bus-convolve')).toBeVisible();
+  const read = () => page.evaluate(() => ([...document.querySelectorAll('[data-testid=meter-bus-convolve] .meter-fill')] as HTMLElement[]).map((f) => f.style.clipPath).join('|'));
+  const idle = await read();
+  await page.getByRole('button', { name: /^▶ Play$/ }).click();
+  await expect(page.getByTestId('song-editor')).toHaveAttribute('data-playing', 'true', { timeout: 30_000 });
+  const seen = new Set<string>();
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20_000 && seen.size < 4) { seen.add(await read()); await page.waitForTimeout(50); }
+  seen.delete(idle);
+  expect(seen.size).toBeGreaterThanOrEqual(3);
+});
+
 test('the convolve device card draws the response it uses, the panel picks it from the project\'s samples, and the room is a sample the sound cannot lose', async ({ page }) => {
   await start();
   await open(page, '#/sound/door_room');
