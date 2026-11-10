@@ -56,7 +56,8 @@ function header(c: Canvas, left: string, right: string): void {
 
 // ---- wave --------------------------------------------------------------------------------------
 
-export function waveView(x: Samples, a: Analysis, title = ''): Image {
+/** The waveform; `marks` are vertical lines with a label each (slice points, say), at times in seconds. */
+export function waveView(x: Samples, a: Analysis, title = '', marks: readonly { t: number; label: string }[] = []): Image {
   const H = 300;
   const c = new Canvas(W, H, BG);
   const px = LEFT, pw = W - LEFT - RIGHT, py = TOP, ph = H - TOP - BOTTOM;
@@ -86,6 +87,11 @@ export function waveView(x: Samples, a: Analysis, title = ''): Image {
       const y = Math.round(mid - s * a.peak * (ph / 2 - 1));
       c.hline(px, px + pw - 1, y, AMBER, 4);
     }
+  }
+  for (const m of marks) {
+    const mx = px + Math.round((m.t / a.duration) * (pw - 1));
+    c.vline(mx, py, py + ph, AMBER, 3);
+    c.text(m.label, mx + 3, py + 2, AMBER);
   }
   timeRuler(c, px, pw, py + ph + 2, a.duration);
   return { png: c.png(), width: W, height: H };
