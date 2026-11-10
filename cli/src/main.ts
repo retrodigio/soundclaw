@@ -60,7 +60,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         sound generate <id> <category|random> [seed=<n>]    a new patch for a classic sound from a category's ranges
         sound mutate <id> [amount=0.05] [seed=<n>] [as=<new id>]   a small seeded change (also: mutate <id> ...)
         sound mark <id> approved|rejected|draft ["note"]
-        sound new <id> voice=layered [preset=<recipe>] [seed=<n>]   up to 8 layers (see docs/commands.md); recipes:
+        sound new <id> voice=layered [preset=<recipe> [sample=<name>]] [seed=<n>]   up to 8 layers (see docs/commands.md); recipes:
                                                             footstep ui-click door magic, beds wind rain fire crowd (or a classic category)
         sound layer-up <id>                                 a classic sound becomes layered (same samples)
         sound classic <id> on|off                           keep a sound one classic voice (exports as a synth.csv row)
@@ -74,7 +74,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         set add|remove <set> <sound>...   set retarget <set> <LUFS>|none   set class <set> <name>|none   set regen <set> [seed=<n>] [spread="..."]
         sound set <id> moment="<the game situation>"|none   set moment <set> "…"|none   (words only)
         family <sound> near|far|muffled [as=<id>]           the sound heard near, far away or through a wall
-        layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]
+        layer add <id> classic|osc|fm|ks|sample|grain [<param>=<value> ...] [at=<n>]   (grain sample=<name> dur= density= size= position= spread= pitch= jitter=)
         layer set <id> <n> <param>=<value> ...   layer remove|move|mute|solo <id> <n> [to=<m> | on|off]
         layer align <id> <n> to=<m>|start [by=onset|peak]   layer match <id> <n> to=<m> [db=<offset>]   (measured, written as layer set offset= / gain=)
         env <id> <n>.amp follow=<layer>|sample:<name> [attack=<s>] [release=<s>]   an envelope that follows a layer's or a sample's level

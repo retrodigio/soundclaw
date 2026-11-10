@@ -521,7 +521,7 @@ layer remove imp 5`;
 
   it('says plainly what is wrong, with the line and column', () => {
     const err = (cmd: string) => { const p = parse(cmd); if (p.errors.length) return p.errors[0]!.message; try { build(NEW + cmd); } catch (e) { return (e as Error).message; } return 'no error'; };
-    expect(err('layer add s horn')).toMatch(/give the source \(classic, osc, fm, ks, sample\)/);
+    expect(err('layer add s horn')).toMatch(/give the source \(classic, osc, fm, ks, sample, grain\)/);
     expect(err('layer add s osc freq=5')).toMatch(/freq must be between 20 and 20000 Hz/);
     expect(err('layer add s osc volume=1')).toMatch(/no parameter 'volume'.*parameters: wave, freq/);
     expect(err('layer add s osc wave=triangel')).toMatch(/wave is one of sine, square/);

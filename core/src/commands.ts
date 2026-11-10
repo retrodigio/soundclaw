@@ -146,11 +146,14 @@ export type SetValue = number | string;
 /** `name=value` words of a layer or effect command, the values still as text (the layer decides what they mean). */
 export type Raw = [string, string][];
 
+/** A sample's name (the same rule as `SAMPLE_NAME_RE` in samples.ts, which needs this file). */
+const SAMPLE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/;
+
 export type Command =
-  | { op: 'new'; id: string; voice: VoiceKind; preset: string | null; seed: number | null; text: string }
+  | { op: 'new'; id: string; voice: VoiceKind; preset: string | null; seed: number | null; sample: string | null; text: string }
   | { op: 'set'; id: string; values: [string, SetValue][]; text: string }
   | { op: 'patch'; id: string; patch: ClassicPatch; text: string }
-  | { op: 'generate'; id: string; category: string; seed: number; text: string }
+  | { op: 'generate'; id: string; category: string; seed: number; sample: string | null; text: string }
   | { op: 'mutate'; id: string; amount: number; seed: number | null; as: string | null; text: string }
   | { op: 'mark'; id: string; status: SoundStatus; note: string; text: string }
   | { op: 'layer-up'; id: string; seed: number; text: string }
@@ -533,15 +536,19 @@ function parseLine(l: RawLine): Command {
       let voice: VoiceKind | null = null;
       let preset: string | null = null;
       let seed: number | null = null;
+      let sample: string | null = null;
       for (const t of args.slice(1)) {
-        const m = /^(voice|preset|seed)=(.*)$/.exec(t.v);
-        if (!m) throw new DiagError(line, t.col, `sound new: unexpected '${t.v}' (voice=tone|classic|layered, preset=<category>, seed=<n>)`);
+        const m = /^(voice|preset|seed|sample)=(.*)$/.exec(t.v);
+        if (!m) throw new DiagError(line, t.col, `sound new: unexpected '${t.v}' (voice=tone|classic|layered, preset=<category>, seed=<n>, sample=<name>)`);
         if (m[1] === 'voice') {
           if (m[2] !== 'tone' && m[2] !== 'classic' && m[2] !== 'layered') throw new DiagError(line, t.col, `voice is tone, classic or layered (not '${m[2]}')`);
           voice = m[2];
         } else if (m[1] === 'preset') {
           if (!isGenerator(m[2]!) && !isRecipe(m[2]!)) throw new DiagError(line, t.col, `no preset '${m[2]}' (presets: ${[...GENERATOR_NAMES, ...RECIPE_NAMES, ...RECIPE_UMBRELLAS].join(', ')})`);
           preset = m[2]!;
+        } else if (m[1] === 'sample') {
+          if (!SAMPLE_NAME_PATTERN.test(m[2]!)) throw new DiagError(line, t.col, `'${m[2]}' is not a sample name (letters, digits, _ and -)`);
+          sample = m[2]!;
         } else {
           const n = numberOf(m[2]!);
           if (n === null || !Number.isInteger(n) || n < 0 || n > 4294967295) throw new DiagError(line, t.col, `seed is a whole number from 0 to 4294967295 (got '${m[2]}')`);
@@ -550,6 +557,7 @@ function parseLine(l: RawLine): Command {
       }
       const at = args[1] ?? args[0]!;
       if (preset && voice === 'tone') throw new DiagError(line, at.col, 'a preset makes a classic or layered sound (voice=classic or voice=layered)');
+      if (sample && !(preset && isRecipe(preset))) throw new DiagError(line, at.col, 'sample= goes with a layered recipe: sound new <id> voice=layered preset=<recipe> sample=<name>');
       if (preset && isRecipe(preset) && voice !== 'layered') {
         if (voice === 'classic') throw new DiagError(line, at.col, `${preset} is a layered recipe: use voice=layered`);
         voice = 'layered';
@@ -560,8 +568,8 @@ function parseLine(l: RawLine): Command {
       if (voice === 'classic' && preset && !isGenerator(preset)) throw new DiagError(line, at.col, `no classic preset '${preset}' (presets: ${GENERATOR_NAMES.join(', ')})`);
       if (preset && seed === null) seed = defaultGenSeed(preset, id);
       if (voice === 'layered' && seed === null) seed = defaultRecipeSeed('layered', id);
-      const text = voice === 'tone' ? `sound new ${id}` : voice === 'classic' ? `sound new ${id} voice=classic${preset ? ` preset=${preset} seed=${seed}` : ''}` : `sound new ${id} voice=layered${preset ? ` preset=${preset}` : ''} seed=${seed}`;
-      return { op: 'new', id, voice, preset, seed, text };
+      const text = voice === 'tone' ? `sound new ${id}` : voice === 'classic' ? `sound new ${id} voice=classic${preset ? ` preset=${preset} seed=${seed}` : ''}` : `sound new ${id} voice=layered${preset ? ` preset=${preset}` : ''} seed=${seed}${sample ? ` sample=${sample}` : ''}`;
+      return { op: 'new', id, voice, preset, seed, sample, text };
     }
     if (verb.v === 'set') {
       const id = checkId(args[0], line, 'sound set');
@@ -639,14 +647,22 @@ function parseLine(l: RawLine): Command {
       const cat = args[1];
       if (!cat || (!isGenerator(cat.v) && !isRecipe(cat.v))) throw new DiagError(line, (cat ?? verb).col, `sound generate ${id}: give a category (${[...GENERATOR_NAMES, ...RECIPE_NAMES, ...RECIPE_UMBRELLAS].join(', ')})`);
       let seed: number | null = null;
+      let sample: string | null = null;
       for (const t of args.slice(2)) {
+        const sm = /^sample=(.*)$/.exec(t.v);
+        if (sm) {
+          if (!isRecipe(cat.v)) throw new DiagError(line, t.col, `sample= goes with a layered recipe (${RECIPE_NAMES.join(', ')}); ${cat.v} is a classic category`);
+          if (!SAMPLE_NAME_PATTERN.test(sm[1]!)) throw new DiagError(line, t.col, `'${sm[1]}' is not a sample name (letters, digits, _ and -)`);
+          sample = sm[1]!;
+          continue;
+        }
         const m = /^seed=(.*)$/.exec(t.v);
         const n = m ? numberOf(m[1]!) : null;
-        if (n === null || !Number.isInteger(n) || n < 0 || n > 4294967295) throw new DiagError(line, t.col, `sound generate: unexpected '${t.v}' (seed=<whole number from 0 to 4294967295>)`);
+        if (n === null || !Number.isInteger(n) || n < 0 || n > 4294967295) throw new DiagError(line, t.col, `sound generate: unexpected '${t.v}' (seed=<whole number from 0 to 4294967295>${isRecipe(cat.v) ? ', sample=<name>' : ''})`);
         seed = n;
       }
       seed ??= isRecipe(cat.v) ? defaultRecipeSeed(cat.v, id) : defaultGenSeed(cat.v, id);
-      return { op: 'generate', id, category: cat.v, seed, text: `sound generate ${id} ${cat.v} seed=${seed}` };
+      return { op: 'generate', id, category: cat.v, seed, sample, text: `sound generate ${id} ${cat.v} seed=${seed}${sample ? ` sample=${sample}` : ''}` };
     }
     if (verb.v === 'mutate') return parseMutate(args, verb.col, line);
     if (verb.v === 'layer-up') {
@@ -802,7 +818,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       checkFree(lib, c.id);
       if (c.voice === 'layered') {
         let up = newLayeredSound(c.id, c.seed!);
-        if (c.preset && isRecipe(c.preset)) up = applyRecipe(up, c.preset as RecipeName, c.seed!);
+        if (c.preset && isRecipe(c.preset)) up = applyRecipe(up, c.preset as RecipeName, c.seed!, c.sample);
         else if (c.preset) up = { ...up, layers: [classicLayer(generate(c.preset as GeneratorName, c.seed!), 1)], nextSalt: 2 };
         lib.set(c.id, up);
       } else if (c.voice === 'tone') lib.set(c.id, newSound(c.id));
@@ -863,7 +879,7 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       if (!s) throw new Error(`no sound '${c.id}'`);
       if (isRecipe(c.category)) {
         if (s.voice !== 'layered') throw new Error(`${c.category} is a layered recipe; ${c.id} is a ${s.voice} sound (make it with sound new <id> voice=layered preset=${c.category})`);
-        lib.set(c.id, applyRecipe(s, c.category as RecipeName, c.seed));
+        lib.set(c.id, applyRecipe(s, c.category as RecipeName, c.seed, c.sample));
         return undefined;
       }
       if (s.voice === 'layered') {

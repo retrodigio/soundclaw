@@ -160,6 +160,9 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   response; `len` is written for you as the response's length (to 12 s), `predelay=` and `gain=` (dB) shape it. The response is scaled to unit energy, so `gain=0` keeps a noisy sound
   about as loud as it was; `sample bounce <new> from=<sound>` makes a response from a reverb tail. On a song: `song fx add <song> convolve ir=…` over the mix, or one room for the whole
   piece, `song send <song> convolve ir=<sample>` fed by `song channel set <song> <ch> convolve=0.3`.
+- Beds and textures from a short recording: `layer add rainbed grain sample=rain dur=8 density=30 size=0.06 position=0.5 spread=0.3 jitter=0.3` (grains are cut around the position;
+  `seed=` is another cloud; `env rainbed 1.position "0:0.1 8:0.9"` walks through the recording), then `sound loop rainbed 6 fade=0.5` so it repeats without a seam. To lay a recording's
+  transient over a recipe's body: `sound new door voice=layered preset=door sample=creak`.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower

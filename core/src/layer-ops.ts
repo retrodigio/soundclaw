@@ -233,10 +233,25 @@ export function applyLayerCommand(lib: Map<string, Sound>, c: Command): string |
   }
 }
 
-/** Fill a layered sound from a recipe. */
-export function applyRecipe(s: LayeredSound, name: RecipeName, seed: number): LayeredSound {
+/** How much of the start of a sample a recipe lays over its synth body (`preset=<recipe> sample=<name>`), seconds. */
+export const RECIPE_SAMPLE_SECONDS = 0.3;
+
+/** Fill a layered sound from a recipe (and, when a sample is named, lay its first moments over it). */
+export function applyRecipe(s: LayeredSound, name: RecipeName, seed: number, sample?: string | null): LayeredSound {
   const body = recipeBody(name, seed);
   const out: LayeredSound = { ...s, seed, duration: null, gain: 1, ...body };
+  if (sample) {
+    // a recording's first moments laid over the synth body: the sample as the transient, the recipe as what carries it
+    if (body.layers.length >= MAX_LAYERS) throw new Error(`${name} with seed ${seed} already makes ${body.layers.length} layers, so a sample layer would be one too many (try another seed=)`);
+    const l = newLayer('sample', body.nextSalt);
+    l.p.sample = sample;
+    l.p.interp = 'sinc';
+    l.p.end = RECIPE_SAMPLE_SECONDS;
+    l.p['fade-out'] = 0.12;
+    l.p.gain = 0.8;
+    out.layers = [...body.layers, l];
+    out.nextSalt = body.nextSalt + 1;
+  }
   if (body.gain === undefined) out.gain = 1;
   if (body.loudClass) out.loudClass = body.loudClass;
   // A recipe replaces the whole sound: a bed brings its loop, anything else has none, and a family mark no longer applies.

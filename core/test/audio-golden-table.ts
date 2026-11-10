@@ -15,4 +15,13 @@ export const RENDER_TABLE: Record<string, string> = {
   'convolve-master-stereo-hall': ONE('fx add s convolve ir=hall mix=0.5 len=0.5'),
   'convolve-master-mono-room': ONE('fx add s convolve ir=room mix=0.5 len=0.5'),
   'convolve-impulse-late': ONE('fx add s layer=1 convolve ir=late mix=1 len=0.2'),
+
+  'grain-bed': GRAIN('layer add s grain sample=bed dur=1 density=30 size=0.06 position=0.4 spread=0.3 jitter=0.4'),
+  'grain-pitched-envelopes': GRAIN('layer add s grain sample=tone dur=1 density=25 size=0.08 pitch=-5 spread=0.2\nenv s 1.position "0:0.1 1:0.8"\nenv s 1.density "0:10 1:60"'),
+  'grain-linear-left': GRAIN('layer add s grain sample=wide dur=1 density=40 size=0.04 side=left interp=linear'),
+  'recipe-door-with-sample': 'sound new s voice=layered preset=door seed=3 sample=beat',
 };
+
+function GRAIN(layer: string): string {
+  return `sound new s voice=layered seed=7\nsound set s duration=1\n${layer}\n`;
+}

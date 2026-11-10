@@ -241,7 +241,15 @@ export function noteSoundWith(i: Instrument, n: NoteSpec, bank?: SampleBank): { 
     const out: Layer = { ...l, p: { ...l.p }, envs: { ...l.envs }, fx: l.fx };
     out.amp = l.amp ? multiply(l.amp, env, total) : env;
     const dur = Math.min(123, total + (l.p.offset as number));
-    if (l.kind === 'osc' || l.kind === 'fm' || l.kind === 'ks') {
+    if (l.kind === 'grain') {
+      out.p.dur = dur;
+      const base = l.p.pitch as number;
+      if (!P) out.p.pitch = Math.max(-48, Math.min(48, base + st0));
+      else {
+        const e = l.envs.pitch;
+        out.envs.pitch = sampled((t) => Math.max(-48, Math.min(48, (e ? envAt(e, t) : base) + st0 + P(t))), total);
+      }
+    } else if (l.kind === 'osc' || l.kind === 'fm' || l.kind === 'ks') {
       out.p.dur = dur;
       const base = l.p.freq as number;
       if (l.kind === 'ks' || !P) {

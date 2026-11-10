@@ -6,7 +6,7 @@
 
 import { renderClassic } from './classic.ts';
 import {
-  BUILTIN_TABLES, MAX_DURATION, audibleLayers, isStereo, layerPatch, parseTable,
+  BUILTIN_TABLES, MAX_DURATION, MAX_GRAIN_OVERLAP, audibleLayers, isStereo, layerPatch, parseTable,
   type Env, type Fx, type Layer, type LayeredSound,
 } from './layered.ts';
 import { TAU, exp2, log2, sineCycles, sinRad, tanPi } from './mathx.ts';
@@ -424,6 +424,52 @@ function renderSample(l: Layer, bank: SampleBank | undefined, channel: 'left' | 
   return out.slice(0, n);
 }
 
+/**
+ * A cloud of grains cut from a sample: short Hann-windowed pieces taken at positions around `position`, started `density` times a second
+ * (the gap between them varied by `jitter`), each read at the pitch's ratio. The positions and gaps come from the layer's seed, drawn in a
+ * fixed order, so the same layer is the same cloud on every machine. The level is divided by the square root of the grains sounding at once
+ * (when more than one), so a dense cloud is not louder than a sparse one.
+ */
+function renderGrain(s: LayeredSound, l: Layer, bank: SampleBank | undefined): Float64Array {
+  const name = l.p.sample as string;
+  const smp = name ? bank?.get(name) : undefined;
+  if (!smp) return new Float64Array(Math.round(0.1 * SR)); // a missing sample is silence; the server refuses a batch that names one
+  const n = Math.max(1, Math.round((l.p.dur as number) * SR));
+  const out = new Float64Array(n);
+  const side = l.p.side as string;
+  const src = resample(side === 'left' && smp.left ? smp.left : side === 'right' && smp.right ? smp.right : smp.data, smp.rate, SR);
+  if (src.length < 2) return out;
+  const read = readerFor(l.p.interp as Interp, src);
+  const rng = new Noise(layerSeed(s, l));
+  const density = param(l.p, l.envs, 'density');
+  const size = param(l.p, l.envs, 'size');
+  const position = param(l.p, l.envs, 'position');
+  const spread = param(l.p, l.envs, 'spread');
+  const pitch = param(l.p, l.envs, 'pitch');
+  const jitter = l.p.jitter as number;
+  const last = src.length - 1;
+  let t = 0;
+  while (t < n) {
+    const i = Math.floor(t);
+    const secs = size(i);
+    let dens = density(i);
+    if (dens * secs > MAX_GRAIN_OVERLAP) dens = MAX_GRAIN_OVERLAP / secs;
+    const len = Math.max(8, Math.round(secs * SR));
+    const ratio = exp2(pitch(i) / 12);
+    const span = len * ratio;
+    // the grain is centred on the position (moved by the spread), and kept inside the sample
+    const centre = position(i) * last + spread(i) * last * rng.next();
+    const start = Math.min(Math.max(0, last - span), Math.max(0, centre - span / 2));
+    const norm = 1 / Math.sqrt(Math.max(1, dens * secs));
+    for (let k = 0; k < len && i + k < n; k++) {
+      const w = sineCycles(k / len / 2); // sin(pi k / len), squared: a Hann window
+      out[i + k] = out[i + k]! + read(start + k * ratio, ratio) * w * w * norm;
+    }
+    t += Math.max(1, (SR / dens) * (1 + jitter * rng.next()));
+  }
+  return out;
+}
+
 /** One layer's source as doubles. */
 function renderSource(s: LayeredSound, l: Layer, bank: SampleBank | undefined): Float64Array {
   switch (l.kind) {
@@ -432,6 +478,7 @@ function renderSource(s: LayeredSound, l: Layer, bank: SampleBank | undefined): 
     case 'fm': return renderFm(l);
     case 'ks': return renderKs(l, layerSeed(s, l));
     case 'sample': return renderSample(l, bank);
+    case 'grain': return renderGrain(s, l, bank);
   }
 }
 

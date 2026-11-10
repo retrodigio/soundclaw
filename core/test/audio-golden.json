@@ -29,6 +29,26 @@
    "hash": "29be0a877630ec4aa418adab61789d43935416785114d6d96c0543404002c15a",
    "detail": "1 ch, 22050 samples",
    "renderVersion": 4
+  },
+  "grain-bed": {
+   "hash": "7213d8c32559516adfc7e614da00e2a82e957ca52b24b75ca30a1efdb26dc256",
+   "detail": "1 ch, 44100 samples",
+   "renderVersion": 4
+  },
+  "grain-pitched-envelopes": {
+   "hash": "684ca2b10c71e02a269151c1275d183abc9aab197561e77021fd3f37566b3752",
+   "detail": "1 ch, 44100 samples",
+   "renderVersion": 4
+  },
+  "grain-linear-left": {
+   "hash": "95abecea7ea4974f23d2cbb9f9e54a9d46322067a6f3cffa815826f0b1aa42ab",
+   "detail": "1 ch, 44100 samples",
+   "renderVersion": 4
+  },
+  "recipe-door-with-sample": {
+   "hash": "2bffe43291dfe15184dccbac53f89a70b7d3c8438f5237ced277ae6b2d57a6ef",
+   "detail": "1 ch, 49708 samples",
+   "renderVersion": 4
   }
  }
 }

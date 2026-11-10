@@ -268,6 +268,28 @@ the project is refused. The render key includes the audio's hash.
 | `xfade` | 0 to 2 s | 0.01 | - | crossfade at each seam of `loop` |
 | `interp` | `linear`, `cubic`, `sinc` | linear | - | how the sample is read between its frames: linear (what documents without this setting use), cubic, or sinc (a windowed sinc whose cut-off follows the pitch, so pitching up does not alias; new layers are made with sinc) |
 
+*grain*: a cloud of grains cut from a sample, for beds and textures from short recordings (rain, a crowd, fire, a hum, a machine): `layer add bed grain sample=rain dur=8
+density=30 size=0.06 position=0.5 spread=0.3`. A grain is a Hann-windowed piece of the sample `size` seconds long, centred on `position` (0 the start of the sample, 1 its end) moved by up
+to `spread` of the sample either way, read at the pitch's ratio; one starts `density` times a second, the gap between them varied by `jitter` (0 is regular). The moves come from the
+layer's seed (`seed=`, else the sound's seed and the layer), drawn in a fixed order, so the same layer is the same cloud on every machine; another `seed` is another cloud. A grain is
+kept inside the sample, and the level is divided by the square root of the grains sounding at once (when there is more than one), so a dense cloud is not louder than a sparse one; at
+most 64 grains sound at once (a higher `density` is lowered to keep to that). `position`, `spread`, `density`, `size` and `pitch` take envelopes (`env bed 1.position "0:0.1 8:0.9"`
+walks through the recording). Like a sample layer it takes a filter, an amplitude envelope, effects and pan, names a sample that must be in the project, and has the sample's hash in the
+render key. For a bed that repeats without a seam, `sound loop <id> <seconds> fade=<s>` as for any layer: the cloud is rendered past the end and folded onto the start.
+
+| Parameter | Range | Default | Envelope | Meaning |
+|---|---|---|---|---|
+| `sample` | text | none | - | the name of the sample the grains are cut from (a short recording of rain, a crowd, fire, a hum) |
+| `dur` | 0.01 to 123 s | 2 | - | length of the source |
+| `density` | 1 to 400 grains/s | 20 | yes | grains started each second (at most 64 sound at once: a higher density is lowered to keep to that) |
+| `size` | 0.005 to 1 s | 0.08 | yes | length of one grain, which is faded in and out by a Hann window |
+| `position` | 0 to 1 | 0.5 | yes | where in the sample a grain is centred: 0 the start … 1 the end |
+| `spread` | 0 to 1 | 0.1 | yes | how far from the position a grain may be taken, either way, as a share of the sample (random, from the layer's seed) |
+| `pitch` | -48 to 48 semitones | 0 | yes | transposition of the grains (a grain keeps its length in the sound) |
+| `jitter` | 0 to 1 | 0.3 | - | randomness of the time between grains, as a share of that time (0 is regular, 1 up to twice as long or none) |
+| `side` | `mix`, `left`, `right` | mix | - | which channel of a stereo file the grains are cut from: mix (both averaged), left or right |
+| `interp` | `linear`, `cubic`, `sinc` | sinc | - | how the sample is read between its frames: linear, cubic or sinc |
+
 **Envelopes.** `env <id> <target> "<breakpoints>"` replaces a fixed value with breakpoints `time:value`, times in seconds from the
 start of the layer (the master chain's from the start of the sound), rising. Each point may carry a curve for the segment
 that arrives at it: `0:100 0.2:400@exp 0.5:100@ease`. Before the first point the value is the first, after the last the last.
@@ -412,8 +434,9 @@ true peak, sample peak and clipping take the louder channel, DC the worse channe
 (BS.1770), click looks at both channels' first and last samples, and pitch, spectrum and the `harsh` check are measured on the
 mix of the two ((L + R) / 2). `describe` says "stereo". The page plays both channels. `GET /api/render/<id>.f32` is the channels one after the other.
 
-**Layered recipes** (`sound new <id> voice=layered preset=<recipe>`, `sound generate <id> <recipe> [seed=<n>]`; also `generate` with a
-classic category on a layered sound, which gives it one classic layer). Like the classic categories, the ranges are data (`RECIPES` in
+**Layered recipes** (`sound new <id> voice=layered preset=<recipe> [sample=<name>]`, `sound generate <id> <recipe> [seed=<n>] [sample=<name>]`; also `generate` with a
+classic category on a layered sound, which gives it one classic layer). With `sample=<name>` a recipe lays a recording over its synth body: one more sample layer (`interp=sinc`, the first 0.3 s
+of the sample, a 0.12 s fade-out, `gain=0.8`) after the recipe's layers, which are exactly what the recipe makes without it. The recipes ship no audio; the sample must be in the project. Like the classic categories, the ranges are data (`RECIPES` in
 `core/src/recipes.ts`); the same recipe and seed always give the same sound; "×a..b every c..d s" repeats a layer.
 
 | Recipe | Layer | Chance | Parameters | Envelopes | Effects |

@@ -644,12 +644,12 @@ export class Writer {
         missingIr(song.master, `song ${id} master`, at?.line ?? 1);
         for (const k of ['reverb', 'delay', 'convolve'] as const) if (song[k]) missingIr([song[k]!], `song ${id} ${k} bus`, at?.line ?? 1);
       }
-      // A sample layer must name a sample that is in the project.
+      // A sample or grain layer must name a sample that is in the project.
       for (const [id, snd] of next) {
         if (snd.voice !== 'layered' || snd === this.library.get(id)) continue;
         snd.layers.forEach((l, i) => {
-          const name = l.kind === 'sample' ? String(l.p.sample) : '';
-          if (l.kind === 'sample' && (!name || !(next.samples.has(name) || this.samples.info(name)))) {
+          const name = l.kind === 'sample' || l.kind === 'grain' ? String(l.p.sample) : '';
+          if ((l.kind === 'sample' || l.kind === 'grain') && (!name || !(next.samples.has(name) || this.samples.info(name)))) {
             const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
             errors.push({ line: at?.line ?? 1, col: 1, message: `${id} layer ${i + 1} ${name ? `names sample '${name}', which is not in the project` : 'has no sample'} (soundclaw sample import <project> <file> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
           }

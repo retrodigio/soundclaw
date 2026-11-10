@@ -68,3 +68,23 @@ describe('impulse responses on a project', () => {
     expect(l.state).toBe('attribution');
   });
 });
+
+describe('grains and recipes on a project', () => {
+  beforeEach(load);
+
+  it('a grain layer must name a sample of the project, and keeps it from going away', () => {
+    run('sound new s voice=layered seed=1');
+    expect(fail('layer add s grain sample=nowhere dur=1')).toMatch(/layer 1 names sample 'nowhere'/);
+    run('layer add s grain sample=bed dur=1 density=30');
+    expect(soundSamples(f.w.sampleLibrary().get('s')!)).toEqual(['bed']);
+    expect(fail('sample remove bed')).toMatch(/played by sound s/);
+  });
+
+  it('a recipe takes a sample and lays its first moments over its body', () => {
+    run('sound new s voice=layered preset=door seed=3 sample=loop90');
+    const s = f.w.sampleLibrary().get('s')!;
+    expect(soundSamples(s)).toEqual(['loop90']);
+    expect(tape().find((t) => t.startsWith('sound new s'))).toBe('sound new s voice=layered preset=door seed=3 sample=loop90');
+    expect(fail('sound new t voice=layered preset=door seed=3 sample=nowhere')).toMatch(/names sample 'nowhere'/);
+  });
+});

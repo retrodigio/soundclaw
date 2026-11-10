@@ -18,8 +18,10 @@ export const MAX_DURATION = 120;
 /** A source may be a little longer than a sound can be: a 120 s loop renders its crossfade past the end (up to 2 s) and needs a source that covers it. */
 export const MAX_SOURCE_DURATION = 123;
 
-export type SourceKind = 'classic' | 'osc' | 'fm' | 'ks' | 'sample';
-export const SOURCE_KINDS: readonly SourceKind[] = ['classic', 'osc', 'fm', 'ks', 'sample'];
+export type SourceKind = 'classic' | 'osc' | 'fm' | 'ks' | 'sample' | 'grain';
+export const SOURCE_KINDS: readonly SourceKind[] = ['classic', 'osc', 'fm', 'ks', 'sample', 'grain'];
+/** Grains sounding at once, at the most: more would only be louder work (the density is lowered to keep to it). */
+export const MAX_GRAIN_OVERLAP = 64;
 export type FxKind = 'filter' | 'distort' | 'bitcrush' | 'chorus' | 'delay' | 'reverb' | 'compress' | 'limit' | 'convolve';
 export const FX_KINDS: readonly FxKind[] = ['filter', 'distort', 'bitcrush', 'chorus', 'delay', 'reverb', 'compress', 'limit', 'convolve'];
 /** The longest part of an impulse response a convolution uses, seconds. */
@@ -117,6 +119,18 @@ export const SOURCE_SPECS: Record<Exclude<SourceKind, 'classic'>, readonly PSpec
     quietly(num('loop', 0, MAX_DURATION, 0, 's', 'repeat the sample\'s loop (its loop points, else the part that plays) until the layer is this long; 0 plays it once')),
     quietly(num('xfade', 0, 2, 0.01, 's', 'crossfade at each seam of `loop`')),
     quietly(choice('interp', SAMPLE_INTERPS, 'linear', 'how the sample is read between its frames: linear (what documents without this setting use), cubic, or sinc (a windowed sinc whose cut-off follows the pitch, so pitching up does not alias; new layers are made with sinc)')),
+  ],
+  grain: [
+    text('sample', '', 'the name of the sample the grains are cut from (a short recording of rain, a crowd, fire, a hum)'),
+    num('dur', 0.01, MAX_SOURCE_DURATION, 2, 's', 'length of the source'),
+    num('density', 1, 400, 20, 'grains/s', 'grains started each second (at most 64 sound at once: a higher density is lowered to keep to that)', true),
+    num('size', 0.005, 1, 0.08, 's', 'length of one grain, which is faded in and out by a Hann window', true),
+    num('position', 0, 1, 0.5, '', 'where in the sample a grain is centred: 0 the start … 1 the end', true),
+    num('spread', 0, 1, 0.1, '', 'how far from the position a grain may be taken, either way, as a share of the sample (random, from the layer\'s seed)', true),
+    num('pitch', -48, 48, 0, 'semitones', 'transposition of the grains (a grain keeps its length in the sound)', true),
+    num('jitter', 0, 1, 0.3, '', 'randomness of the time between grains, as a share of that time (0 is regular, 1 up to twice as long or none)'),
+    choice('side', ['mix', 'left', 'right'], 'mix', 'which channel of a stereo file the grains are cut from: mix (both averaged), left or right'),
+    choice('interp', SAMPLE_INTERPS, 'sinc', 'how the sample is read between its frames: linear, cubic or sinc'),
   ],
 };
 
@@ -475,7 +489,7 @@ export function layeredBody(s: LayeredSound, sampleHash: (name: string) => strin
     if (l.mute) { parts.push(`L${l.salt}:muted`); return; }
     const specs = layerSpecs(l.kind);
     const vals = specs.filter((sp) => l.p[sp.name] !== undefined && !(sp.quiet && l.p[sp.name] === sp.default)).map((sp) => `${sp.name}=${fmtValue(l.p[sp.name]!)}`);
-    const sampleName = l.kind === 'sample' ? String(l.p.sample) : '';
+    const sampleName = l.kind === 'sample' || l.kind === 'grain' ? String(l.p.sample) : '';
     parts.push(`L${l.salt}:${l.kind}${l.solo ? ':solo' : ''}(${vals.join(',')})${sampleName ? `[${sampleHash(sampleName)}]` : ''}amp=${l.amp ? formatEnv(l.amp) : '-'};${Object.keys(l.envs).sort().map((k) => `${k}=${formatEnv(l.envs[k]!)}`).join(',')};${l.fx.map(fx).join('>')}`);
   });
   parts.push(`master:${s.master.map(fx).join('>')}`);
@@ -485,7 +499,7 @@ export function layeredBody(s: LayeredSound, sampleHash: (name: string) => strin
 /** The names of the samples a layer reads: its source's, and the impulse responses of its effects. */
 export function layerSamples(l: Layer): string[] {
   const out: string[] = [];
-  if (l.kind === 'sample' && l.p.sample) out.push(String(l.p.sample));
+  if ((l.kind === 'sample' || l.kind === 'grain') && l.p.sample) out.push(String(l.p.sample));
   out.push(...fxSamples(l.fx));
   return out;
 }
@@ -518,6 +532,7 @@ export function layerLabel(l: Layer): string {
     case 'fm': return `fm ${l.p.ops} ops ${l.p.algo} ${l.envs.freq ? '(pitch envelope)' : `${l.p.freq} Hz`}`;
     case 'ks': return `pluck ${l.p.freq} Hz`;
     case 'sample': return `sample ${l.p.sample || '(none)'}`;
+    case 'grain': return `grains of ${l.p.sample || '(none)'}${l.envs.density ? '' : ` ${l.p.density}/s`}`;
   }
 }
 

@@ -94,6 +94,12 @@ All notable changes to SoundClaw are listed here. The format follows
   sound its own channel, and `fx add` writes the response's length (to 12 s) into the command, so the tape holds the number. A song has a third send bus beside the reverb and the
   delay: `song send <song> convolve ir=<sample>`, fed by `song channel set <song> <ch> convolve=0.3`. The render key holds the response's hash; a sample that is read as a
   response cannot be removed while a sound, instrument or song reads it, a rename follows, and its licence reaches the sound and the song.
+- **Grains.** `layer add <id> grain sample=<name> dur= density= size= position= spread= pitch= jitter=` is a source that cuts a cloud of Hann-windowed grains from a short recording
+  (rain, a crowd, fire, a hum) for beds and textures. The positions and gaps come from the layer's seed, so a cloud is the same on every machine and another `seed` is another cloud;
+  the level is kept as the density rises; `position`, `spread`, `density`, `size` and `pitch` take envelopes; `sound loop` makes a bed that repeats without a seam. The grain layer
+  names a sample like a sample layer does (the batch is refused when it is not in the project; the sample cannot be removed while a sound plays it).
+- **Recipes take a sample.** `sound new <id> voice=layered preset=<recipe> sample=<name>` (and `sound generate <id> <recipe> sample=<name>`) lays the first 0.3 s of a recording over the
+  recipe's synth body as one more sample layer. No recipe ships audio.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.
