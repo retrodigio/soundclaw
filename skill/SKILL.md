@@ -121,6 +121,13 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   `--pack`) refuses a sound that reaches an unknown or blocked licence unless you pass `--allow-licence <id>` (only if the person says so), lists the
   samples used and writes `ATTRIBUTION.txt`. Pointing a name at other audio (`sample set <name> hash=…`) is undoable like any edit. A 0.1 project's
   `samples/*.wav` still work; `soundclaw upgrade <project>` moves them into the store. `sample gc` is a dry run until `--apply`.
+- Libraries are folders of recordings kept outside the project; the person (or you, from Bash) registers them once: `soundclaw library add <folder> licence=<id>` then
+  `soundclaw library index` (minutes for thousands of files). From then on search by words and numbers, with the MCP `library` tool or the CLI:
+  `library search "door creak" dur=0.8-2.5 pitched=no licence=shippable --limit 8` (every word must match a name, tag or folder; the numbers query is the one `sample list` takes; hits show length,
+  loudness, note, centroid, attack, licence and a line of words), `library similar <project> <sound|sample:name|file>` for "recordings like the synth door I made", then
+  `library use <project> <library>:<path> as=creak_lib` to copy one in (it keeps where it came from and the library's licence; a library with no declared licence is `unknown` and
+  blocks a manifest export until someone sets one). Listen to a hit before building on it: after `library use`, `describe`, `view … sample:<name>` and `compare` it with your synth version.
+  Add your own tags with `library tag` so the next search finds a file by what it is. Never read a library's folder by hand to find files: search it.
 - Samples are material you can edit and hear. Listen first: `describe <project> sample:<name>` (words and numbers: tonal or noisy, pitch and how steady, one hit
   or several, dry or roomy, mono or wide, silence at the ends, the licence and the advice), `view <project> sample:<name> wave|spec|pitch|loop|slices`,
   `compare <project> sample:<name> <the synth version>` for the distance numbers, and `sample check` for advice (a sample's checks never gate `work done`; the sound's do).

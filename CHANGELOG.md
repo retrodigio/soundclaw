@@ -40,6 +40,11 @@ All notable changes to SoundClaw are listed here. The format follows
 - **One numbers query.** `sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1 tag=wood licence=shippable` keeps the samples a
   query fits, closest first, with units (`ms`, `k`, `dB`, note names); the same language will serve library search and generation.
 - **The Samples tab shows each sample.** Its numbers, a licence badge (a glyph and a word, never colour alone) and a play button.
+- **Sample libraries.** `soundclaw library add <folder>` registers a folder of recordings kept outside any project, with its licence (`licence=`, a `soundclaw-library.json`, or a
+  licence file's text that you confirm). `library index` reads, hashes and measures every file once on worker threads (and again only what changed), keeping the numbers of `sample list`,
+  the root and loop a file carries and tags from its folders and name. `library search "door creak" dur=0.8-2.5 pitched=no licence=shippable` ranks by word match and then by closeness to the
+  ranges; `library similar` finds files that sound like a sound, sample or file by a documented feature distance; `library use` copies one into a project with its provenance and the library's licence;
+  `library tag` adds tags that survive a re-index. The MCP `library` tool has list, search, similar and use, and `GET /api/library/<id>/audio` lets a page audition a file without copying it.
 
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
