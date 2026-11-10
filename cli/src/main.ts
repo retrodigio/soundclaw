@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, shipPolicyOf, type ViewKind } from '@soundclaw/core';
-import { exportInstrument, formatInstrumentExport, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap, SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
+import { exportInstrument, formatInstrumentExport, formatInstrumentImport, importInstrument, isSoundFont, soundFontList, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap, SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
   EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
@@ -272,6 +272,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       --pattern one pattern). Combinations that mean nothing (--loops with no loop region, --pattern with audio,
       --quality with wav, --loop or --stems with midi, song flags on a sound) are refused. A <song>-manifest.json
       says the loop points.
+  soundclaw instrument import <project> <file.sfz | file.sf2> [--id <id>] [preset=<bank>:<program>|<name>] [--list] [licence=<id>] [attribution="<text>"] [terms=<url>] [tags=a,b] [prefix=<text>] [--by <author>]
   soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]
   soundclaw instrument zones <project> <id>
       A sampled instrument (zones: the samples it plays by key and velocity; docs/commands.md). export writes an SFZ file
@@ -279,6 +280,12 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       licence asks for it, and says what SFZ cannot carry (synth layers, effects, the velocity crossfade); a licence that is
       unknown or blocked is warned about. zones lists the zones, one to a line. The key-map picture is
       soundclaw view <project> <id> keymap; the instrument's checks are soundclaw check <project> <id>.
+      import reads an SFZ (<control> <global> <master> <group> <region>, #define, #include, default_path; the key, velocity, pitch,
+      level, pan, envelope, loop, offset, release, round-robin and choke opcodes) or one preset of a SoundFont 2 file (--list shows
+      the presets; preset= picks one) as a sampled instrument: the sample files go into the store (provenance: the file and the path
+      inside it; licence unknown unless licence= says), the regions become instrument zone add lines, all one undo group. Every
+      opcode or generator the zones cannot carry is named in the answer, per region or zone, as lost or approximated. A sample that
+      cannot be read names its region and nothing is written. Sample names start with --id and an underscore (prefix= changes that).
   soundclaw midi import <project> <file.mid> [--id <song>] [--by <author>]
   soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
       Import a Standard MIDI file (type 0 or 1) as a song: one pattern per two bars, a channel per track and MIDI channel,
@@ -417,6 +424,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   reply: [['by'], []],
   cancel: [['by'], []],
   work: [['by'], []],
+  instrument: [['to', 'out', 'format', 'id', 'preset', 'prefix', 'by', 'licence', 'license', 'attribution', 'terms', 'tags'], ['list', 'force']],
   library: [['name', 'licence', 'license', 'attribution', 'terms', 'library', 'limit', 'workers', 'project', 'by', 'as', 'tags', 'note'], ['json', 'yes', 'rebuild', 'remove', 'force']],
 };
 
@@ -831,10 +839,30 @@ function cmdCheck(io: Io, p: Parsed): number {
   return r.pass && results.every((x) => x.pass) && (insts?.pass ?? true) ? 0 : 1;
 }
 
-/** `instrument export <project> <id> --format sfz [--to <dir>]` and `instrument zones <project> <id>`. */
+/** `instrument export|zones|import`. */
 function cmdInstrument(io: Io, p: Parsed): number {
   const [verb, dir, id, ...extra] = p.pos;
-  if (!verb || !['export', 'zones'].includes(verb)) throw new UsageError('instrument: export <project> <id> [--format sfz] [--to <dir>], or zones <project> <id>');
+  if (!verb || !['export', 'zones', 'import'].includes(verb)) throw new UsageError('instrument: import <project> <file.sfz|file.sf2> [--id <id>] [--preset <bank>:<program>|<name>] [--list] [licence=<id>], export <project> <id> [--format sfz] [--to <dir>], or zones <project> <id>');
+  if (verb === 'import') {
+    if (!dir || !id) throw new UsageError('instrument import: give a project folder and an .sfz or .sf2 file');
+    const kv = pairsFrom(extra, 'instrument import');
+    for (const k of Object.keys(kv)) if (!['licence', 'attribution', 'terms', 'tags', 'preset', 'id', 'prefix'].includes(k)) throw new UsageError(`instrument import: no field '${k}' (licence, attribution, terms, tags, preset, id, prefix)`);
+    const pick = (k: string): string | undefined => kv[k] ?? one(p, k) ?? (k === 'licence' ? one(p, 'license') : undefined);
+    if (p.flags.has('list')) {
+      if (!isSoundFont(id)) throw new UsageError('instrument import --list lists the presets of a .sf2 file');
+      io.out(soundFontList(id));
+      return 0;
+    }
+    assertNoServer(dir, io);
+    const w = wr(io, dir);
+    const r = importInstrument(w, id, {
+      ...(pick('id') ? { id: pick('id')! } : {}), ...(pick('licence') ? { licence: pick('licence')! } : {}), ...(pick('attribution') ? { attribution: pick('attribution')! } : {}),
+      ...(pick('terms') ? { terms: pick('terms')! } : {}), ...(pick('tags') ? { tags: pick('tags')! } : {}), ...(pick('preset') ? { preset: pick('preset')! } : {}),
+      ...(pick('prefix') !== undefined ? { prefix: pick('prefix')! } : {}), force: p.flags.has('force'), by: author(p, 'agent:claude', (n) => `agent:${n}`),
+    });
+    io.out(formatInstrumentImport(r, id) + '\n');
+    return 0;
+  }
   if (!dir || !id) throw new UsageError(`instrument ${verb}: give a project folder and an instrument id`);
   if (extra.length) throw new UsageError(`instrument ${verb}: unexpected '${extra[0]}'`);
   const w = wr(io, dir);
@@ -1164,7 +1192,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'reply': case 'cancel': return cmdAnswer(io, cmd, parseArgs(rest, ...WRITE_OPTS.reply!));
       case 'work': return cmdWork(io, parseArgs(rest, ...WRITE_OPTS.work!));
       case 'skill': return cmdSkill(io, parseArgs(rest, ['dest', 'project'], []));
-      case 'instrument': return cmdInstrument(io, parseArgs(rest, ['to', 'out', 'format'], []));
+      case 'instrument': return cmdInstrument(io, parseArgs(rest, ...WRITE_OPTS.instrument!));
       case 'scale': return cmdScale(io, parseArgs(rest, [], []));
       case 'style': return cmdStyle(io, parseArgs(rest, [], ['init']));
       case undefined: case 'help': case '-h': case '--help':

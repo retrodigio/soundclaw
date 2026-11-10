@@ -180,7 +180,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'library', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi', 'upgrade'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'library', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi', 'upgrade', 'instrument'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   o.writer.samples.list(); // the samples' hashes are worked out (or read from the cache) now, not when the first page connects

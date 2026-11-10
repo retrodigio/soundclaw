@@ -100,6 +100,12 @@ in a full render; its render key holds the instrument's zones with the hash (and
 render it always had, so every earlier project and golden is unchanged. Building commands (`from-samples`, `from-slices`, `from-sample`) measure once in the writer and put plain
 `instrument zone add` lines on the tape; the checks (`core/src/instrumentchecks.ts`) play each zone alone and measure, and never feed a render.
 
+**Instrument files are read once, at the import.** `instrument import` (`core/src/sfzimport.ts`, `core/src/sf2.ts`, `server/src/instrumentimport.ts`) parses an SFZ or a SoundFont 2 file, decodes
+the audio it plays, and writes the result as `sample add` lines (a hash and the facts that were read) and plain `instrument zone add` lines, in one undo group: the file and its folder are not
+needed again, a replay opens nothing, and a render never sees either format. The readers are pure TypeScript in `core` (no dependencies; the files are untrusted, so every size and index
+is checked against its chunk). They produce a plan, zones in the document's own terms plus a report of every opcode or generator the zones cannot carry, kept per region or zone, so the importer
+names what it dropped. Importing may use platform maths (timecents to seconds): its numbers are written to the tape rounded and nothing there feeds back into a render.
+
 **Licences travel with the audio.** Each sample has a licence (never inferred) and a provenance (source, origin, the original file's hash, who and when,
 and for generated or derived audio how). A sound, instrument or song carries the licences of every sample it reaches, through parents too, and a manifest
 export is gated by the project's policy. The tool records; it gives no legal advice.

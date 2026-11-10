@@ -22,6 +22,7 @@ import { historyText, soundSummary } from './summary.ts';
 import { exportInstrument, formatInstrumentExport, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap } from './instruments.ts';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
 import { readFileSync } from 'node:fs';
+import { formatInstrumentImport, importInstrument, isSoundFont, soundFontList } from './instrumentimport.ts';
 import { configText, generateFromBody, ledgerText, ledgerTotals, readGenerationConfig } from './generate.ts';
 import type { Writer } from './writer.ts';
 
@@ -62,7 +63,7 @@ Sets, families and loops (game sounds that repeat, or come in several distances,
 
 Music (instruments, patterns, songs; build a song in passes and run \`check\` after each: structure, harmony, bass, melody, drums, mix):
   instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample|zones]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= pitched= adsr=a,d,s,r velocity= range=C3-C6 pitchenv= gain=   instrument layer|fx|env …   (built-ins: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open: use them by name)
-  Sampled instruments (the samples of the project played by key and velocity): instrument zone add <id> sample=<name> root=<note> keys=<lo>-<hi> [vel=<lo>-<hi>] [tune=<cents>] [gain=<dB>] [loopmode=none|sustain|continuous|oneshot] [trigger=attack|release] [release-decay=<dB/s>] [rr=<i>/<n>] [choke=<group>] [hit=<name>]   instrument zone set|remove|clear <id> [<n>] ...   instrument zones <id> from-samples <sample>... [root=detect] | from-slices <sample> [start=C1]   instrument from-sample <id> <sample> [loop=find]   instrument set <id> velxfade=<steps> rr=cycle|hash; a drum channel takes kit=<kit instrument> (zones keyed by hit=<name>). \`check\` an instrument for holes in its key-map, zones out of tune, level steps and loop seams; \`view\` it with kind keymap; \`export\` it as sfz.
+  Sampled instruments (the samples of the project played by key and velocity): instrument zone add <id> sample=<name> root=<note> keys=<lo>-<hi> [vel=<lo>-<hi>] [tune=<cents>] [gain=<dB>] [loopmode=none|sustain|continuous|oneshot] [trigger=attack|release] [release-decay=<dB/s>] [rr=<i>/<n>] [choke=<group>] [hit=<name>]   instrument zone set|remove|clear <id> [<n>] ...   instrument zones <id> from-samples <sample>... [root=detect] | from-slices <sample> [start=C1]   instrument from-sample <id> <sample> [loop=find]   instrument set <id> velxfade=<steps> rr=cycle|hash; a drum channel takes kit=<kit instrument> (zones keyed by hit=<name>). \`check\` an instrument for holes in its key-map, zones out of tune, level steps and loop seams; \`view\` it with kind keymap; \`export\` it as sfz. \`instrument_import\` reads an .sfz file or one preset of an .sf2 (list: true shows the presets) as a sampled instrument and names what it could not carry.
   song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song channel add <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=base|tension|combat]   song section add <song> <name> <pattern>… [x2]   song loop <song> <from>..<to>|off   song intro|ending <song> <section>   song fx add <song> compress|limit …
   pattern <song>.<name> steps=16 tpb=4 bar=8, then indented rows: \`lead: C5 . E5 - | G5v80 . E5~slide .\` (. rest, - hold, | bars, v velocity, ! outside the key on purpose, ~slide ~vib ~arp(0,4,7), chords C4+E4+G4, lower-case words are drum hits)
   One note at a time: \`pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> …\` (add E5 len=2; move step=6 note=G5; set vel=80 fx=~slide). A person's edits in the music editor are these commands: call \`changes\` before editing a song a person touched.
@@ -409,6 +410,39 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       if (!a.file) return fail('import needs file');
       const r = importPath(w, a.file, { ...(a.as ? { as: a.as } : {}), ...(a.licence ? { licence: a.licence } : {}), ...(a.attribution ? { attribution: a.attribution } : {}), ...(a.terms ? { terms: a.terms } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.source ? { source: a.source } : {}), ...(a.origin ? { origin: a.origin } : {}), ...(a.note ? { note: a.note } : {}), force: !!a.force, by: agentName(a.by) });
       return { content: [text(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}`)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('instrument_import', {
+    title: 'Import an SFZ or SoundFont 2 file as a sampled instrument',
+    description: 'Read an .sfz or .sf2 file on the machine running the server into this project as a sampled instrument: the samples go into the store (provenance: the file and the path inside it; licence unknown unless given) and the regions or preset zones become `instrument zone add` lines, all as one undo group. ' +
+      'SFZ covers <control> <global> <master> <group> <region>, #define, #include, default_path and the key, velocity, pitch, level, pan, envelope, loop, offset, release, round-robin and choke opcodes; a SoundFont 2 file imports one preset (preset: <bank>:<program> or a name; list: true lists them). ' +
+      'Every other opcode or generator is named in the answer, per region or zone, as lost or approximated. A sample that cannot be read names its region and nothing is written. Then `check` and `view` (keymap) the instrument.',
+    inputSchema: z.object({
+      path: z.string().describe('The .sfz or .sf2 file'),
+      id: z.string().optional().describe('The instrument id (default: the file name, or the preset name)'),
+      preset: z.string().optional().describe('SoundFont: <bank>:<program> or a preset name'),
+      list: z.boolean().optional().describe('SoundFont: list the presets and import nothing'),
+      licence: z.string().optional().describe('CC0-1.0, CC-BY-4.0, own, unknown (default), proprietary:<note>'),
+      attribution: z.string().optional(),
+      terms: z.string().optional(),
+      tags: z.string().optional().describe('comma-separated tags for the samples'),
+      prefix: z.string().optional().describe('put in front of the sample names (default <id>_)'),
+      by: z.string().optional().describe('the author on the tape (default agent:claude)'),
+    }),
+  }, (a) => w.enqueue(() => {
+    try {
+      if (a.list) {
+        if (!isSoundFont(a.path)) return fail('error: list is for .sf2 files');
+        return { content: [text(soundFontList(a.path))] };
+      }
+      const r = importInstrument(w, a.path, {
+        ...(a.id ? { id: a.id } : {}), ...(a.preset ? { preset: a.preset } : {}), ...(a.licence ? { licence: a.licence } : {}), ...(a.attribution ? { attribution: a.attribution } : {}),
+        ...(a.terms ? { terms: a.terms } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.prefix !== undefined ? { prefix: a.prefix } : {}), by: agentName(a.by),
+      });
+      return { content: [text(formatInstrumentImport(r, a.path))] };
     } catch (e) {
       return errorResult(e);
     }

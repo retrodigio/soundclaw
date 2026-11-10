@@ -49,6 +49,8 @@ export interface Prepared {
   command: string;
   notes: string[];
   file: string;
+  /** The sample's facts as `sample add` will say them. */
+  entry?: SampleEntry;
 }
 
 /** A readable name for a file: its stem with anything but letters, digits, _ and - turned into `_`. */
@@ -128,7 +130,7 @@ export function prepareImport(bytes: Uint8Array, filename: string, o: Omit<Impor
     ...(meta.tempo ? [`tempo ${meta.tempo} BPM`] : []),
   ].join('; ');
   if (text) entry.note = text.slice(0, 400);
-  return { name, audio, hash, command: sampleAddText(entry), notes, file: filename };
+  return { name, audio, hash, command: sampleAddText(entry), notes, file: filename, entry };
 }
 
 export interface ImportedItem {
@@ -151,7 +153,7 @@ export interface ImportResult {
  * Put prepared files in the store and their names on the tape, as one undo group. A file whose name is in the project with other
  * audio is a problem and the others still go in.
  */
-export function commitImports(w: Writer, prepared: Prepared[], o: Pick<ImportOptions, 'by' | 'force'>): ImportResult {
+export function commitImports(w: Writer, prepared: Prepared[], o: Pick<ImportOptions, 'by' | 'force'> & { extra?: string[] }): ImportResult {
   const problems: string[] = [];
   const warnings: string[] = [];
   const items: ImportedItem[] = [];
@@ -177,8 +179,8 @@ export function commitImports(w: Writer, prepared: Prepared[], o: Pick<ImportOpt
   const created = new Map<string, boolean>();
   for (const p of todo) created.set(p.name, w.samples.store.put(p.audio, p.hash).created);
   let group: string | null = null;
-  if (todo.length) {
-    const r = w.run({ commands: todo.map((p) => p.command).join('\n'), by: o.by });
+  if (todo.length || o.extra?.length) {
+    const r = w.run({ commands: [...todo.map((p) => p.command), ...(o.extra ?? [])].join('\n'), by: o.by });
     if (!r.ok) throw new ProjectError(r.errors.map((e) => e.message).join('\n'));
     group = r.group;
   }
@@ -328,7 +330,7 @@ export function upgradeProject(w: Writer): UpgradeResult {
           name, hash, rate: audio.rate, channels: audio.channels, frames: audio.frames, format: audio.format, tags: [],
           prov: { source: 'file', origin: f, origHash: sha256Hex(bytes), origFormat: `wav ${d.sourceFormat}` }, licence: { id: 'unknown' },
         };
-        prepared.push({ name, file, p: { name, audio, hash, command: sampleAddText(e), notes: [], file } });
+        prepared.push({ name, file, p: { name, audio, hash, command: sampleAddText(e), notes: [], file, entry: e } });
       } catch (err) {
         skipped.push(`${name}: ${(err as Error).message}`);
       }

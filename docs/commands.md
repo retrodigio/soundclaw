@@ -711,6 +711,40 @@ apart (the set-spread rules); a release zone louder than the zone it follows. `s
 velocity up, each zone a box with its sample, root, measured error and level, coloured by its checks; take stacks the round robins, and hits are listed
 below. `soundclaw instrument zones <project> <id>` lists the zones. `render-match` hears a sampled instrument's notes as it does any other.
 
+**SFZ and SoundFont 2 import.** `soundclaw instrument import <project> <file.sfz|file.sf2> [--id <id>] [preset=<bank>:<program>|<name>] [--list] [licence=<id>]
+[attribution="<text>"] [terms=<url>] [tags=a,b] [prefix=<text>]` (the MCP `instrument_import` tool takes the same fields, with `list: true`) reads the file into a sampled
+instrument. The sample files go into the store as `source=instrument-import` (the origin is `<file>:<path inside it>`, the original file's hash is kept, the licence is `unknown`
+unless `licence=` gives one, so an export with a manifest refuses until it is set), and the regions or zones become plain `instrument zone add` lines, all one undo group. The files are
+read once, at the import; a replay or a render never opens them again. Sample names are the file's name after `<id>_` (`prefix=` changes the front; a name already taken gets `_2`).
+The answer lists what was written and then everything the zones cannot say, per region (SFZ) or zone (SoundFont), as `lost` or `approximated`.
+
+| SFZ | Becomes |
+|---|---|
+| `<control>`, `<global>`, `<master>`, `<group>`, `<region>`; `#define $NAME value`; `#include "file"` (nested up to 8 deep, from the SFZ's folder); `//` and `/* */` comments; `default_path`; `octave_offset`, `note_offset` | opcodes inherit down the headers as SFZ says; other headers (`<curve>`, `<effect>`, `<midi>`) are named as lost |
+| `sample` (spaces allowed; found beside the SFZ, ignoring case) | the zone's sample; a `*sine`-style generator or an absolute path stops the import naming the region |
+| `lokey`, `hikey`, `key`, `pitch_keycenter` (note names like `c4` = 60; `sample` = the file's own root) | `keys=`, `root=` (default root 60) |
+| `lovel`, `hivel` | `vel=` |
+| `tune`, `transpose` | `tune=` (cents, `tune + 100 × transpose`) |
+| `volume`, `pan` | `gain=`, `pan=` (pan ÷ 100) |
+| `pitch_keytrack=0` | an unpitched instrument if every region has it; else one zone per key (spans up to 16 keys), longer spans are reported as approximated |
+| `loop_mode` (`no_loop`, `one_shot`, `loop_continuous`, `loop_sustain`), `loop_start`, `loop_end`, `loop_crossfade` | `loopmode=` (none, oneshot, continuous, sustain), `loop=` in seconds from where the zone starts playing, `xfade=`; with no `loop_mode`, a file or opcode loop plays as `continuous`, else no loop |
+| `offset`, `end` | `start=`, `end=` (seconds) |
+| `trigger=release`, `rt_decay` | `trigger=release`, `release-decay=` (`first`, `legato` play as attack, reported) |
+| `seq_length`, `seq_position` | `rr=<position>/<length>` and `instrument set rr=cycle` |
+| `lorand`, `hirand` | regions sharing keys and velocities become `rr=1/n … n/n` and `instrument set rr=hash` (reported as approximated, with unequal ranges said) |
+| `group`, `off_by` | `choke=` (groups linked by `off_by` share a number; a one-way cut is reported, as choke cuts both ways) |
+| `ampeg_attack`, `ampeg_decay`, `ampeg_sustain` (percent), `ampeg_release`, `amp_veltrack` | the instrument's `attack decay sustain release` and `velocity`: one for the instrument, the commonest of the regions'; regions that differ are reported; an SFZ with no `ampeg_*` leaves the instrument's own envelope |
+
+`ampeg_hold` and every opcode not listed (`cutoff`, `fil_type`, `*_cc`, `sw_*`, `pitch_veltrack`, `polyphony`, …) are reported as lost, with the regions that had them. Opcodes that
+only label things (`region_label`, `hint_*`, `label_cc`) are ignored without a word. A region with no `sample`, or an empty key or velocity range, is left out with a note.
+More than 512 zones is refused (import a part of the library). For SoundFont 2: `--list` prints the presets (`bank:program name (zones)`); a file with one preset needs no `preset=`, with
+several it is required. Reads the RIFF structure with 16-bit samples and 24-bit (`sm24`); SoundFont 3 (compressed) and ROM samples are refused. Each preset zone × instrument zone becomes a
+zone with its key and velocity range (intersected as the format says), root (`overridingRootKey`, else the sample's), tuning (`coarseTune`, `fineTune`, the sample's correction), level
+(`initialAttenuation`), pan (a left or right half of a stereo pair is hard left or right), the loop and its address offsets (`sampleModes` 1 = `continuous`, 3 = `sustain`), the start and
+end offsets, and `exclusiveClass` as `choke=`; the volume envelope (timecents; decays are converted from decibels) is the instrument's note envelope, the commonest zone's. Modulators, filters,
+LFOs, the modulation envelope, effect sends, key-number scaling of the envelope and `scaleTuning` other than 0 or 100 are named as lost; `holdVolEnv` too. The font's name, copyright and comment go into
+the samples' notes; the licence stays `unknown` until you set it. Both formats are subsets: what a file has beyond the table is named, never silently dropped.
+
 **SFZ export.** `soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]` writes `<id>.sfz` and its samples as WAV files (and
 `ATTRIBUTION.txt` when a licence asks for it) so the instrument can go to a DAW or another sampler. The note envelope becomes the amplitude envelope, and
 what SFZ cannot say (synth layers, effects, the pitch envelope, the velocity crossfade width) is named in the report and a comment in the file. A
@@ -1450,6 +1484,7 @@ soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=<n>] [as
 soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>]
 soundclaw generate --ledger [<project>]    soundclaw generate config [<key>=<value>...]
 soundclaw generate cap <project> <credits>
+soundclaw instrument import <project> <file.sfz|file.sf2> [--id <id>] [preset=<bank>:<program>|<name>] [--list] [licence=<id>] [attribution="<text>"] [terms=<url>] [tags=a,b] [prefix=<text>]
 soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]
 soundclaw instrument zones <project> <id>
 soundclaw licence check <project> [<id>...] [--allow-licence <id>]...

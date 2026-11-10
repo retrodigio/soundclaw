@@ -45,6 +45,7 @@ function writes(cmd: string, p: ReturnType<typeof parseArgs>): boolean {
     case 'sample': return ['import', 'add', 'set', 'rename', 'remove', 'derive', 'bounce', 'slice', 'loop'].includes(p.pos[0] ?? '') || (p.pos[0] === 'gc' && p.flags.has('apply'));
     case 'library': return p.pos[0] === 'use';
     case 'midi': return p.pos[0] === 'import';
+    case 'instrument': return p.pos[0] === 'import' && !p.flags.has('list');
     default: return true;
   }
 }
@@ -60,7 +61,7 @@ export async function forwardToServer(argv: string[], io: Pick<Io, 'out' | 'err'
   if (!spec) return null;
   let p;
   try { p = parseArgs(argv.slice(1), ...spec); } catch { return null; }
-  const dir = argv[0] === 'sample' || argv[0] === 'midi' || argv[0] === 'library' ? p.pos[1] : p.pos[0];
+  const dir = argv[0] === 'sample' || argv[0] === 'midi' || argv[0] === 'library' || argv[0] === 'instrument' ? p.pos[1] : p.pos[0];
   if (!dir || !writes(argv[0]!, p)) return null;
   const ref = findServer(resolve(dir));
   if (!ref) return null;
@@ -88,7 +89,7 @@ export function runForwarded(argv: string[], writer: Writer, cwd: string): { cod
   const spec = WRITE_OPTS[argv[0] ?? ''];
   if (!spec) return { code: 2, stdout: '', stderr: `error: '${argv[0]}' is not sent through the server\n` };
   let dir: string | undefined;
-  try { const pa = parseArgs(argv.slice(1), ...spec); dir = argv[0] === 'sample' || argv[0] === 'library' ? pa.pos[1] : pa.pos[0]; } catch { /* main reports it */ }
+  try { const pa = parseArgs(argv.slice(1), ...spec); dir = argv[0] === 'sample' || argv[0] === 'library' || argv[0] === 'midi' || argv[0] === 'instrument' ? pa.pos[1] : pa.pos[0]; } catch { /* main reports it */ }
   const real = (d: string) => { try { return realpathSync(d); } catch { return resolve(d); } };
   if (dir !== undefined && real(resolve(cwd, dir)) !== real(writer.project.dir)) {
     return { code: 1, stdout: '', stderr: `error: this server owns ${writer.project.dir}, not ${dir}\n` };

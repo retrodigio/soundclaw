@@ -14,6 +14,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { decodeWav, floatsFromBytes, newSound, renderSound, samplesHash, type Sound } from '@soundclaw/core';
 import { LOCK_FILE, tokenFilePath } from '../src/index.ts';
 import { channelInts, flacBytes, makeAudio, wavBytes } from '../../core/test/audio-fixtures.ts';
+import { buildSf2 } from '../../core/test/sf2-fixture.ts';
 import { BIN, until } from './helpers.ts';
 
 let root: string;
@@ -223,6 +224,24 @@ describe('the server process', () => {
     expect((await cli(['licence', 'check', dir])).out).toMatch(/0 items|no sounds/);
   });
 
+  it('instrument import goes through the server, from the CLI, and listing presets needs no server', async () => {
+    await startServe();
+    const sf2 = join(root, 'ramps.sf2');
+    const pcm = Int16Array.from({ length: 3000 }, (_, i) => Math.round(Math.sin(i / 12) * 9000));
+    writeFileSync(sf2, buildSf2({
+      info: { INAM: 'Ramps' },
+      samples: [{ name: 'ramp', pcm, rate: 22050, rootKey: 60 }],
+      instruments: [{ name: 'I', zones: [{ target: 0 }] }],
+      presets: [{ name: 'One', bank: 0, program: 0, zones: [{ target: 0 }] }, { name: 'Two', bank: 0, program: 1, zones: [{ target: 0 }] }],
+    }));
+    expect((await cli(['instrument', 'import', dir, sf2, '--list'])).out).toMatch(/^Ramps {2}\(SoundFont 2\.01, 2 presets\)\n000:000 {2}One/);
+    const imp = await cli(['instrument', 'import', dir, sf2, 'preset=One', '--id', 'ramps', 'licence=own']);
+    expect(imp.err).toBe('');
+    expect(imp.out).toMatch(/^imported instrument ramps from ramps\.sf2 \(SoundFont 2\): 1 zone read, 1 zone written, 1 sample, as group g1/);
+    const tape = readFileSync(join(dir, 'history.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { cmd?: string });
+    expect(tape.filter((e) => e.cmd?.startsWith('instrument new')).map((e) => e.cmd)).toEqual(['instrument new ramps kind=zones seed=1']);
+  });
+
   it('a CLI call that cannot reach the server writes nothing behind its back', async () => {
     await startServe();
     // Hide the token file: the folder is locked but the token cannot be read.
@@ -256,7 +275,7 @@ describe('MCP over stdio', () => {
   it('lists the tools, runs commands, reports numbers, reads the history, renders and exports', async () => {
     const m = await connect();
     const tools = (await client!.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'generate', 'history', 'import', 'library', 'licence', 'measure', 'midi', 'normalize', 'project', 'render', 'request', 'run', 'sample', 'scale', 'style', 'view', 'work']);
+    expect(tools).toEqual(['await_requests', 'changes', 'check', 'describe', 'export', 'generate', 'history', 'import', 'instrument_import', 'library', 'licence', 'measure', 'midi', 'normalize', 'project', 'render', 'request', 'run', 'sample', 'scale', 'style', 'view', 'work']);
     expect((await m.call('project')).text).toMatch(/sounds: none yet/);
     const r = await m.call('run', { commands: 'sound new beep\nsound set beep frequency=880 volume=0.4' });
     expect(r.isError).toBe(false);
@@ -279,6 +298,26 @@ describe('MCP over stdio', () => {
     expect((await m.call('project')).text).toContain('watch: http://127.0.0.1:');
     expect((await m.call('scale', { key: 'D:major' })).text).toMatch(/^D:major: D E F# G A B C#/);
     expect((await m.call('style')).text).toMatch(/no style guide \(music-style.md/);
+  });
+
+  it('instrument_import reads a SoundFont for an agent: presets listed, one imported, an unchosen preset refused', async () => {
+    const m = await connect();
+    const sf2 = join(root, 'ramps.sf2');
+    const pcm = Int16Array.from({ length: 3000 }, (_, i) => Math.round(Math.sin(i / 12) * 9000));
+    writeFileSync(sf2, buildSf2({
+      info: { INAM: 'Ramps' },
+      samples: [{ name: 'ramp', pcm, rate: 22050, rootKey: 60 }],
+      instruments: [{ name: 'I', zones: [{ target: 0 }] }],
+      presets: [{ name: 'One', bank: 0, program: 0, zones: [{ target: 0 }] }, { name: 'Two', bank: 0, program: 1, zones: [{ target: 0 }] }],
+    }));
+    expect((await m.call('instrument_import', { path: sf2, list: true })).text).toContain('000:001  Two');
+    const again = await m.call('instrument_import', { path: sf2, preset: '0:1', id: 'ramps_two' });
+    expect(again.isError).toBe(false);
+    expect(again.text).toContain('imported instrument ramps_two');
+    const bad = await m.call('instrument_import', { path: sf2 });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('2 presets; name one with preset=');
+    expect((await m.call('check', { sounds: ['ramps_two'] })).text).toContain('ramps_two');
   });
 
   it('files, claims and finishes a request, and await_requests returns what people did', async () => {

@@ -65,6 +65,12 @@ All notable changes to SoundClaw are listed here. The format follows
   hit name (`kit=<instrument>`). `check <project> <instrument>` finds holes in the key-map, zones out of tune at their root, level steps, a looped zone's seam, a note far from its root,
   round robins too alike or too different and a release louder than its attack; `view <project> <instrument> keymap` draws it; `soundclaw instrument export … --format sfz` writes an SFZ with
   its samples. A song of sampled instruments renders to the same bytes in Node and in the browser, and a project from before has the renders it had.
+- **SFZ and SoundFont 2 import.** `soundclaw instrument import <project> <file.sfz|file.sf2>` (and the MCP `instrument_import` tool) reads an SFZ (headers, `#define`, `#include`, `default_path`, and the key, velocity,
+  pitch, level, pan, envelope, loop, offset, release, round-robin and choke opcodes) or one preset of a SoundFont 2 file (16- and 24-bit samples, ranges, root and tuning, loops and their offsets,
+  attenuation, pan, the volume envelope, exclusive classes) as a sampled instrument: the samples go into the store with the file and path as provenance and the licence `unknown` unless given, the
+  regions become plain `instrument zone add` lines, all one undo group, and nothing is read again on replay. Every opcode or generator the zones cannot carry is named, per region or zone, as lost or
+  approximated; a sample that cannot be read names its region and nothing is written. `--list` shows a font's presets. SFZ export now writes the loop crossfade and counts a zone's `start` into its loop
+  points, so an exported instrument imports back to the same zones and renders the same bytes.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.
@@ -73,6 +79,7 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ### Fixed
 - The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.
+- `midi import` sent through a running server names the right project folder.
 
 ## [0.1.1] - 2026-11-09
 

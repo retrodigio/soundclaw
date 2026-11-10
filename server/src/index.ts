@@ -15,6 +15,7 @@ export * from './changes.ts';
 export * from './samples.ts';
 export * from './songs.ts';
 export * from './instruments.ts';
+export * from './instrumentimport.ts';
 export * from './normalize.ts';
 export * from './sampleimport.ts';
 export * from './sampleedit.ts';

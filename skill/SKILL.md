@@ -155,7 +155,7 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   a kit is an instrument whose zones are `hit=kick`, `hit=snare` (`pitched=no`), a drum channel `kit=<instrument>`. Then `check <project> <instrument>` (holes in the key-map, a zone more than
   10 cents off its root, a level step over 3 LU between neighbours, a looped zone's seam, round robins too alike) and `view <project> <instrument> keymap` (zones as boxes coloured by their checks):
   fix what it says (`instrument zone set <id> <n> tune=… gain=…`) before you write the song, then judge it in the song by ear and with `render-match`. `from-sample <id> <sample> loop=find` makes
-  a one-sample instrument. `soundclaw instrument export <project> <id> --format sfz` takes it to a DAW. The samples' licences reach the instrument and every song that plays it.
+  a one-sample instrument. `soundclaw instrument export <project> <id> --format sfz` takes it to a DAW. `soundclaw instrument import <project> <file.sfz|file.sf2> --id <id> [preset=<bank>:<program>] licence=<id>` brings an SFZ or one SoundFont 2 preset in (`--list` shows a font's presets; read the `lost` and `approximated` lines in the answer, then `check` and `view … keymap`; the licence is `unknown` until you set it, so ask the person what the file's licence is). The samples' licences reach the instrument and every song that plays it.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower
