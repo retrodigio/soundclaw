@@ -3,7 +3,13 @@
 // with an agent's arp that masks the lead, and requests in every lane, one of them ready for review.
 // Then the list of screens, each with the address, what it waits for and what it does first.
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Page } from '@playwright/test';
+import { pcmFromFloats } from '../core/src/index.ts';
+import { wavBytes } from '../core/test/audio-fixtures.ts';
+import { hitsFloats, toneFloats } from '../core/test/sample-golden-table.ts';
+import { wavOf } from '../server/test/library-fixtures.ts';
 import type { Agent } from './helpers.ts';
 
 export const SOUNDS = `sound new laser voice=classic preset=laser seed=3
@@ -97,6 +103,32 @@ export async function makeExample(a: Agent): Promise<void> {
   await ask('jump', 'a little higher at the top'); // r6: sent
   await run(Array.from({ length: 6 }, (_, i) => `sound mutate laser amount=0.1 seed=${40 + i} as=laser_v${i + 1}`).join('\n'), 'agent:otter');
   await run('sound set jump punch=0.4', 'human:ana');
+  await makeSamples(a);
+}
+
+/**
+ * Samples for the dashboard's sample views, all made by test code: a hit pattern with slices (attribution), a steady tone with a loop (own), a
+ * noise bed (licence unknown), a derived one, three generated takes from the free test provider, and a small library of one-shots.
+ */
+export async function makeSamples(a: Agent): Promise<void> {
+  const cli = async (args: string[]) => { const r = await a.cli(args); if (r.code !== 0) throw new Error(`${args.join(' ')}: ${r.err || r.out}`); return r; };
+  const files = join(a.root, 'audio');
+  const lib = join(a.root, 'cellar-foley');
+  mkdirSync(files, { recursive: true });
+  writeFileSync(join(files, 'door_hits.wav'), wavBytes(pcmFromFloats([hitsFloats(22050, 2, 0.5)], 22050, 'pcm16')));
+  writeFileSync(join(files, 'hum_tone.wav'), wavBytes(pcmFromFloats([toneFloats(44100, 1.5)], 44100, 'pcm16')));
+  writeFileSync(join(files, 'field_noise.wav'), wavOf('rain', 4, 1.2));
+  await cli(['sample', 'import', a.dir, join(files, 'door_hits.wav'), 'licence=CC-BY-4.0', 'attribution=invented for the tests', 'tags=door,wood']);
+  await cli(['sample', 'import', a.dir, join(files, 'hum_tone.wav'), 'licence=own', 'tags=tone']);
+  await cli(['sample', 'import', a.dir, join(files, 'field_noise.wav'), 'tags=noise']);
+  await cli(['run', a.dir, '-e', ['sample slice door_hits grid=4', 'sample loop hum_tone 0.2 1.2', 'sample derive hum_soft from=hum_tone op="fade out=100ms; gain -6"'].join('\n'), '--by', 'human:ana']);
+  await cli(['generate', a.dir, 'sfx', 'the slow creak of an old wooden door hinge, close and dry', 'provider=fake', 'takes=3', 'duration=1.2', 'as=creak_gen']);
+  for (const [path, kind, seed, secs] of [['doors/creak_01.wav', 'creak', 1, 1.2], ['doors/creak_02.wav', 'creak', 2, 2.4], ['doors/slam_01.wav', 'slam', 3, 0.6], ['bells/bell_high.wav', 'bell', 4, 1.5], ['weather/rain_loop.wav', 'rain', 5, 2]] as const) {
+    mkdirSync(join(lib, path.split('/')[0]!), { recursive: true });
+    writeFileSync(join(lib, path), wavOf(kind, seed, secs));
+  }
+  await cli(['library', 'add', lib, 'licence=CC0-1.0']);
+  await cli(['library', 'index', 'cellar-foley']);
 }
 
 export interface Screen {
@@ -110,6 +142,12 @@ export interface Screen {
 
 /** Take focus off whatever has it (the page's keys then act on the page, not on a focused list or field). */
 export const unfocus = (p: Page) => p.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); });
+
+/** The library's Samples tab, opened (below 900 px the library is an overlay that ⌥1 opens). */
+const samplesTab = async (p: Page): Promise<void> => {
+  if (!(await p.getByTestId('lib-tab-samples').isVisible())) { await unfocus(p); await p.keyboard.press('Alt+1'); }
+  await p.getByTestId('lib-tab-samples').click();
+};
 
 const lens = (key: string): ((p: Page) => Promise<void>) => async (p) => {
   await unfocus(p);
@@ -132,6 +170,17 @@ export const SCREENS: Screen[] = [
   { name: 'session', hash: '#/session', ready: 'session' },
   { name: 'review', hash: '#/review/r1', ready: 'review-item' },
   { name: 'kit', hash: '#/kit', ready: 'kit' },
+  { name: 'samples-project', hash: '#/', ready: 'home', act: async (p) => { await samplesTab(p); await p.getByTestId('lib-row-door_hits').waitFor(); await p.getByTestId('sample-numbers-door_hits').waitFor(); await p.waitForTimeout(500); } },
+  { name: 'samples-library', hash: '#/', ready: 'home', act: async (p) => { await samplesTab(p); await p.getByTestId('samples-mode-library').click(); await p.getByTestId('library-hit').first().waitFor(); } },
+  { name: 'samples-takes', hash: '#/', ready: 'home', act: async (p) => { await samplesTab(p); await p.getByTestId('samples-mode-takes').click(); await p.getByTestId('take-creak_gen_t1').waitFor(); await p.getByTestId('keep-creak_gen_t1').click(); await p.getByTestId('keep-form-creak_gen_t1').waitFor(); } },
+  { name: 'sample-page', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('sample-licence-panel').waitFor(); await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); } },
+  { name: 'sample-spectrogram', hash: '#/sample/hum_tone', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await unfocus(p); await p.keyboard.press('2'); await p.waitForTimeout(300); } },
+  { name: 'sample-loop', hash: '#/sample/hum_tone', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await p.getByTestId('tool-loop').click(); await unfocus(p); await p.keyboard.press('4'); await p.getByTestId('seam-numbers').waitFor(); } },
+  { name: 'sample-slices', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await p.getByTestId('tool-slice').click(); await p.getByTestId('slice-handle-2').waitFor(); } },
+  { name: 'sample-generated', hash: '#/sample/creak_gen_t1', ready: 'sample-page', act: async (p) => { await p.getByTestId('prov-prompt').waitFor(); await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); } },
+  { name: 'sample-derive', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('sample-derive').click(); await p.getByTestId('derive-dialog').waitFor(); } },
+  { name: 'sample-compare', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await unfocus(p); await p.keyboard.press('5'); await p.getByTestId('compare-other').waitFor(); } },
+  { name: 'record-dialog', hash: '#/', ready: 'home', act: async (p) => { await p.getByTestId('transport-record').click(); await p.getByTestId('record-dialog').waitFor(); await p.waitForTimeout(500); } },
   { name: 'palette', hash: '#/sound/coin_pickup', ready: 'editor', act: async (p) => { await p.getByTestId('open-palette').click(); await p.getByRole('dialog').first().waitFor(); await p.keyboard.type('make the coin brighter'); } },
   { name: 'shortcuts', hash: '#/', ready: 'home', act: async (p) => { await unfocus(p); await p.keyboard.press('?'); await p.getByRole('dialog').first().waitFor(); } },
   { name: 'composer', hash: '#/sound/laser', ready: 'editor', act: async (p) => { await unfocus(p); await p.keyboard.press('r'); await p.getByTestId('composer').waitFor(); } },

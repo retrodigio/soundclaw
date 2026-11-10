@@ -93,6 +93,18 @@ The first release.
 
 ### Setup
 - **Bigger imported instruments.** An instrument holds up to 4096 zones (it was 512): a note from 4096 zones renders in about 30 ms, `check` takes about two seconds (zones that differ only in the keys and velocities they answer to are measured once) and the key-map view draws in under 0.1 s. Each sample of an SFZ or SoundFont 2 import records the file's own SHA-256 as `container-hash`.
+- **Samples in the dashboard.** The library's Samples tab is a browser with three modes: *Project* (a small waveform, length, loudness and note, where the
+  audio came from and its licence, each as a glyph and a word; the numbers query of `sample list` in the filter field, with chips; ↑↓, Space and Enter),
+  *Library* (the registered sample libraries, 48 files a page, nothing loaded until one is played, and *Use* to copy one in with its licence) and *Takes*
+  (what generation made, to keep under a name and a confirmed licence, or discard). A sample has a page, `#/sample/<name>`: waveform, spectrogram, pitch,
+  loop-seam and compare lenses on one time axis, handles for the trim, the loop points and the slice markers (each gesture is one command, as an agent would
+  write it; from a layer the trim writes that layer's start and end), the numbers, the words, the advisory checks, where the audio came from, its licence
+  (editable) and what uses it, with derive, make an instrument, generate again and ask for changes. Audio dropped on the window (or chosen from the palette)
+  is imported as the person, under the licence they choose; a record button records the microphone (an input meter, an optional count-in) and saves the
+  take as `recorded`, licence `own`, once they confirm it. A sample row drags onto a layer list. The agent's new samples carry the violet mark in the list
+  and the rail's feed until they are played, and the feed says what came in (an import, a library file, a recording, a take with its prompt and credits, a
+  derived sample, a bounce). The server makes each sample's numbers and waveform once per audio in a worker thread (`GET /api/sample-card/<hash>.json`) and
+  adds `GET /api/sample-detail/<name>.json`, `GET /api/libraries`, `GET /api/library/search` and `POST /api/library/use` for the page.
 - **`soundclaw init`** sets up Claude Code in one step: it makes the project (or uses the one there), installs the skill, and
   registers the MCP server at this version with `claude mcp add` (or in `.mcp.json` when `claude` is not on the PATH).
   `--scope project` shares both with the repo.

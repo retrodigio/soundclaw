@@ -211,7 +211,7 @@ export function LensPanel({ store, sound, live, height = 300, prov, outline, pre
 
 // ---- the shared surface: pointer gestures, cursor, selection, playhead, flags ---------------------------------------------
 
-function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, data, onPick }: { store: Store; id: string; view: { t0: number; t1: number }; duration: number; axis: Axis; set(p: Partial<Axis>): void; flags: Flag[]; onFlag(f: Flag): void; lens: LensId; data: LensReply; onPick?: ((kind: 'click' | 'move', t: number, fy: number, px: number, py: number) => void) | undefined }) {
+export function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, data, onPick, children }: { children?: ReactNode; store: Store; id: string; view: { t0: number; t1: number }; duration: number; axis: Axis; set(p: Partial<Axis>): void; flags: Flag[]; onFlag(f: Flag): void; lens: LensId; data: LensReply; onPick?: ((kind: 'click' | 'move', t: number, fy: number, px: number, py: number) => void) | undefined }) {
   const box = useRef<HTMLDivElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; t: number; moved: boolean; extend: boolean; base: { a: number; b: number } | null } | null>(null);
@@ -347,13 +347,14 @@ function Surface({ store, id, view, duration, axis, set, flags, onFlag, lens, da
           </span>
         );
       })}
+      {children}
     </div>
   );
 }
 
 // ---- time ruler ---------------------------------------------------------------------------------------------
 
-function TimeRuler({ view, duration }: { view: { t0: number; t1: number }; duration: number }) {
+export function TimeRuler({ view, duration }: { view: { t0: number; t1: number }; duration: number }) {
   const span = view.t1 - view.t0;
   if (!(span > 0) || !duration) return <div className="lens-ruler mono" />;
   const raw = span / 7;
@@ -410,9 +411,9 @@ function LayersView({ data, view, lens, bands }: { data: LensReply; view: { t0: 
 
 // ---- waveform with loudness ----------------------------------------------------------------------------------
 
-const W = 1000, H = 400;
+export const W = 1000, H = 400;
 
-function WaveLens({ data, view, axis, live, outline }: { data: LensReply; view: { t0: number; t1: number }; axis: Axis; live?: Float32Array | null; outline: { min: ArrayLike<number>; max: ArrayLike<number>; duration: number } | null }) {
+export function WaveLens({ data, view, axis, live, outline }: { data: LensReply; view: { t0: number; t1: number }; axis: Axis; live?: Float32Array | null; outline: { min: ArrayLike<number>; max: ArrayLike<number>; duration: number } | null }) {
   const dur = data.duration;
   const pk = useMemo(() => {
     if (live && live.length) {
@@ -503,7 +504,7 @@ export function bandOf(freqs: ArrayLike<number>, hz: number): number {
   return lo + (hz - freqs[lo]!) / (freqs[hi]! - freqs[lo]!);
 }
 
-function useBitmap(w: number, h: number, paint: (img: ImageData) => void, deps: unknown[]): HTMLCanvasElement | null {
+export function useBitmap(w: number, h: number, paint: (img: ImageData) => void, deps: unknown[]): HTMLCanvasElement | null {
   return useMemo(() => {
     if (!w || !h) return null;
     const c = document.createElement('canvas');
@@ -518,7 +519,7 @@ function useBitmap(w: number, h: number, paint: (img: ImageData) => void, deps: 
 }
 
 /** A canvas as large as its box, redrawn by `draw` whenever the box or the inputs change. */
-function Fit({ draw, deps, testId, className }: { draw(g: CanvasRenderingContext2D, w: number, h: number): void; deps: unknown[]; testId?: string; className?: string }) {
+export function Fit({ draw, deps, testId, className }: { draw(g: CanvasRenderingContext2D, w: number, h: number): void; deps: unknown[]; testId?: string; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -540,7 +541,7 @@ function Fit({ draw, deps, testId, className }: { draw(g: CanvasRenderingContext
   return <canvas ref={ref} className={className} width={size.w} height={size.h} data-testid={testId} aria-hidden />;
 }
 
-function SpecLens({ data, view, hover: at }: { data: LensReply; view: { t0: number; t1: number }; hover: { t: number; fy: number; px: number; py: number } | null }) {
+export function SpecLens({ data, view, hover: at }: { data: LensReply; view: { t0: number; t1: number }; hover: { t: number; fy: number; px: number; py: number } | null }) {
   const { theme } = usePrefs();
   const { w, h, data: bytes } = data.spec;
   const bmp = useBitmap(w, h, (img) => {
@@ -579,7 +580,7 @@ function SpecLens({ data, view, hover: at }: { data: LensReply; view: { t0: numb
 
 // ---- pitch ---------------------------------------------------------------------------------------------------
 
-function PitchLens({ data, view }: { data: LensReply; view: { t0: number; t1: number } }) {
+export function PitchLens({ data, view }: { data: LensReply; view: { t0: number; t1: number } }) {
   const dur = data.duration;
   const voiced = data.pitch.filter((p) => p.hz !== null && p.clarity >= 0.5);
   const a = data.analysis.pitch;

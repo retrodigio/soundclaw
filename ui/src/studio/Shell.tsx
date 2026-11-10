@@ -10,6 +10,9 @@ import { AskHost, askHere, itemSpec, openAsk } from './ask.tsx';
 import { ToastHost, useToast } from './controls.tsx';
 import { Chevron, Close, KindIcon, Spark, type TabKind } from './icons.tsx';
 import { Library } from './Library.tsx';
+import { SamplesHost } from '../samples/SamplesHost.tsx';
+import { chooseFiles, openRecorder } from '../samples/samplesUi.ts';
+import { markSampleSeen } from './sampleSeen.ts';
 import { UndoBar } from './decisions.tsx';
 import { BatchStrip, UpdateChip } from './live.tsx';
 import { OfflineBanner, RefusedBanner } from './offline.tsx';
@@ -31,7 +34,7 @@ interface TabInfo { hash: string; label: string; kind: TabKind; id: string | nul
 
 /** What a tab's hash is: its label and icon. */
 function tabOf(hash: string): TabInfo | null {
-  let m = /^#\/(sound|set|song)\/([A-Za-z][A-Za-z0-9_-]*)/.exec(hash);
+  let m = /^#\/(sound|set|song|sample)\/([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(hash);
   if (m) return { hash: `#/${m[1]}/${m[2]}`, label: m[2]!, kind: m[1] as TabKind, id: m[2]! };
   m = /^#\/audition(?:\/([A-Za-z][A-Za-z0-9_-]*))?$/.exec(hash);
   if (m) return { hash, label: m[1] ? `audition · ${m[1]}` : 'Audition', kind: 'audition', id: null };
@@ -144,6 +147,7 @@ function ShellInner({ store }: { store: Store }) {
 
   const ask = useCallback(async (text: string, target: Focus | null = focus): Promise<boolean> => {
     if (!target || target.kind === 'set') { toast('Open or select a sound first, then ask.', 'warn'); return false; }
+    if (target.kind === 'sample') { toast('A request is made on a sound: open the sample\u2019s page and use Ask for changes there.', 'warn'); return false; }
     const r = await store.askForChanges(target.id, text);
     if (r.ok) toast(`Sent to the agent: “${text}” on ${target.id}`);
     else toast(r.error ?? 'The request was refused.', 'error');
@@ -160,6 +164,7 @@ function ShellInner({ store }: { store: Store }) {
     if (!f) return;
     if (f.kind === 'sound') void (loop ? store.playLoop(f.id) : store.play(f.id));
     else if (f.kind === 'song') void store.playSong(f.id, loop ? 'loop' : 'full');
+    else if (f.kind === 'sample') void store.playSample(f.id, loop ? { loop: true } : {});
     else {
       const set = store.sets.find((x) => x.id === f.id);
       if (set) void store.playSequence(set.members.map((m) => (typeof m === 'string' ? m : (m as { id: string }).id)), 400);
@@ -195,6 +200,11 @@ function ShellInner({ store }: { store: Store }) {
     { id: 'nav.library.songs', label: 'Library: show songs', group: 'Library', run: () => setPrefs({ libTab: 'songs' }) },
     { id: 'nav.library.instruments', label: 'Library: show instruments', group: 'Library', run: () => setPrefs({ libTab: 'instruments' }) },
     { id: 'nav.library.samples', label: 'Library: show samples', group: 'Library', run: () => setPrefs({ libTab: 'samples' }) },
+    { id: 'samples.project', label: 'Samples: this project\u2019s samples', group: 'Samples', run: () => { setPrefs({ libTab: 'samples', samplesMode: 'project' }); if (narrowLib) setLibOverlay(true); else setPanels({ libOpen: true }); }, keywords: 'browse' },
+    { id: 'samples.library', label: 'Samples: browse the sample libraries', group: 'Samples', run: () => { setPrefs({ libTab: 'samples', samplesMode: 'library' }); if (narrowLib) setLibOverlay(true); else setPanels({ libOpen: true }); }, keywords: 'search recordings folders' },
+    { id: 'samples.takes', label: 'Samples: takes to keep or discard', group: 'Samples', run: () => { setPrefs({ libTab: 'samples', samplesMode: 'takes' }); if (narrowLib) setLibOverlay(true); else setPanels({ libOpen: true }); }, keywords: 'generated' },
+    { id: 'samples.import', label: 'Samples: import audio files\u2026', group: 'Samples', run: chooseFiles, keywords: 'add drop upload wav' },
+    { id: 'samples.record', label: 'Samples: record from the microphone', group: 'Samples', shortcut: '⌥ R', key: 'alt+r', run: openRecorder, keywords: 'mic voice foley' },
     { id: 'panel.library', label: 'Toggle the library', group: 'Panels', shortcut: '⌥ 1', key: 'alt+1', run: toggleLibrary },
     { id: 'panel.inspector', label: 'Toggle the inspector', group: 'Panels', shortcut: '⌥ 2', key: 'alt+2', run: () => toast('This page has no inspector.') },
     { id: 'panel.rail', label: 'Toggle the agent rail', group: 'Panels', shortcut: '⌥ 3', key: 'alt+3', run: toggleRail },
@@ -212,6 +222,7 @@ function ShellInner({ store }: { store: Store }) {
     ...REFERENCE_KEYS,
   ];
   useActions(actions);
+  useEffect(() => { store.heardSample = (n) => markSampleSeen(store, n); return () => { store.heardSample = null; }; }, [store]);
 
   // the one keyboard handler: it runs the action bound to a key, and never while a text field has focus (except Esc and ⌘K)
   useEffect(() => {
@@ -298,6 +309,7 @@ function ShellInner({ store }: { store: Store }) {
           </aside>
         </div>
       )}
+      <SamplesHost store={store} />
       <AskHost store={store} focus={focus} />
       <UndoBar />
       {overlay === 'palette' && <Palette store={store} focus={focus} onClose={() => setOverlay(null)} ask={(t, f) => ask(t, f)} />}

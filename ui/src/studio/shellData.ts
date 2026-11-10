@@ -47,11 +47,12 @@ export function sortByAttention(index: SoundSummary[], tape: TapeEntry[]): Sound
 }
 
 /** The item the transport and the bottom panel act on: the open tab's item, else the library's selection. */
-export interface Focus { kind: 'sound' | 'song' | 'set'; id: string }
+export interface Focus { kind: 'sound' | 'song' | 'set' | 'sample'; id: string }
 export function focusOf(route: Route, selected: Focus | null): Focus | null {
   if (route.kind === 'sound') return { kind: 'sound', id: route.id };
   if (route.kind === 'song') return { kind: 'song', id: route.id };
   if (route.kind === 'set') return { kind: 'set', id: route.id };
+  if (route.kind === 'sample') return { kind: 'sample', id: route.name };
   if (route.kind === 'audition' && route.set) return { kind: 'set', id: route.set };
   return selected;
 }
@@ -84,7 +85,29 @@ export function ago(at: string | undefined, now: number): string {
 export const MINUS = '−';
 export const lufsText = (v: number | null | undefined): string => (v === undefined ? '…' : v === null ? `${MINUS}∞` : v.toFixed(1).replace('-', MINUS));
 
-export interface FeedItem { key: string; by: string; text: string; meta: string; at: number; sound: string | null }
+export interface FeedItem { key: string; by: string; text: string; meta: string; at: number; sound: string | null; /** A sample the entry added: the rail plays it. */ sample?: string }
+
+const WORDS_RE = /([A-Za-z][A-Za-z0-9-]*)=("(?:[^"\\]|\\.)*"|\S+)/g;
+const unquote = (v: string): string => (v.startsWith('"') ? v.slice(1, -1).replace(/\\(.)/g, '$1') : v);
+
+/** A `sample add` on the tape in the words a person reads: what came in, from where, and for generated audio the prompt, the take and the credits. */
+export function sampleFeedText(cmd: string): { text: string; sample: string } | null {
+  const m = /^sample add (\S+) /.exec(cmd);
+  if (!m) return null;
+  const name = m[1]!;
+  const f: Record<string, string> = {};
+  for (const x of cmd.matchAll(WORDS_RE)) f[x[1]!] = unquote(x[2]!);
+  const secs = f.frames && f.rate ? ` (${(Number(f.frames) / Number(f.rate)).toFixed(2)} s)` : '';
+  switch (f.source) {
+    case 'library': return { sample: name, text: `Used library file ${f.origin ?? ''} as ${name}${secs}` };
+    case 'recorded': return { sample: name, text: `Recorded ${name}${secs}` };
+    case 'generated': return { sample: name, text: `Generated ${name}${secs}${f.prompt ? `: \u201c${f.prompt.length > 90 ? `${f.prompt.slice(0, 89)}\u2026` : f.prompt}\u201d` : ''}${f.take ? `, take ${f.take}` : ''}${f.credits ? `, ${f.credits} credits` : ''}` };
+    case 'derived': return { sample: name, text: `Derived ${name}${f.ops ? ` (${f.ops.length > 70 ? `${f.ops.slice(0, 69)}\u2026` : f.ops})` : ''}${secs}` };
+    case 'bounce': return { sample: name, text: `Bounced ${name}${secs}` };
+    case 'instrument-import': return { sample: name, text: `Imported ${name} from ${f.origin ?? 'an instrument file'}${secs}` };
+    default: return { sample: name, text: `Imported ${name}${f.origin ? ` from ${f.origin}` : ''}${secs}` };
+  }
+}
 
 /** The live feed: the tape's newest commands and the requests' events, newest first. */
 export function buildFeed(store: Store, limit = 40): FeedItem[] {
@@ -93,7 +116,8 @@ export function buildFeed(store: Store, limit = 40): FeedItem[] {
   const items: FeedItem[] = [];
   for (const e of store.tape.slice(-limit)) {
     const sound = soundOfCmd(e.cmd, known);
-    items.push({ key: `t${e.seq}`, by: e.by, text: e.cmd, meta: `#${e.seq} · ${e.by}${e.at ? ` · ${ago(e.at, now)}` : ''}`, at: e.at ? Date.parse(e.at) : 0, sound });
+    const smp = sampleFeedText(e.cmd);
+    items.push({ key: `t${e.seq}`, by: e.by, text: smp ? smp.text : e.cmd, meta: `#${e.seq} · ${e.by}${e.at ? ` · ${ago(e.at, now)}` : ''}`, at: e.at ? Date.parse(e.at) : 0, sound, ...(smp ? { sample: smp.sample } : {}) });
   }
   for (const q of store.requests.slice(-12)) {
     items.push({ key: `q${q.id}`, by: q.by, text: `${q.by.startsWith('human:') ? (q.kind === 'comparison' ? 'You compared' : 'You asked') : `${q.by} ${q.kind === 'comparison' ? 'compared' : 'asked'}`}: ${q.note}`, meta: `request ${q.id} · ${q.sound} · ${ago(q.at, now)}`, at: Date.parse(q.at), sound: null });

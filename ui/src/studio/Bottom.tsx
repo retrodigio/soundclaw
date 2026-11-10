@@ -157,6 +157,19 @@ export function History({ store, focus }: { store: Store; focus: Focus | null })
   );
 }
 
+/** The focused sample in a few lines (its page has the rest). */
+function SampleDetailLite({ store, name }: { store: Store; name: string }) {
+  const x = store.samples.find((s) => s.name === name);
+  if (!x) return <p className="dim pad">No such sample.</p>;
+  return (
+    <div className="pad" data-testid="sample-detail-lite">
+      <p className="mono">{x.name} {'·'} {x.seconds.toFixed(2)} s {'·'} {Number((x.rate / 1000).toFixed(1))} kHz {'·'} {x.channels === 1 ? 'mono' : x.channels === 2 ? 'stereo' : `${x.channels} ch`} {'·'} {x.format}</p>
+      <p className="dim small">source {x.source} {'·'} licence {x.licence} ({x.licenceState}){x.author ? ` · added by ${x.author}` : ''}</p>
+      <a className="link-btn small" href={`#/sample/${name}`}>Open the sample{'’'}s page</a>
+    </div>
+  );
+}
+
 export function BottomPanel({ store, focus }: { store: Store; focus: Focus | null }) {
   const { panels } = usePrefs();
   const tab = panels.bottomTab;
@@ -170,7 +183,7 @@ export function BottomPanel({ store, focus }: { store: Store; focus: Focus | nul
         <span className="hint">{'⌥'}4 toggles {'·'} drag the edge to resize</span>
       </div>
       <div className="bottom-body" role="tabpanel">
-        {tab === 'detail' && (f ? (f.kind === 'sound' ? <SoundDetail store={store} id={f.id} /> : <SongDetail store={store} id={f.id} />) : <p className="dim pad" data-testid="detail-empty">Select a sound in the library to see its waveform and numbers.</p>)}
+        {tab === 'detail' && (f ? (f.kind === 'sound' ? <SoundDetail store={store} id={f.id} /> : f.kind === 'sample' ? <SampleDetailLite store={store} name={f.id} /> : <SongDetail store={store} id={f.id} />) : <p className="dim pad" data-testid="detail-empty">Select a sound in the library to see its waveform and numbers.</p>)}
         {tab === 'mixer' && <MixerTab store={store} focus={f} />}
         {tab === 'history' && <History store={store} focus={focus && focus.kind !== 'set' ? focus : null} />}
       </div>

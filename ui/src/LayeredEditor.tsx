@@ -24,6 +24,7 @@ import type { RunResult, Store } from './store.ts';
 import { Badge, Button, Knob, Segmented, Slider, IconButton } from './studio/controls.tsx';
 import type { ValueSpec } from './studio/values.ts';
 import { Spark } from './studio/icons.tsx';
+import { SAMPLE_MIME } from './studio/Samples.tsx';
 import { useActions, type Action } from './studio/registry.ts';
 
 const sched: Scheduler = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
@@ -40,6 +41,8 @@ interface ControlProps {
   value: Value | undefined;
   samples: string[];
   hasEnv: boolean;
+  /** The sound this control belongs to (a sample's control links to the sample's page, trimming this layer). */
+  soundId?: string;
   onMove(v: Value): void;
   /** A drag in progress: the page shows it, nothing is written. */
   onPreview(v: Value): void;
@@ -62,7 +65,7 @@ export function paramSpec(sp: PSpec): ValueSpec {
 }
 
 /** One parameter, drawn with the studio components: a knob for a number, a segmented control for a few choices, a styled select for many, a text field for a name. */
-function Control({ ckey, spec, value, samples, hasEnv, onMove, onPreview, onRelease, onReset, onEnv }: ControlProps) {
+function Control({ ckey, spec, value, samples, hasEnv, soundId, onMove, onPreview, onRelease, onReset, onEnv }: ControlProps) {
   const tid = ckey.replace(/:/g, '-');
   if (spec.choices) {
     const cur = String(value);
@@ -89,10 +92,13 @@ function Control({ ckey, spec, value, samples, hasEnv, onMove, onPreview, onRele
       <div className="pc wide" data-testid={`row-${tid}`} title={spec.help}>
         <label htmlFor={`c-${tid}`} className="cap">{spec.name}</label>
         {isSample ? (
+          <>
           <select id={`c-${tid}`} className="sel" data-testid={`ctl-${tid}`} value={String(value)} onChange={(e) => { onMove(e.target.value); onRelease(); }}>
             <option value="">(none)</option>
             {samples.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
+          {String(value) && soundId && /^\d+:/.test(ckey) && <a className="link-btn smp-open" href={`#/sample/${String(value)}/layer/${soundId}/${ckey.split(':')[0]}`} data-testid={`open-sample-${tid}`} title="Open the sample: its trim handles write this layer's start and end">open</a>}
+          </>
         ) : (
           <input id={`c-${tid}`} type="text" className="txt" data-testid={`ctl-${tid}`} defaultValue={String(value)} key={String(value)} onBlur={(e) => { if (e.target.value !== String(value)) { onMove(e.target.value); onRelease(); } }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
         )}
@@ -282,6 +288,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
   const [envTarget, setEnvTarget] = useState('1.amp');
   const [draft, setDraft] = useState<Record<string, Value>>({});
   const [menu, setMenu] = useState<string | null>(null);
+  const [dropSample, setDropSample] = useState(false);
   const [over, setOver] = useState<string | null>(null);
   const [hoverBand, setHoverBand] = useState<number | null>(null);
   const [askOpen, setAskOpen] = useState(false);
@@ -388,7 +395,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
   const data = voice ? null : store.lens(sound);
 
   const controlFor = (ckey: string, spec: PSpec, current: Value | undefined, hasEnv: boolean, onEnv?: () => void) => (
-    <Control key={ckey} ckey={ckey} spec={spec} value={val(ckey, current)} samples={samples} hasEnv={hasEnv}
+    <Control key={ckey} ckey={ckey} spec={spec} value={val(ckey, current)} samples={samples} hasEnv={hasEnv} soundId={id}
       onMove={(v) => move(ckey, v)} onPreview={(v) => setDraft((d) => ({ ...d, [ckey]: v }))} onRelease={releaseFor(ckey)} onReset={() => resetTo(ckey, spec.default)} onEnv={onEnv} />
   );
   const toEnv = (target: string, fixed: number, exists: boolean) => () => {
@@ -595,7 +602,7 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
               <button className={`letter-btn${l.solo ? ' on' : ''}`} aria-pressed={l.solo} data-testid={`layer-solo-${n}`} title="solo" aria-label={`Solo layer ${n}`} onClick={() => void now(`layer solo ${id} ${n} ${l.solo ? 'off' : 'on'}`)}>S</button>
               <button className={`letter-btn${l.mute ? ' on' : ''}`} aria-pressed={l.mute} data-testid={`layer-mute-${n}`} title="mute" aria-label={`Mute layer ${n}`} onClick={() => void now(`layer mute ${id} ${n} ${l.mute ? 'off' : 'on'}`)}>M</button>
             </div>
-            <span className="mono track-src" data-testid={`layer-src-${n}`}>{layerLabel(l)}</span>
+            <span className="mono track-src" data-testid={`layer-src-${n}`}>{layerLabel(l)}{l.kind === 'sample' && l.p.sample ? <a className="link-btn smp-open" href={`#/sample/${String(l.p.sample)}/layer/${id}/${n}`} data-testid={`layer-sample-${n}`} title="Open the sample: its trim handles write this layer's start and end">open sample</a> : null}</span>
             <MiniWave peaks={strips?.[i]} n={n} color={color} />
             <div className="track-gain"><Slider label="Gain" testId={`layer-gain-${n}`} value={val(gk, l.p.gain) as number} min={gs.min} max={gs.max} def={gs.default as number} warp={gainWarp} disabled={!!l.envs.gain} spec={{ unit: 'plain', digits: 2 }} step={0.02}
               onDraft={(v) => setDraft((d) => ({ ...d, [gk]: roundSpec(gs, v) }))} onCommit={(v) => { move(gk, roundSpec(gs, v)); doRelease(); }} />
@@ -680,7 +687,17 @@ export function LayeredEditor({ store, id, voice }: { store: Store; id: string; 
       {!voice && <LensPanel store={store} sound={sound} height={190} prov={prov} outline={prov.beforeAgent} previous={prov.before} layersLens={layersLens} onAxis={setAxis} />}
 
       <div className="lay-grid" data-panel={panelEl ? 'open' : undefined} onKeyDown={(e) => { if (e.key === 'Escape' && panelEl && (e.target as HTMLElement).closest('.device-panel')) setOpen(null); }}>
-      <section className="tracks" data-testid="layers" aria-label="Layers" data-count={sound.layers.length}>
+      <section className={`tracks${dropSample ? ' drop-sample' : ''}`} data-testid="layers" aria-label="Layers" data-count={sound.layers.length}
+        onDragOver={(e) => { if (!voice && [...e.dataTransfer.types].includes(SAMPLE_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dropSample) setDropSample(true); } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropSample(false); }}
+        onDrop={(e) => {
+          const name = e.dataTransfer.getData(SAMPLE_MIME);
+          setDropSample(false);
+          if (!name || voice) return;
+          e.preventDefault();
+          if (sound.layers.length >= MAX_LAYERS) return;
+          void now(`layer add ${id} sample sample=${name}`).then(() => select(sound.layers.length + 1));
+        }}>
         {sound.layers.length === 0 && <p className="dim" data-testid="no-layers">No layers yet: add one with + Layer, or start from a recipe.</p>}
         <div data-testid="layer-strips" className="tracks-list">
           {sound.layers.map((l, i) => track(l, i))}

@@ -76,6 +76,7 @@ export type Route =
   | { kind: 'audition'; set: string | null }
   | { kind: 'session' }
   | { kind: 'review'; id: string }
+  | { kind: 'sample'; name: string; /** Opened from a layer: the trim handles write that layer's start and end. */ layer?: { sound: string; n: number } }
   | { kind: 'kit' };
 
 const ID = '([A-Za-z][A-Za-z0-9_-]*)';
@@ -90,6 +91,8 @@ export function parseRoute(hash: string): Route {
   if (m) return { kind: 'audition', set: m[1] ?? null };
   m = new RegExp(`^#/review/${ID}$`).exec(hash);
   if (m) return { kind: 'review', id: m[1]! };
+  m = /^#\/sample\/([A-Za-z0-9][A-Za-z0-9_-]*)(?:\/layer\/([A-Za-z][A-Za-z0-9_-]*)\/(\d{1,3}))?$/.exec(hash);
+  if (m) return { kind: 'sample', name: m[1]!, ...(m[2] ? { layer: { sound: m[2], n: Number(m[3]) } } : {}) };
   if (hash === '#/session') return { kind: 'session' };
   if (hash === '#/kit') return { kind: 'kit' };
   return { kind: 'cards' };
@@ -1635,10 +1638,13 @@ export class Store {
   }
 
   /** Play a sound: rendered here with core, handed to Web Audio at the renderer's own rate. */
-  /** Play a sample as it is stored (its own rate and channels), a toggle like playing a sound. */
-  async playSample(name: string): Promise<void> {
+  /** Told when a sample is played here (the shell clears its violet mark). */
+  heardSample: ((name: string) => void) | null = null;
+
+  /** Play a sample as it is stored (its own rate and channels), a toggle like playing a sound. `region` (seconds) plays part of it, `loop` repeats it until stopped. */
+  async playSample(name: string, o: { region?: [number, number]; loop?: boolean } = {}): Promise<void> {
     const key = `sample:${name}`;
-    if (this.playing === key) { this.stop(); return; }
+    if (this.playing === key && !o.region) { this.stop(); return; }
     this.stop();
     const token = ++this.playToken;
     this.playing = key;
@@ -1648,20 +1654,75 @@ export class Store {
     if (!have || token !== this.playToken) { if (token === this.playToken) { this.playing = null; this.changed(); } return; }
     const smp = have.data;
     const chans = smp.left && smp.right ? [smp.left, smp.right] : [smp.data];
+    this.heardSample?.(name);
+    await this.playSampleBuffer(key, chans as Float32Array[], smp.rate, have.sha, token, o);
+  }
+
+  /** Play a file of a registered library, streamed from the server and decoded by the browser; nothing is copied into the project. */
+  async playLibraryFile(ref: string): Promise<void> {
+    const key = `library:${ref}`;
+    if (this.playing === key) { this.stop(); return; }
+    this.stop();
+    const token = ++this.playToken;
+    this.playing = key;
+    this.changed();
+    try {
+      const at = ref.indexOf(':');
+      const r = await fetch(`/api/library/${encodeURIComponent(ref.slice(0, at))}/audio?path=${encodeURIComponent(ref.slice(at + 1))}&token=${encodeURIComponent(this.token)}`);
+      if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `audition ${r.status}`);
+      const pcm = decodeAudio(new Uint8Array(await r.arrayBuffer()), { lenient: true }).audio;
+      if (token !== this.playToken) return;
+      const data = pcmToSampleData(pcm);
+      const chans = data.left && data.right ? [data.left, data.right] : [data.data];
+      await this.playSampleBuffer(key, chans as Float32Array[], data.rate, ref, token, {});
+    } catch (e) {
+      if (token === this.playToken) { this.playing = null; this.error = (e as Error).message; this.changed(); }
+    }
+  }
+
+  /** One buffer of audio at its own rate to the speakers, with the clock the playheads read. */
+  private async playSampleBuffer(key: string, chans: Float32Array[], rate: number, hash: string, token: number, o: { region?: [number, number]; loop?: boolean }): Promise<void> {
     this.ctx ??= new AudioContext({ sampleRate: 44100 });
     if (this.ctx.state === 'suspended') await this.ctx.resume();
     if (token !== this.playToken) return;
-    const len = chans[0]!.length;
-    const buf = this.ctx.createBuffer(chans.length, len, smp.rate);
-    chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+    const total = chans[0]!.length;
+    const a = o.region ? Math.max(0, Math.min(total - 1, Math.floor(o.region[0] * rate))) : 0;
+    const b = o.region ? Math.max(a + 1, Math.min(total, Math.ceil(o.region[1] * rate))) : total;
+    const len = b - a;
+    const buf = this.ctx.createBuffer(chans.length, len, rate);
+    chans.forEach((c, i) => buf.copyToChannel((a === 0 && b === total ? c : c.subarray(a, b)) as Float32Array<ArrayBuffer>, i));
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
+    if (o.loop) src.loop = true;
     src.connect(this.out());
     src.onended = () => { if (this.source === src) { this.source = null; this.playing = null; this.changed(); this.wake(); } };
     this.source = src;
-    this.played.push({ id: key, loop: false, hash: sha256Text(`${have.sha}|${len}`), samples: len, key, gain: 0 });
-    this.clock = { at: performance.now(), from: 0, len: len / smp.rate, loop: false };
+    this.played.push({ id: key, loop: !!o.loop, hash: sha256Text(`${hash}|${len}`), samples: len, key, gain: 0, ...(o.region ? { region: o.region } : {}) });
+    this.clock = { at: performance.now(), from: a / rate, len: len / rate, loop: !!o.loop };
     src.start();
+  }
+
+  /** A sound rendered here (in the worker), as one 44.1 kHz channel: both channels averaged. */
+  async renderMono(id: string): Promise<Float32Array> {
+    const doc = await this.docNow(id);
+    if (!doc) throw new Error(`no sound ${id}`);
+    await this.ensureSamples(doc);
+    const r = await this.renderer.render(doc, this.samples, this.token);
+    return r.channels.length === 1 ? r.channels[0]!.slice() : Float32Array.from(r.channels[0]!, (v, k) => (v + r.channels[1]![k]!) / 2);
+  }
+
+  /** Upload a recorded or dropped file as a person's import (a sample the tape names with the licence they confirmed). Resolves with the names it made. */
+  async uploadSample(bytes: Uint8Array | Blob, filename: string, o: { as?: string; licence?: string; attribution?: string; source?: string; origin?: string; tags?: string; note?: string } = {}): Promise<{ ok: true; names: string[]; notes: string[] } | { ok: false; error: string }> {
+    const q = new URLSearchParams({ token: this.token, by: this.me, name: filename });
+    for (const [k, v] of Object.entries(o)) if (v) q.set(k, v);
+    try {
+      const r = await fetch(`/api/samples/import?${q}`, { method: 'POST', body: bytes as BodyInit });
+      const j = (await r.json()) as { items?: { name: string; notes: string[]; sameAs?: string }[]; error?: string };
+      if (!r.ok) return { ok: false, error: j.error ?? `the upload failed (${r.status})` };
+      return { ok: true, names: (j.items ?? []).map((x) => x.name), notes: (j.items ?? []).flatMap((x) => x.notes) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
   }
 
   async play(id: string): Promise<void> {

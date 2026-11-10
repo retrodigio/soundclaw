@@ -7,6 +7,8 @@ const base = (size: number, w = size, h = size) => ({ width: w, height: h, 'aria
 
 export const Play = ({ size = 12, ...r }: P) => <svg {...base(12, size, size)} {...r}><path d="M2 1 L11 6 L2 11 Z" fill="currentColor" /></svg>;
 export const Stop = ({ size = 10, ...r }: P) => <svg {...base(10, size, size)} {...r}><rect width="10" height="10" rx="1" fill="currentColor" /></svg>;
+/** Record: a filled circle. */
+export const Record = ({ size = 12, ...r }: P) => <svg {...base(12, size, size)} {...r}><circle cx="6" cy="6" r="4.5" fill="currentColor" /></svg>;
 export const Loop = ({ size = 16, ...r }: P) => <svg width={size} height={size * 0.75} viewBox="0 0 16 12" aria-hidden {...r}><path d="M3 4 H12 L10 2 M13 8 H4 L6 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 export const Undo = ({ size = 14, ...r }: P) => <svg width={size} height={size * 0.86} viewBox="0 0 14 12" aria-hidden {...r}><path d="M4 2 L1 5 L4 8 M1 5 H9 A4 3.5 0 0 1 9 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 export const Redo = ({ size = 14, ...r }: P) => <svg width={size} height={size * 0.86} viewBox="0 0 14 12" aria-hidden {...r}><path d="M10 2 L13 5 L10 8 M13 5 H5 A4 3.5 0 0 0 5 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;

@@ -314,6 +314,39 @@ that opens over the page, below 900 px the library is an overlay, and there is n
   text field has focus, except Esc and ⌘K. Typed text that has two or more words and matches no action becomes "Ask the agent: … on <focused item>",
   which writes a change request.
 
+## Samples in the dashboard
+
+A person sees and steers the samples the way they do sounds: everything is a command on the tape, written as `human:<name>`, and everything an agent
+brings in is visible as it happens.
+
+- **The Samples tab** of the library has three modes. *Project* lists this project's samples: a name, a small waveform, the length, loudness and note,
+  where the audio came from (a glyph and a word), and the licence (a glyph and a word). The filter field takes the numbers query of `sample list`
+  (`dur>1.4 centroid<2k pitched=yes`), words and chips; a query that does not parse says why and keeps the list. ↑↓ moves (and plays the row after a
+  short pause when preview on select is on), Space plays, Enter opens the sample's page, and a row drags onto a layer list (`layer add <sound> sample
+  sample=<name>`). *Library* searches the registered sample libraries with the same query, 48 files a page; nothing is loaded until a file is played,
+  which streams from the server, and *Use* copies one into the project with the library's licence and where it came from. *Takes* lists what generation
+  made, newest first, with the prompt, the take and the credits; *Keep* names it and asks the person to confirm its licence, *Discard* removes the
+  name (the audio stays in the store until `sample gc`).
+- **Cards.** A sample's numbers and small waveform are worked out once per distinct audio by a worker thread on the server and kept in
+  `.cache/samplecards/<hash>.json` (`GET /api/sample-card/<hash>.json`); the page asks only for rows in view, or for all of them when a query needs
+  numbers. The page keeps no audio for a row.
+- **The sample page** `#/sample/<name>` shows the lenses (waveform, spectrogram, pitch, the loop's seam, and a difference spectrogram against another
+  sample or a sound) on one time axis, worked out in a worker from the same measuring code the CLI uses. Handles sit on the axis and a gesture writes
+  one command when it is let go: the loop points (`sample loop`), the slice markers (`sample slice … at=`; click adds one, Delete removes the
+  focused one) and the trim (a `sample derive` when the person asks for it; from a layer, `#/sample/<name>/layer/<sound>/<n>`, the layer's own `start`
+  and `end`). Below are the numbers, the words, the advisory checks, where the audio came from (source, origin, prompt, provider, take and credits,
+  parents and operations, the original and the instrument file's hashes), the licence and why it stands as it does (editable), and what uses the sample.
+  Actions: derive, make an instrument, generate again (the estimate and the budget first, then a confirm) and ask for changes (a request is made on a
+  sound that plays the sample).
+- **Dropping and recording.** Files dropped anywhere on the window (or chosen from the palette) open a dialog that asks for the licence, `unknown`
+  unless the person says otherwise, and upload as a human import. The record button in the top bar opens the microphone through `getUserMedia` into an
+  AudioWorklet at the device's own rate, with an input meter and an optional count-in; nothing is trimmed, and the take is saved as `source=recorded
+  licence=own` only after the person confirms they recorded it. The worklet is a file next to the page's script (a `data:` address would not pass its
+  content security policy).
+- **The agent's new samples** carry the violet mark in the list and the rail's feed until the person plays or opens them (what was there when the page
+  first opened a project is not news); the feed says what came in: an import, a library file used, a recording, a take with its prompt, a derived
+  sample, a bounce.
+
 ## States, accessibility and narrow windows
 
 **A new project** shows three starts instead of an empty list: a sound from a preset (laser, pickup, jump, hit or explosion; N), a set of four

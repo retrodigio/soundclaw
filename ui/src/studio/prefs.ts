@@ -19,6 +19,8 @@ export interface Prefs {
   previewOnSelect: boolean;
   homeView: 'cards' | 'rows';
   libTab: 'sounds' | 'sets' | 'songs' | 'instruments' | 'samples';
+  /** The Samples tab's mode. */
+  samplesMode: 'project' | 'library' | 'takes';
 }
 
 export const DEFAULT_PANELS: PanelPrefs = { libW: 288, railW: 320, bottomH: 220, libOpen: true, railOpen: true, bottomOpen: true, inspectorOpen: true, bottomTab: 'detail' };
@@ -44,7 +46,7 @@ function load(): Prefs {
   const theme = p.theme === 'dark' || p.theme === 'light' ? p.theme : null;
   const panels = { ...DEFAULT_PANELS, ...(p.panels ?? {}) };
   panels.libW = clamp(panels.libW, LIMITS.libW); panels.railW = clamp(panels.railW, LIMITS.railW); panels.bottomH = clamp(panels.bottomH, LIMITS.bottomH);
-  return { theme, density: p.density === 'comfortable' ? 'comfortable' : 'compact', panels, previewOnSelect: p.previewOnSelect !== false, homeView: p.homeView === 'rows' ? 'rows' : 'cards', libTab: p.libTab ?? 'sounds' };
+  return { theme, density: p.density === 'comfortable' ? 'comfortable' : 'compact', panels, previewOnSelect: p.previewOnSelect !== false, homeView: p.homeView === 'rows' ? 'rows' : 'cards', libTab: p.libTab ?? 'sounds', samplesMode: p.samplesMode === 'library' || p.samplesMode === 'takes' ? p.samplesMode : 'project' };
 }
 
 let prefs: Prefs = load();
@@ -54,7 +56,7 @@ export function getPrefs(): Prefs { return prefs; }
 export function setPrefs(patch: Partial<Prefs> | ((p: Prefs) => Partial<Prefs>)): void {
   const next = { ...prefs, ...(typeof patch === 'function' ? patch(prefs) : patch) };
   prefs = next;
-  write(KEY, JSON.stringify({ theme: next.theme, density: next.density, panels: next.panels, previewOnSelect: next.previewOnSelect, homeView: next.homeView, libTab: next.libTab }));
+  write(KEY, JSON.stringify({ theme: next.theme, density: next.density, panels: next.panels, previewOnSelect: next.previewOnSelect, homeView: next.homeView, libTab: next.libTab, samplesMode: next.samplesMode }));
   apply();
   for (const f of [...subs]) f();
 }
@@ -73,6 +75,7 @@ export function effectiveTheme(): Theme {
 
 /** Put the theme and density on <html>. Called at start and whenever they change. */
 export function apply(): void {
+  if (typeof document === 'undefined') return; // a unit test has no page
   const el = document.documentElement;
   el.dataset.theme = effectiveTheme();
   el.dataset.density = prefs.density;

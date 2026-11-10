@@ -11,6 +11,7 @@ import { Search } from './icons.tsx';
 import { VirtualList, type VirtualHandle } from './layout.tsx';
 import { usePrefs, setPrefs, type Prefs } from './prefs.ts';
 import { checkOf, lufsText, rowName, useAttentionOrder, type Focus } from './shellData.ts';
+import { SamplesBrowser } from './Samples.tsx';
 
 const LICENCE_GLYPH: Record<string, string> = { shippable: '✓', attribution: '©', blocked: '×', unknown: '?' };
 const LICENCE_KIND: Record<string, CheckKind> = { shippable: 'pass', attribution: 'warn', blocked: 'fail', unknown: 'warn' };
@@ -134,12 +135,11 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
       sets: store.sets.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: `${x.members.length} members${x.target !== null ? ` · ${x.target} LUFS` : ''}` })),
       songs: store.songs.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: `${x.tempo} BPM${x.key ? ` · ${x.key}` : ''}` })),
       instruments: store.instruments.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: '' })),
-      samples: store.samples.filter((x) => has(x.name)).map((x) => ({ id: x.name, sub: '' })),
     };
   }, [store.sets, store.songs, store.instruments, store.samples, q]);
 
   const kind: 'sound' | 'set' | 'song' | null = tab === 'sounds' ? 'sound' : tab === 'sets' ? 'set' : tab === 'songs' ? 'song' : null;
-  const otherRows = tab === 'sounds' ? [] : others[tab];
+  const otherRows = tab === 'sounds' || tab === 'samples' ? [] : others[tab];
   const ids: string[] = tab === 'sounds' ? rows.map((s) => s.id) : otherRows.map((x) => x.id);
   const at = selected && kind && selected.kind === kind ? ids.indexOf(selected.id) : -1;
 
@@ -168,18 +168,8 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
     if (kind === 'sound') preview(id);
   }, [ids, kind, onSelect, preview]);
 
-  // the Samples tab keeps its own selection (a sample has no page yet): ↑↓ move it, Space plays it
-  const [sampleSel, setSampleSel] = useState<string | null>(null);
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (tab === 'samples') {
-      const names = otherRows.map((x) => x.id);
-      const i = sampleSel ? names.indexOf(sampleSel) : -1;
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSampleSel(names[Math.min(names.length - 1, i + 1)] ?? null); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setSampleSel(names[Math.max(0, i <= 0 ? 0 : i - 1)] ?? null); }
-      else if (e.key === ' ' && sampleSel) { e.preventDefault(); void store.playSample(sampleSel); }
-      return;
-    }
     if (e.key === 'ArrowDown') { e.preventDefault(); pick(Math.min(ids.length - 1, at + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); pick(Math.max(0, at <= 0 ? 0 : at - 1)); }
     else if (e.key === 'Home') { e.preventDefault(); pick(0); }
@@ -211,23 +201,7 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
       </div>
     );
   };
-  const renderSample = (i: number) => {
-    const x = otherRows[i]!;
-    const info = store.samples.find((y) => y.name === x.id);
-    const sel = sampleSel === x.id;
-    const playing = store.playing === `sample:${x.id}`;
-    return (
-      <div className={`lib-row${sel ? ' sel' : ''}`} data-testid={`lib-row-${x.id}`} data-sample-row={x.id} data-licence={info?.licenceState} onClick={() => setSampleSel(x.id)}>
-        <span className="new-dot" style={{ opacity: 0 }} />
-        <button type="button" className="lib-play" data-testid={`play-sample-${x.id}`} aria-label={`${playing ? 'Stop' : 'Play'} sample ${x.id}`} aria-pressed={playing} onClick={(e) => { e.stopPropagation(); setSampleSel(x.id); void store.playSample(x.id); }}>{playing ? '■' : '▶'}</button>
-        <span className="lib-name" title={info ? `${x.id}: ${info.source}, licence ${info.licence}` : x.id}>{x.id}</span>
-        {info ? <span className="mono lib-sub" data-testid={`sample-numbers-${x.id}`}>{sampleNumbers(info)}</span> : null}
-        {info ? <LicenceBadge state={info.licenceState} licence={info.licence} testId={`sample-licence-${x.id}`} /> : null}
-      </div>
-    );
-  };
   const renderOther = (i: number) => {
-    if (tab === 'samples') return renderSample(i);
     const x = otherRows[i]!;
     const sel = !!kind && selected?.kind === kind && selected.id === x.id;
     return (
@@ -252,6 +226,8 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
       <Tabs<Prefs['libTab']> label="Library" value={tab} onChange={(v) => setPrefs({ libTab: v })} testId="lib-tabs"
         tabs={[{ value: 'sounds', label: 'Sounds', count: counts.sounds, testId: 'lib-tab-sounds' }, { value: 'sets', label: 'Sets', count: counts.sets, testId: 'lib-tab-sets' }, { value: 'songs', label: 'Songs', count: counts.songs, testId: 'lib-tab-songs' },
           { value: 'instruments', label: 'Instr', count: counts.instruments, testId: 'lib-tab-instruments' }, { value: 'samples', label: 'Samples', count: counts.samples, testId: 'lib-tab-samples' }]} />
+      {tab === 'samples' ? <SamplesBrowser store={store} inputRef={inputRef} onOpen={(name) => { location.hash = `#/sample/${name}`; }} /> : (
+      <>
       <div className="lib-filter">
         <label className="lib-search"><Search size={12} /><span className="sr-only">Filter {tab}</span>
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onFilterKey} placeholder={`Filter ${tab}`} data-testid="lib-filter" spellCheck={false} autoComplete="off" />
@@ -287,6 +263,8 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
         )}
       </div>
       <div className="lib-foot"><span>{'↑↓'} audition {'·'} Enter open</span><span className="mono">{prefs.density}</span></div>
+      </>
+      )}
     </div>
   );
 }

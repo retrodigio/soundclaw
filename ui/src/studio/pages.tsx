@@ -8,6 +8,7 @@ import { AnalysisPage } from '../sound/AnalysisPage.tsx';
 import { SetPage } from '../SetPage.tsx';
 import { SongEditor } from '../SongEditor.tsx';
 import type { Store } from '../store.ts';
+import { SamplePage } from '../samples/SamplePage.tsx';
 import { Home } from './Home.tsx';
 import { Kit } from './Kit.tsx';
 import { Review } from './Review.tsx';
@@ -39,6 +40,7 @@ export function Page({ store, onOpen }: { store: Store; onPlay?(id: string): voi
       const set = store.sets.find((x) => x.id === r.id);
       return set ? <SetPage key={set.id} store={store} set={set} /> : <p className="dim" data-testid="no-set">{store.status === 'open' ? 'No such set.' : 'Connecting…'} <a href="#/">{'←'} all sounds</a></p>;
     }
+    case 'sample': return <SamplePage key={r.name} store={store} name={r.name} layer={r.layer} />;
     case 'session': return <Session store={store} onOpen={onOpen} />;
     case 'review': return <Review store={store} id={r.id} />;
     case 'kit': return <Kit />;

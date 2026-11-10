@@ -10,6 +10,7 @@ import './studio/agent.css';
 import './sound/sound.css';
 import './sets/sets.css';
 import './song/song.css';
+import './samples/samples.css';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const store = new Store();

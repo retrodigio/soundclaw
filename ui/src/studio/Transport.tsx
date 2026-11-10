@@ -5,7 +5,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Store } from '../store.ts';
 import { IconButton, Meter } from './controls.tsx';
-import { Chevron, Logo, Loop, Person, Play, Redo, Search, Stop, Undo } from './icons.tsx';
+import { Chevron, Logo, Loop, Person, Play, Record, Redo, Search, Stop, Undo } from './icons.tsx';
+import { openRecorder } from '../samples/samplesUi.ts';
 import { usePrefs, setPanels } from './prefs.ts';
 import { PresencePill } from './Rail.tsx';
 import { shortcutLabel } from './registry.ts';
@@ -93,6 +94,9 @@ export function Transport({ store, focus, onPalette, canLoop, onPlay, onStop, on
       {song && <><span className="mono t-pill" data-testid="t-tempo">{song.tempo} BPM</span><span className="mono t-pill t-pill-more">{song.key ?? 'no key'}</span><span className="mono t-pill t-pill-more">{song.time[0]}/{song.time[1]}</span></>}
       <MasterMeter store={store} focus={focus} />
       <span className="grow" />
+      <div className="t-buttons t-rec">
+        <IconButton label="Record from the microphone" shortcut={shortcutLabel('⌥R')} onClick={openRecorder} testId="transport-record"><Record size={12} /></IconButton>
+      </div>
       <div className="t-buttons t-undo">
         <IconButton label="Undo" shortcut={shortcutLabel('⌘Z')} onClick={() => void store.undo()} disabled={!store.canUndo()} testId="undo"><Undo /></IconButton>
         <IconButton label="Redo" shortcut={shortcutLabel('⇧⌘Z')} onClick={() => void store.redo()} disabled={!store.canRedo()} testId="redo"><Redo /></IconButton>

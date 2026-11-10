@@ -33,6 +33,8 @@ function installReaper(): void {
 export interface Done { code: number | null; out: string; err: string }
 
 export interface Agent {
+  /** The folder the temporary project, the server's state, config and caches are in. */
+  root: string;
   dir: string;
   url: string;
   token: string;
@@ -55,7 +57,8 @@ export async function startAgent(o: { build?: (dir: string) => void } = {}): Pro
   const root = mkdtempSync(join(tmpdir(), 'soundclaw-e2e-'));
   const dir = join(root, 'demo.sclaw');
   // the server stops on its own if this worker is killed outright (no hook or teardown would run then)
-  const env = { ...process.env, SOUNDCLAW_STATE_DIR: join(root, 'state'), SOUNDCLAW_PARENT_PID: String(process.pid) };
+  // the library registry, the caches and the spend log live in folders of their own: a test never touches the person's real ones
+  const env = { ...process.env, SOUNDCLAW_STATE_DIR: join(root, 'state'), SOUNDCLAW_CONFIG_DIR: join(root, 'config'), SOUNDCLAW_CACHE_DIR: join(root, 'cache'), SOUNDCLAW_PARENT_PID: String(process.pid) };
   if (o.build) o.build(dir);
   else execFileSync(process.execPath, [BIN, 'new', dir], { env });
   const children = new Set<ChildProcess>();
@@ -92,7 +95,7 @@ export async function startAgent(o: { build?: (dir: string) => void } = {}): Pro
     return { child, done: new Promise((resolve) => child.on('close', (code) => { children.delete(child); resolve({ code, out, err }); })) };
   };
   return {
-    dir, url, token: new URL(url).searchParams.get('token')!, port: Number(new URL(url).port),
+    root, dir, url, token: new URL(url).searchParams.get('token')!, port: Number(new URL(url).port),
     log: () => stderr,
     cli: (args) => run(args).done,
     background: (args) => { const r = run(args); return { done: r.done, kill: () => r.child.kill('SIGTERM') }; },

@@ -10,6 +10,7 @@ import type { Store } from '../store.ts';
 import { AuthorDot, AuthorMark, Kbd } from './controls.tsx';
 import { Play, Spark } from './icons.tsx';
 import { ago, buildFeed, requestState, type Focus } from './shellData.ts';
+import { useNewSamples } from './sampleSeen.ts';
 
 /** The agent's short name: `agent:claude` is `claude`. */
 const shortName = (by: string): string => by.replace(/^agent:/, '');
@@ -70,6 +71,7 @@ export function Rail({ store, onPlay, onOpen, ask, focus }: { store: Store; onPl
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const feed = useMemo(() => buildFeed(store), [store.tape, store.requests, now]);
+  const freshSamples = useNewSamples(store);
   const mine = store.requests.filter((q) => q.by.startsWith('human:')).slice(-8).reverse();
   const open = store.requests.filter((q) => ['open', 'claimed', 'blocked'].includes(q.state));
   const pr = presenceOf(store);
@@ -101,10 +103,11 @@ export function Rail({ store, onPlay, onOpen, ask, focus }: { store: Store; onPl
           {feed.map((f) => {
             const who = f.by.startsWith('human:') ? 'you' : 'agent';
             return (
-              <li key={f.key} className="feed-item" data-testid="feed-item" data-by={who}>
+              <li key={f.key} className="feed-item" data-testid="feed-item" data-by={who} data-sample={f.sample} data-new={f.sample && freshSamples.has(f.sample) ? 'true' : undefined}>
                 <AuthorDot by={who} />
-                <div className="feed-body"><span className="feed-text">{f.text}</span><span className="mono feed-meta">{f.meta}</span></div>
+                <div className="feed-body"><span className="feed-text">{f.sample ? <a href={`#/sample/${f.sample}`} className="feed-sample" data-testid={`feed-sample-${f.sample}`}>{f.text}</a> : f.text}</span><span className="mono feed-meta">{f.meta}</span></div>
                 {f.sound && <button type="button" className="feed-play" aria-label={`Play ${f.sound}`} title={`Play ${f.sound}`} onClick={() => onPlay(f.sound!)}><Play size={8} /></button>}
+                {f.sample && store.samples.some((x) => x.name === f.sample) && <button type="button" className="feed-play" data-testid={`feed-play-${f.sample}`} aria-label={`Play sample ${f.sample}`} title={`Play sample ${f.sample}`} onClick={() => void store.playSample(f.sample!)}><Play size={8} /></button>}
               </li>
             );
           })}
