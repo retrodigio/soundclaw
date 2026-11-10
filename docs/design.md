@@ -5,8 +5,8 @@ through a command line or an MCP server. **People** listen, watch and edit in a 
 on the same project folder through one writer.
 
 The central problem: **the agent cannot hear.** SoundClaw therefore turns a sound into things an
-agent can read and check (today: its length, peak, rms and a hash of its samples, printed after
-every command), and keeps a person's ears as the final judge: the dashboard plays everything, and
+agent can read and check (its loudness, peaks, pitch, onsets, a hash of its samples and the checks'
+verdicts, printed after every command; pictures and words on request), and keeps a person's ears as the final judge: the dashboard plays everything, and
 listening feedback comes back as requests.
 
 ## The parts
@@ -47,10 +47,10 @@ command in its normal form. A batch is one group. The sounds are the tape replay
   CLI takes `--by`. An agent that wants to know what a person did reads the history.
 - **Text on disk.** Everything is plain text and git-friendly. The history is append-only.
 
-The only document today is a **sound**, with one of three voices: the **classic voice** (sfxr's 25
-parameters; below), the **layered voice** (below), or the tone placeholder, a sine tone with `frequency`, `duration` and `volume`.
-The folder already has places (`instruments/`, `songs/`, `sets/`) for the documents the fuller tool
-will add.
+The documents are **sounds**, with one of three voices (the **classic voice**, sfxr's 25 parameters; the **layered
+voice**; or the tone placeholder, a sine tone with `frequency`, `duration` and `volume`), **sets** of sounds,
+**instruments**, **songs** and **samples** (names for stored audio). Each is the tape replayed, and each is written
+out as text (`sounds/`, `sets/`, `instruments/`, `songs/`, `samples/`) for reading and diffs.
 
 **The tape is the source of truth; `sounds/<id>.sfx` is written from it.** Every command, including
 a person's action in the dashboard, goes on `history.jsonl`, and the sounds are the tape replayed.
@@ -630,5 +630,9 @@ with a moment set and finds every hash unchanged); describe, the run summaries, 
 
 ## Not yet
 
-Instruments, songs, sets and variants, loops and families for ambience, the batch audition page, bfxr/jsfxr import, OGG export, a time range on feedback ("0.4–0.7 s too harsh"), and a headless worker
-that takes requests with no agent session.
+- A headless worker that takes requests with no agent session.
+- A store that keeps audio in a lossless compressed encoding (the hash is over the samples, so it would change no name and no render).
+- Playing a long MP3 or OGG library file while it is still being decoded (it is decoded whole, then streamed in ranges).
+- Online libraries and AI voice as sources, local generative models, and search by text-to-audio embeddings.
+- A helper that slices a loop on a grid and places one clip per slice in a song (a clip plays one slice with `slice=`).
+- Instrument formats beyond SFZ and SoundFont 2.

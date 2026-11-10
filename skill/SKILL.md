@@ -160,9 +160,9 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   response; `len` is written for you as the response's length (to 12 s), `predelay=` and `gain=` (dB) shape it. The response is scaled to unit energy, so `gain=0` keeps a noisy sound
   about as loud as it was; `sample bounce <new> from=<sound>` makes a response from a reverb tail. On a song: `song fx add <song> convolve ir=…` over the mix, or one room for the whole
   piece, `song send <song> convolve ir=<sample>` fed by `song channel set <song> <ch> convolve=0.3`.
-- Beds and textures from a short recording: `layer add rainbed grain sample=rain dur=8 density=30 size=0.06 position=0.5 spread=0.3 jitter=0.3` (grains are cut around the position;
+- Beds and textures from a short recording: `layer add rainbed grain sample=rain dur=8 density=30 size=0.06 position=0.5 spread=0.3 jitter=0.3` (each grain is centred on `position`, 0 the start of the recording and 1 its end;
   `seed=` is another cloud; `env rainbed 1.position "0:0.1 8:0.9"` walks through the recording), then `sound loop rainbed 6 fade=0.5` so it repeats without a seam. To lay a recording's
-  transient over a recipe's body: `sound new door voice=layered preset=door sample=creak`.
+  transient over a recipe's body: `sound new door voice=layered preset=door sample=creak` (every layered recipe takes `sample=`; there is no `impact` recipe, so build that body by hand as above and add the sample as a layer).
 - Recordings in a song: `song channel add tune loops audio layer=tension`, then `song clip add tune loops drum_loop at=3 len=2 stretch=tempo` (a loop made at another tempo is fitted to the
   song's by the time stretch, the pitch kept; `from-tempo=<bpm>` says the tempo it was made at when it cannot be heard; `method=pv` for tones and pads; `pitch=`, `gain=`, `fade=`,
   `slice=<n>` and `nudge=<ms>` shape it). It prints `clip 1`; `song clip set tune loops 1 at=5` and `song clip remove tune loops 1` take the number. A generated bed or a library loop becomes
@@ -173,6 +173,71 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   that layer's `gain`, or add `filter=lp` to it.
 - A person edits layers, envelopes and effects in the dashboard as `human:<name>` (`layer set`, `env`, `fx …`): read
   `changes` before editing a sound they touched, as with classic sounds.
+
+## Samples: three workflows
+
+Recorded and generated audio fills what synthesis does badly (voices, creatures, doors, creaks, glass, bells, rain, real
+instruments). Every acquisition is a command with numbers in its answer, the audio is pinned by its hash, and what is measured
+is written on the tape, so a sound made from samples renders the same everywhere. Ask the person for the licence of anything
+you bring in that has none (it stays `unknown`, and a manifest export refuses it).
+
+**A sound effect from a library file and a generated take, layered with synthesis.** Write the moment first, then search,
+generate, listen and shape:
+
+```
+soundclaw library search "door creak" dur=1-3 pitched=no licence=shippable --limit 8
+soundclaw library use cellar foley:doors/creak_04.wav as=creak_lib
+soundclaw generate cellar sfx "the slow creak of an old wooden door hinge, close, dry, no reverb" duration=2 takes=3 as=creak_gen --estimate
+soundclaw generate cellar sfx "the slow creak of an old wooden door hinge, close, dry, no reverb" duration=2 takes=3 as=creak_gen want="dur=1.5-2.5 centroid<2.5k attack<40ms"
+soundclaw describe cellar sample:creak_gen_t2
+soundclaw view cellar sample:creak_gen_t2 compare sample:creak_lib
+soundclaw run cellar -e '
+  sample derive creak from=creak_gen_t2 op="silence-trim -50; fade out=80ms"
+  sound new door_open voice=layered
+  sound set door_open class=foley moment="the cellar door swings open slowly at night"
+  layer add door_open sample sample=creak interp=sinc
+  layer add door_open osc wave=sine freq=70 dur=0.25
+  env door_open 2.amp "0:0 0.005:1 0.25:0@exp"
+  layer align door_open 2 to=1 by=onset
+  fx add door_open limit ceiling=-1'
+soundclaw normalize cellar door_open && soundclaw check cellar door_open
+```
+
+`--estimate` first: it prints the cost, the budget left and every reason the call would be refused (no cap set, no plan, `CI`), and
+calls nothing. If paid generation is off, say so and ask; do not work around it. `provider=fake` gives free stand-in takes for a
+dry run. Choose a take by its numbers and by comparing it with the library file and your synth version, keep one, `sample remove`
+the others. A sample layer and a synth thump at full level clip together: the limiter on the master chain holds the true peak, then
+`normalize` sets the level for the class.
+
+**An instrument from single notes.** Three dry notes (recorded by the person, imported, taken from a library or generated as
+sound effects) become one playable instrument:
+
+```
+soundclaw run tunes -e '
+  instrument new recorder kind=zones
+  instrument zones recorder from-samples rec_c4 rec_g4 rec_d5 root=detect
+  instrument set recorder legato=yes range=C4-G6 adsr=0.02,0.1,0.9,0.15'
+soundclaw run tunes -e 'sample loop rec_c4 find; sample loop rec_g4 find; sample loop rec_d5 find'
+soundclaw check tunes recorder
+soundclaw view tunes recorder keymap
+```
+
+`root=detect` measures each note's pitch and writes it as a root and cents; the key ranges split halfway between roots. `sample
+loop … find` prints the seam numbers of its best three loops: a click above about -40 dB will be heard, so pick another (`sample
+loop <name> <start> <end>`). `check` warns when a zone plays more than 7 semitones from its root: add a note there, or narrow the
+range the song uses.
+
+**From synthesis to an instrument.** When a layered note is too heavy to render for every note of a song, freeze it:
+
+```
+soundclaw run tunes -e '
+  sample bounce chime_c5 from=chime root=C5
+  instrument from-sample chime_inst chime_c5'
+soundclaw check tunes chime_inst
+```
+
+The check measures the zone's pitch at its root: an inharmonic tone (an FM ratio such as 3.5) can sound an octave away from the
+note you meant, and the check says so with the `tune=` to set.
 
 ## Sets, families and beds
 
