@@ -14,6 +14,10 @@ All notable changes to SoundClaw are listed here. The format follows
 - **`normalize` over several sounds is no longer all or nothing.** The sounds that can reach the target are normalized; the rest are listed as
   `not normalized: …` and left exactly as they were (the CLI exits 1 when any was left; it is an error only when none could be done). A sound that
   lands inside its class's tolerance counts as normalized, with a warning, instead of being refused.
+- **`compare` no longer depends on level.** The same sound at two gains gave 15.6 dB and 11.4 dB against the same file. The spectral distance is now
+  printed twice, as it is and with the second turned to the first's loudness; `compare --match-level` (and `view … compare --match-level`, MCP `view` with
+  `matchLevel`) puts the matched one first. The JSON adds `spectralMatchedDb`, `averageSpectrumMatchedDb` and `levelMatchDb`. `generate … like=` ranks
+  the takes with the level matched and prints the distance both ways (`distanceWithLevel` in the JSON); `want=` depends on level only when it names it.
 - **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
   (to 24), from the threshold and ratio the effect has then; the document holds the number.
 

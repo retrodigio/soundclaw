@@ -247,10 +247,10 @@ export interface ViewResult {
  * A view of a sound as a PNG (saved under <project>/.cache/views, or `out`): wave, spec or pitch;
  * compare takes a second sound and adds the difference spectrogram and distance numbers.
  */
-export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers' | 'loop' | 'set' | 'slices', o: { other?: string; out?: string } = {}): ViewResult {
+export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers' | 'loop' | 'set' | 'slices', o: { other?: string; out?: string; matchLevel?: boolean } = {}): ViewResult {
   if (isSampleRef(id) && kind !== 'compare') return sampleView(w, id, kind, o.out);
   if (kind === 'set') return viewSet(w, id, o.out);
-  if (kind === 'compare') return viewCompare(w, id, o.other, o.out);
+  if (kind === 'compare') return viewCompare(w, id, o.other, o.out, o.matchLevel);
   const m = w.measure(id);
   const r = w.render(id);
   let png: Uint8Array;
@@ -347,7 +347,7 @@ export function compareSide(w: Writer, what: string): CompareSide {
 }
 
 /** `view compare`: two sounds, songs or audio files (a reference outside the project), with the same difference picture and distance numbers. */
-function viewCompare(w: Writer, a: string, b: string | undefined, out?: string): ViewResult {
+function viewCompare(w: Writer, a: string, b: string | undefined, out?: string, matchLevel = false): ViewResult {
   if (!b) throw new ProjectError('compare needs a second sound, song or audio file');
   const A = compareSide(w, a), B = compareSide(w, b);
   const c = compareView(A.samples, B.samples, A.label, B.label);
@@ -356,17 +356,17 @@ function viewCompare(w: Writer, a: string, b: string | undefined, out?: string):
   mkdirSync(join(file, '..'), { recursive: true });
   writeFileSync(file, c.image.png);
   const notes = [A.note, B.note].filter((x): x is string => x !== null);
-  return { png: c.image.png, file, text: `compare view saved to ${file}\n${formatDistance(c.distance, A.label, B.label)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}` };
+  return { png: c.image.png, file, text: `compare view saved to ${file}\n${formatDistance(c.distance, A.label, B.label, matchLevel)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}` };
 }
 
 /** `compare`: the distance numbers between two sounds, songs, samples or audio files (no picture). */
-export function compareText(w: Writer, a: string, b: string): { text: string; json: Record<string, unknown> } {
+export function compareText(w: Writer, a: string, b: string, matchLevel = false): { text: string; json: Record<string, unknown> } {
   const A = compareSide(w, a), B = compareSide(w, b);
   const c = compareView(A.samples, B.samples, A.label, B.label);
   const notes = [A.note, B.note].filter((x): x is string => x !== null);
   return {
-    text: `${formatDistance(c.distance, A.label, B.label)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}`,
-    json: { a: A.label, b: B.label, distance: c.distance, [A.label]: numbersJson(c.a), [B.label]: numbersJson(c.b) },
+    text: `${formatDistance(c.distance, A.label, B.label, matchLevel)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}`,
+    json: { a: A.label, b: B.label, matchLevel, distance: c.distance, [A.label]: numbersJson(c.a), [B.label]: numbersJson(c.b) },
   };
 }
 

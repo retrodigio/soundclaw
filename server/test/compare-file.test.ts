@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { encodeWavChannels, resample } from '@soundclaw/core';
-import { viewSound } from '../src/index.ts';
+import { compareText, viewSound } from '../src/index.ts';
 import { fixture, type Fixture } from './helpers.ts';
 
 let f: Fixture;
@@ -71,6 +71,35 @@ describe('view compare with a file', () => {
     const txt = join(f.root, 'notes.txt');
     writeFileSync(txt, 'not audio');
     expect(() => viewSound(f.w, 'a', 'compare', { other: txt })).toThrow(/notes\.txt/);
+  });
+});
+
+describe('compare does not depend on level when asked', () => {
+  const nums = (text: string, re: RegExp): number[] => (re.exec(text) ?? []).slice(1).map(Number);
+  it('the same sound at two gains: the as-they-are distances differ, the level-matched ones agree', () => {
+    f.w.run({ commands: 'sound new q voice=layered\nlayer add q osc freq=440 dur=0.5\nsound set q gain=0.2\nsound new r voice=layered\nlayer add r osc freq=440 dur=0.5 filter=lp cutoff=900\nsound set r gain=0.9', by: 'agent:claude' });
+    const file = join(f.root, 'ref.wav');
+    writeFileSync(file, encodeWavChannels([f.w.render('r').samples]));
+    const loud = compareText(f.w, 'a', file).text, quiet = compareText(f.w, 'q', file).text;
+    const raw = (t: string): number => nums(t, /spectral distance ([\d.]+) dB \(mean/)[0]!;
+    const matched = (t: string): number => nums(t, /with the level matched \(.*\): ([\d.]+) dB/)[0]!;
+    expect(Math.abs(raw(loud) - raw(quiet))).toBeGreaterThan(2);
+    expect(Math.abs(matched(loud) - matched(quiet))).toBeLessThan(0.6);
+    expect(quiet).toMatch(/with the level matched \(ref\.wav [+-][\d.]+ dB to be as loud as q\)/);
+    // --match-level puts the matched one first and still prints the other
+    const lead = compareText(f.w, 'q', file, true).text;
+    expect(lead).toMatch(/spectral distance [\d.]+ dB with the level matched/);
+    expect(lead).toMatch(/as they are: [\d.]+ dB/);
+    const j = compareText(f.w, 'q', file, true).json as { matchLevel: boolean; distance: { spectralDb: number; spectralMatchedDb: number; levelMatchDb: number } };
+    expect(j.matchLevel).toBe(true);
+    expect(j.distance.spectralMatchedDb).toBeLessThan(j.distance.spectralDb);
+    expect(Math.abs(j.distance.levelMatchDb)).toBeGreaterThan(1);
+    // the same thing against itself is 0 at any level once matched
+    const self = compareText(f.w, 'q', 'a').json as { distance: { spectralMatchedDb: number; spectralDb: number } };
+    expect(self.distance.spectralMatchedDb).toBeLessThan(0.3);
+    expect(self.distance.spectralDb).toBeGreaterThan(2);
+    // the picture's text carries both too
+    expect(viewSound(f.w, 'q', 'compare', { other: 'a', matchLevel: true }).text).toMatch(/spectral distance [\d.]+ dB with the level matched[\s\S]*as they are: [\d.]+ dB/);
   });
 });
 void distanceLine;

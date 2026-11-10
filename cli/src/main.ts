@@ -113,7 +113,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw view <project> <id> layers [--out <file.png>]
   soundclaw view <project> <id> loop [--out <file.png>]
   soundclaw view <project> <set> set [--out <file.png>]
-  soundclaw view <project> <id|file> compare <other|file> [--out <file.png>]
+  soundclaw view <project> <id|file> compare <other|file> [--match-level] [--out <file.png>]
   soundclaw view <project> sample:<name>|hash:<sha256> wave|spec|pitch|loop|slices [--out <file.png>]
       The agent's ears as a PNG (saved under <project>/.cache/views, or --out) and the numbers:
       wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers),
@@ -133,9 +133,11 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       sample: its numbers (rate, bit depth, channels, noise floor, pitch with confidence, onsets, silence at the ends,
       runs at full scale), words for organic sound (tonal or noisy, steady or moving, one hit or several, dry or
       roomy, mono or wide), where it came from, its licence and the advisory checks.
-  soundclaw compare <project> <a> <b> [--json]
+  soundclaw compare <project> <a> <b> [--match-level] [--json]
       The distance numbers between two things, each a sound, a song, sample:<name>, hash:<sha256> or an audio file
-      (view ... compare draws the picture too): a sampled version against a synth version of a sound.
+      (view ... compare draws the picture too): a sampled version against a synth version of a sound. The spectral
+      distance depends on how loud each is, so the numbers are printed twice, as they are and with the second turned to the
+      first's loudness; --match-level puts the level-matched one first.
   soundclaw measure <project> [<id|set|sample:<name>>...] [--json]
       The numbers and the loudness class of many sounds in ONE process (all sounds when none are named): per
       sound its class and target, every number describe prints and every check's result. --json prints one JSON
@@ -563,7 +565,7 @@ function cmdView(io: Io, p: Parsed): number {
   }
   if (!['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, loop, set, compare)`);
   if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound, song or audio file' : `view ${kind}: unexpected '${other}'`);
-  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers' | 'loop' | 'set', { other, out: one(p, 'out') });
+  const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers' | 'loop' | 'set', { other, out: one(p, 'out'), matchLevel: p.flags.has('match-level') });
   io.out(v.text + '\n');
   return 0;
 }
@@ -757,7 +759,7 @@ function cmdLicence(io: Io, p: Parsed): number {
 function cmdCompare(io: Io, p: Parsed): number {
   const [dir, a, b, ...extra] = p.pos;
   if (!dir || !a || !b || extra.length) throw new UsageError('compare: give a project folder and two things: a sound, song, sample:<name>, hash:<sha256> or an audio file');
-  const r = compareText(wr(io, dir), a, b);
+  const r = compareText(wr(io, dir), a, b, p.flags.has('match-level'));
   io.out((p.flags.has('json') ? JSON.stringify(r.json, null, 2) : r.text) + '\n');
   return 0;
 }
@@ -1178,10 +1180,10 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'list': return cmdList(io, parseArgs(rest, [], []));
       case 'history': return cmdHistory(io, parseArgs(rest, ['sound', 'by', 'limit'], []));
       case 'render': return cmdRender(io, parseArgs(rest, [], ['json']));
-      case 'view': return cmdView(io, parseArgs(rest, ['out', 'from', 'to', 'channels'], []));
+      case 'view': return cmdView(io, parseArgs(rest, ['out', 'from', 'to', 'channels'], ['match-level']));
       case 'midi': return cmdMidi(io, parseArgs(rest, ...WRITE_OPTS.midi!));
       case 'describe': return cmdDescribe(io, parseArgs(rest, [], ['json']));
-      case 'compare': return cmdCompare(io, parseArgs(rest, [], ['json']));
+      case 'compare': return cmdCompare(io, parseArgs(rest, [], ['json', 'match-level']));
       case 'measure': return cmdMeasure(io, parseArgs(rest, [], ['json']));
       case 'normalize': return cmdNormalize(io, parseArgs(rest, ...WRITE_OPTS.normalize!));
       case 'check': return cmdCheck(io, parseArgs(rest, [], ['json']));

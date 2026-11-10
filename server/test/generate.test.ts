@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { decodeAudio, pcmHash, pcmToWav } from '@soundclaw/core';
+import { decodeAudio, pcmHash, pcmToWav, similarDistance } from '@soundclaw/core';
 import {
   againOptions, budgetOf, configText, estimateText, fakeAudio, generateJson, generateText, ledgerText, ledgerTotals, nameFromPrompt, optionsFromPairs, planGeneration, readGenerationConfig,
   readLedger, readSpend, redact, runGeneration, setGenerationConfig, spendFile, type GenerateOptions,
@@ -267,7 +267,7 @@ describe('ranking takes', () => {
     const d = r.takes.map((t) => t.closeness!);
     expect([...d].sort((a, b) => a - b)).toEqual(d);
     const text = generateText(r);
-    expect(text).toMatch(/ranked by want "dur=0\.9-1\.1 lufs>-60", then closeness to ref:\n1\. a_dull_knock_t|ranked by want "dur=0\.9-1\.1 lufs>-60", then closeness to ref:\n1\. dull_knock_t/);
+    expect(text).toMatch(/ranked by want "dur=0\.9-1\.1 lufs>-60", then closeness to ref \(level matched\):\n1\. (a_)?dull_knock_t/);
     expect(text).toMatch(/fits want {2}distance \d+\.\d\d from ref/);
     const missing = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 2, duration: 1, want: 'dur>5', as: 'k' }));
     expect(missing.takes.every((t) => t.fits === false)).toBe(true);
@@ -275,6 +275,27 @@ describe('ranking takes', () => {
     expect(generateJson(missing).takes).toHaveLength(2);
     // like= of something that is not there is refused before any call
     await expect(runGeneration(f.w, sfx('x', { provider: 'fake', like: 'nothing_here' }))).rejects.toThrow(/no sound, song or audio file 'nothing_here'/);
+  });
+});
+
+describe('like= ranking', () => {
+  it('takes a reference file outside the project, and ranks by the distance with the level matched (the other number is printed too)', async () => {
+    f.w.run({ commands: 'sound new ref voice=classic preset=hit seed=3', by: claude });
+    const file = join(f.root, 'ref.wav');
+    writeFileSync(file, f.w.wavOf('ref'));
+    const r = await runGeneration(f.w, sfx('a dull knock', { provider: 'fake', takes: 3, duration: 1, like: file }));
+    expect(r.takes.every((t) => typeof t.distance === 'number' && typeof t.distanceWithLevel === 'number')).toBe(true);
+    const d = r.takes.map((t) => t.distance!);
+    expect([...d].sort((a, b) => a - b)).toEqual(d);
+    expect(generateText(r)).toMatch(/distance \d+\.\d\d from ref\.wav \(level matched; \d+\.\d\d with the level\)/);
+    expect((generateJson(r).takes as { distanceWithLevel: number | null }[])[0]!.distanceWithLevel).not.toBeNull();
+  });
+  it('the distance with the level matched leaves loudness out, and only that', () => {
+    const a = [0, -20, 0, 0.5, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const b = a.map((v, i) => (i === 1 ? -5 : v));
+    expect(similarDistance(a, b)).toBeGreaterThan(0.5);
+    expect(similarDistance(a, b, true)).toBe(0);
+    expect(similarDistance(a, b.map((v, i) => (i === 3 ? 1.5 : v)), true)).toBeGreaterThan(0.5);
   });
 });
 

@@ -226,6 +226,11 @@ export interface Distance {
   spectralDb: number;
   /** The same on the time-averaged spectra, dB. */
   averageSpectrumDb: number;
+  /** The same two distances with the second turned up or down by `levelMatchDb` so it is as loud as the first (integrated loudness): the distance in shape, not in level. */
+  spectralMatchedDb: number;
+  averageSpectrumMatchedDb: number;
+  /** The gain applied to the second for the matched numbers, dB (0 when either is silent). */
+  levelMatchDb: number;
   durationDiffS: number;
   loudnessDiffLu: number;
   truePeakDiffDb: number;
@@ -254,12 +259,13 @@ function pearson(a: number[], b: number[]): number {
 }
 
 /** The spectral distances of two mel spectrograms: the mean |difference| over time and band (time axes as they are), and on the time-averaged spectra, dB. */
-export function melDistance(sa: MelSpec, sb: MelSpec): { spectralDb: number; averageSpectrumDb: number } {
-  const ref = Math.max(specMax(sa), specMax(sb));
+export function melDistance(sa: MelSpec, sb: MelSpec, offsetB = 0): { spectralDb: number; averageSpectrumDb: number } {
+  // (offsetB: dB added to every cell of the second, which is the same as a gain on its samples)
+  const ref = Math.max(specMax(sa), specMax(sb) + offsetB);
   const floor = ref - SPEC_RANGE_DB;
   const frames = Math.max(sa.db.length, sb.db.length);
   const bands = sa.freqs.length;
-  const level = (s: MelSpec, f: number, b: number): number => (f < s.db.length ? Math.max(floor, s.db[f]![b]!) : floor);
+  const level = (s: MelSpec, f: number, b: number): number => (f < s.db.length ? Math.max(floor, s.db[f]![b]! + (s === sb ? offsetB : 0)) : floor);
   let sum = 0;
   const avgA = new Float64Array(bands), avgB = new Float64Array(bands);
   for (let f = 0; f < frames; f++) for (let b = 0; b < bands; b++) sum += Math.abs(level(sa, f, b) - level(sb, f, b));
@@ -272,9 +278,12 @@ export function melDistance(sa: MelSpec, sb: MelSpec): { spectralDb: number; ave
 
 export function distance(xa: Samples, xb: Samples, aa: Analysis, ab: Analysis, sa: MelSpec, sb: MelSpec): Distance {
   const md = melDistance(sa, sb);
+  const matchDb = Number.isFinite(aa.lufs) && Number.isFinite(ab.lufs) ? aa.lufs - ab.lufs : 0;
+  const mm = melDistance(sa, sb, matchDb);
   const st = (u: number | null, v: number | null): number | null => (u !== null && v !== null ? 12 * Math.log2(v / u) : null);
   return {
     spectralDb: md.spectralDb, averageSpectrumDb: md.averageSpectrumDb,
+    spectralMatchedDb: mm.spectralDb, averageSpectrumMatchedDb: mm.averageSpectrumDb, levelMatchDb: matchDb,
     durationDiffS: ab.duration - aa.duration, loudnessDiffLu: ab.lufs - aa.lufs, truePeakDiffDb: ab.truePeakDb - aa.truePeakDb,
     centroidDiffHz: ab.centroid.mean - aa.centroid.mean,
     pitchStartDiffSt: st(aa.pitch.start, ab.pitch.start), pitchEndDiffSt: st(aa.pitch.end, ab.pitch.end),
@@ -282,13 +291,17 @@ export function distance(xa: Samples, xb: Samples, aa: Analysis, ab: Analysis, s
   };
 }
 
-export function formatDistance(d: Distance, a: string, b: string): string {
+export function formatDistance(d: Distance, a: string, b: string, matchLevel = false): string {
   const sg = (v: number, unit: string, dp = 1): string => `${v >= 0 ? '+' : ''}${v.toFixed(dp)} ${unit}`;
   const st = (v: number | null): string => (v === null ? 'n/a' : sg(v, 'semitones'));
   return [
     `A = ${a}, B = ${b}`,
     `B compared with A, that is ${b} compared with ${a} (positive: ${b} is more, negative: ${a} is more):`,
-    `spectral distance ${d.spectralDb.toFixed(1)} dB (mean |difference| of the mel spectrograms); on the average spectra ${d.averageSpectrumDb.toFixed(1)} dB`,
+    ...(matchLevel
+      ? [`spectral distance ${d.spectralMatchedDb.toFixed(1)} dB with the level matched (mean |difference| of the mel spectrograms, ${b} ${sg(d.levelMatchDb, 'dB')} to be as loud as ${a}); on the average spectra ${d.averageSpectrumMatchedDb.toFixed(1)} dB`,
+        `as they are: ${d.spectralDb.toFixed(1)} dB, on the average spectra ${d.averageSpectrumDb.toFixed(1)} dB`]
+      : [`spectral distance ${d.spectralDb.toFixed(1)} dB (mean |difference| of the mel spectrograms); on the average spectra ${d.averageSpectrumDb.toFixed(1)} dB`,
+        `with the level matched (${b} ${sg(d.levelMatchDb, 'dB')} to be as loud as ${a}): ${d.spectralMatchedDb.toFixed(1)} dB, on the average spectra ${d.averageSpectrumMatchedDb.toFixed(1)} dB; this one does not depend on how loud either is`]),
     `duration ${sg(d.durationDiffS, 's', 3)}; loudness ${sg(d.loudnessDiffLu, 'LU')}; true peak ${sg(d.truePeakDiffDb, 'dB')}; brightness ${sg(d.centroidDiffHz, 'Hz', 0)}`,
     `pitch at the start ${st(d.pitchStartDiffSt)}, at the end ${st(d.pitchEndDiffSt)}; envelope correlation ${d.envelopeCorrelation.toFixed(2)}`,
   ].join('\n');

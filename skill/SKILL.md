@@ -131,7 +131,7 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
 - Generate a sound effect when neither synthesis nor a library has it (voices, creatures, crowds, organic one-shots): first `soundclaw generate <project> sfx
   "<prompt>" duration=2 takes=3 as=creak --estimate` (MCP `generate` with `estimate: true`): it prints the cost, the budget left and what would refuse it, and
   calls nothing. Write the prompt as a sound designer would: source, action, material, distance, space ("the slow creak of an old wooden door hinge, close, dry,
-  no reverb"); keep it dry and let the tool add the room. Then run it with `want="dur=1.5-2.5 centroid<2.5k attack<40ms"` (or `like=<your synth version>`) so
+  no reverb"); keep it dry and let the tool add the room. Then run it with `want="dur=1.5-2.5 centroid<2.5k attack<40ms"` (or `like=<your synth version or a reference file path>`; `like=` ranks with the level matched) so
   the takes come back ranked, each with its numbers and words. Every take costs credits: the project's cap is 0 until the person sets one in `project.json`
   (`"generation": {"capCredits": n}`), and you never raise a cap or turn on music yourself; ask (a person sets a cap with `soundclaw generate cap <project> <credits>`, or on the page; there is no tool for it). Never put a key in a command, a file or a message; it comes
   from the environment (`ELEVENLABS_API_KEY`). Pick a take by listening (`describe`, `compare` with your synth version), shape it in the tool (`sample derive
@@ -393,7 +393,7 @@ class they are made for. `check` and `measure` say which class applied.
 - `view <sound> spec` shows brightness, pitch motion and noise; `wave` the shape and the clipping;
   `pitch` the note it actually sounds (slides, vibrato); `layers` (layered sounds) each layer on its own; `compare <sound> other=<sound>` stacks two
   and shows the difference with distance numbers (use it for "more like that one" and to see what a
-  `mutate` changed). The image is a PNG; the tool also prints the numbers.
+  `mutate` changed). The image is a PNG; the tool also prints the numbers. The spectral distance depends on level, so it is printed as it is and with the level matched (`matchLevel` / `--match-level` puts the matched one first): judge "same sound?" by the matched one, then fix the level with `normalize`. A reference outside the project is a file path (`other=~/refs/target.wav`).
 - `describe <sound>` is the same measurements in plain words.
 - A request's `work done` is refused while the sound's checks fail, and, for a sound in a set of two or more, while the set's `set-spread` fails; fix it, then finish.
 

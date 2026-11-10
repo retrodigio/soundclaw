@@ -1266,7 +1266,7 @@ soundclaw describe <project> sample:<name> [--json]
 soundclaw measure <project> sample:<name>... [--json]
 soundclaw view <project> sample:<name> wave|spec|pitch|loop|slices [--out <file.png>]
 soundclaw view <project> sample:<name> compare <sound|song|sample:<other>|hash:<h>|file>
-soundclaw compare <project> <a> <b> [--json]
+soundclaw compare <project> <a> <b> [--match-level] [--json]
 soundclaw sample check <project> [<name>...]
 ```
 
@@ -1274,7 +1274,7 @@ The numbers are the sound's (length, peak, true peak, rms, loudness, centroid, f
 noise floor, harmonic-to-noise ratio, pitch with confidence, cents and steadiness, onsets and their rate, a tempo estimate for loops, the time it takes to fall 60 dB (dry or roomy),
 silence at each end, runs at full scale and DC. `describe` puts them in words (tonal, noisy or mixed; the pitch and how steady it is; one hit or several; dry or roomy; mono or wide)
 and adds the provenance, the licence and the advice. `view … loop` draws the sample's loop points joined (or the whole sample when it has none), `view … slices` its slice points (or its
-measured onsets). `compare` works between any two of a sound, a song, a sample, a hash and a file, with the same distance numbers, and `compare` prints them without a picture (`--json` for scripts).
+measured onsets). `compare` works between any two of a sound, a song, a sample, a hash and a file, with the same distance numbers, and `compare` prints them without a picture (`--json` for scripts). **The spectral distance depends on level**: the same sound at two gains is a different distance from the same reference, so `compare` and `view … compare` print it twice, as the sounds are and with the second turned up or down to the first's integrated loudness (`level matched`, which says by how many dB; it does not depend on how loud either is). `--match-level` (MCP `view` `matchLevel`) puts the level-matched number first; the JSON has `spectralMatchedDb`, `averageSpectrumMatchedDb` and `levelMatchDb` beside `spectralDb` and `averageSpectrumDb`. Use the matched one to ask "is it the same sound", the other to ask "is it the same sound at the same level".
 
 **`sample check`** is advice: clipping in the source, DC, more than 20 ms of silence at an end, a noise floor above -60 dBFS, a loop seam with a click, a level step or a spectral
 jump, and slice points more than 15 ms from a transient. A sample is material: its checks never gate `work done`; the checks of the sounds and songs made from it do.
@@ -1387,7 +1387,7 @@ soundclaw generate config elevenlabs.plan=creator         # your settings
 ```
 
 `generate <project> sfx|music "<prompt>" [duration=<s>] [takes=1..4] [loop=yes] [influence=<0-1>] [as=<name>] [want="<numbers query>"]
-[like=<sound|sample:name>] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]`
+[like=<sound|sample:name|file>] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]`
 
 | Setting | Sound effects | Music |
 |---|---|---|
@@ -1406,8 +1406,8 @@ ffmpeg (the MP3's hash stays in the provenance). Generation is acquisition: repl
 call with the recorded prompt and parameters (from the ledger, else the provenance): new takes, not the same audio; it takes `takes=` and `as=`.
 
 **Each take comes back with its numbers** (length, loudness, peak, centroid, attack, pitch, credits, request id) and its words, as `describe` gives them.
-`want="<numbers query>"` ranks the takes: those that fit first, then the closest. `like=<sound | sample:name>` ranks them by the sounds-like distance of
-`library similar`. Listen before you build on one, and remove the takes you do not keep (`sample remove`; the audio stays until `sample gc`).
+`want="<numbers query>"` ranks the takes: those that fit first, then the closest. `like=<sound | sample:name | the path of an audio file>` (a reference outside the project, a WAV, or an OGG with ffmpeg) ranks them by the sounds-like distance of
+`library similar` **with the level matched**: a take's loudness says nothing about whether it is the sound you asked for, so it is left out of the ranking (each take's line gives the distance both ways, `distance 4.03 … (level matched; 4.44 with the level)`; `--json` has `distance` and `distanceWithLevel`). `want=` ranks on the numbers you name, so it depends on level only when you name `lufs`, `peak` or `rms`. Listen before you build on one, and remove the takes you do not keep (`sample remove`; the audio stays until `sample gc`).
 
 **Costs are capped before the call.** A command is worked out first: the provider, the names, and an estimate per take (credits per second: sound
 effects 10, music 27.4, measured from the provider's cost header; `elevenlabs.rate.sfx` and `.rate.music` change them). Any of these refuses the whole
@@ -1519,7 +1519,7 @@ soundclaw changes <project> [--since <command number | time>] [--by human|agent|
 soundclaw render <project> <id>
 soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
 soundclaw view <project> <id> layers [--out <file.png>]
-soundclaw view <project> <id> compare <other> [--out <file.png>]
+soundclaw view <project> <id> compare <other> [--match-level] [--out <file.png>]
 soundclaw view <project> <instrument> keymap [--out <file.png>]
 soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
 soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
@@ -1535,7 +1535,7 @@ soundclaw sample remove <project> <name>
 soundclaw sample gc <project> [--apply] [--drop-history]
 soundclaw sample git-lfs
 soundclaw upgrade <project>
-soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=<n>] [as=<name>] [want="<query>"] [like=<ref>] [provider=<id>] [--estimate] [--json]
+soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=<n>] [as=<name>] [want="<query>"] [like=<ref|file>] [provider=<id>] [--estimate] [--json]
 soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>]
 soundclaw generate --ledger [<project>]    soundclaw generate config [<key>=<value>...]
 soundclaw generate cap <project> <credits>

@@ -218,6 +218,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       from: z.number().optional().describe('A song: draw from this second'),
       to: z.number().optional().describe('A song: draw to this second'),
       channels: z.array(z.string()).optional().describe('A song: only these channels'),
+      matchLevel: z.boolean().optional().describe('compare: lead with the spectral distance after turning the second to the first\'s loudness (both numbers are always printed)'),
     }),
   }, (a) => w.enqueue((): CallToolResult => {
     try {
@@ -234,7 +235,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       }
       if (a.kind === 'keymap') return fail(`error: keymap is a view of a sampled instrument (${a.sound} is not one)`);
       if (a.kind === 'notes' || a.kind === 'mix') return fail(`error: ${a.kind} is a view of a song (${a.sound} is a sound)`);
-      const v = viewSound(w, a.sound, a.kind ?? 'spec', { other: a.other });
+      const v = viewSound(w, a.sound, a.kind ?? 'spec', { other: a.other, matchLevel: a.matchLevel });
       return { content: [{ type: 'image' as const, data: Buffer.from(v.png).toString('base64'), mimeType: 'image/png' }, text(v.text)] };
     } catch (e) {
       return errorResult(e);

@@ -280,10 +280,12 @@ export function similarVector(m: SampleMeasure, bands: readonly number[]): numbe
   ];
 }
 
-export function similarDistance(a: readonly number[], b: readonly number[]): number {
+/** The distance of two feature vectors; `matchLevel` leaves the loudness out, so it is the distance in character and not in how loud each is. */
+export function similarDistance(a: readonly number[], b: readonly number[], matchLevel = false): number {
   let s = 0;
   for (let i = 0; i < SIMILAR_FEATURES.length; i++) {
     const f = SIMILAR_FEATURES[i]!;
+    if (matchLevel && f.name === 'loudness') continue;
     const d = ((a[i] ?? 0) - (b[i] ?? 0)) / f.scale;
     s += f.weight * d * d;
   }

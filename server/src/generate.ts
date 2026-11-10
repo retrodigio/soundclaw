@@ -415,8 +415,10 @@ export interface TakeResult {
   fits?: boolean;
   closeness?: number;
   failed?: string[];
-  /** With like=: the distance from the reference. */
+  /** With like=: the distance from the reference with the level matched (the ranking uses this one: a take's loudness says nothing about the sound). */
   distance?: number;
+  /** With like=: the distance as it is, loudness included. */
+  distanceWithLevel?: number;
   rank?: number;
 }
 
@@ -559,7 +561,11 @@ export function runGeneration(w: Writer, o: GenerateOptions): Promise<GenerateRe
       const chs = pcmChannels(p.audio, 120);
       const m = measureSample(chs, p.audio.rate);
       const t: TakeResult = { name: p.name, take: p.take, hash: p.hash, credits: p.credits, ...(p.request ? { request: p.request } : {}), measure: m, words: describeSample(m) };
-      if (plan.like) t.distance = similarDistance(plan.like.vector, similarVector(m, bandEnergies(monoAt44(p.audio, 20))));
+      if (plan.like) {
+        const v = similarVector(m, bandEnergies(monoAt44(p.audio, 20)));
+        t.distance = similarDistance(plan.like.vector, v, true);
+        t.distanceWithLevel = similarDistance(plan.like.vector, v);
+      }
       takes.push(t);
     }
     rankTakes(w, plan, takes, entries);
@@ -575,7 +581,7 @@ function takeLine(t: TakeResult, plan: GeneratePlan): string {
   const m = t.measure;
   const rank = t.rank !== undefined ? `${t.rank}. ` : '';
   const fit = t.fits === undefined ? '' : t.fits ? '  fits want' : `  misses ${t.failed!.join(', ')}`;
-  const like = t.distance !== undefined ? `  distance ${t.distance.toFixed(2)} from ${plan.like!.label}` : '';
+  const like = t.distance !== undefined ? `  distance ${t.distance.toFixed(2)} from ${plan.like!.label} (level matched; ${t.distanceWithLevel!.toFixed(2)} with the level)` : '';
   return `${rank}${t.name}  ${m.duration.toFixed(3)} s  ${f1(m.lufs)} LUFS  peak ${f1(m.peakDb)} dBFS  centroid ${Math.round(m.centroid)} Hz  attack ${m.attackMs.toFixed(1)} ms  pitch ${m.pitched && m.pitch ? m.pitch.note : 'none'}  ${round(t.credits)} credits${t.request ? `  request ${t.request}` : ''}${fit}${like}\n   ${t.words.join(' ')}`;
 }
 
@@ -584,7 +590,7 @@ export function generateText(r: GenerateResult, projectArg = '<project>'): strin
   const from = { header: "the provider's cost header", counter: "the account's counter before and after", estimate: 'the estimate (the provider said nothing)', provider: 'the provider', mixed: 'the cost header and the counter' }[r.chargeFrom];
   const lines = [
     `generated ${r.takes.length} of ${p.takes} take${p.takes === 1 ? '' : 's'} with ${p.provider.id} ${p.provider.endpoint(p.kind)} (${p.model}), ${p.duration} s each: "${p.prompt}"`,
-    ...(p.want || p.like ? [`ranked by ${[p.o.want ? `want "${p.o.want}"` : '', p.like ? `closeness to ${p.like.label}` : ''].filter(Boolean).join(', then ')}:`] : []),
+    ...(p.want || p.like ? [`ranked by ${[p.o.want ? `want "${p.o.want}"` : '', p.like ? `closeness to ${p.like.label} (level matched)` : ''].filter(Boolean).join(', then ')}:`] : []),
     ...r.takes.map((t) => takeLine(t, p)),
     ...r.errors.map((e) => `warning: ${e}`),
     ...r.warnings.map((x) => `warning: ${x}`),
@@ -600,7 +606,7 @@ export function generateJson(r: GenerateResult): Record<string, unknown> {
   return {
     provider: r.plan.provider.id, endpoint: r.plan.provider.endpoint(r.plan.kind), model: r.plan.model, kind: r.plan.kind, prompt: r.plan.prompt, estimate: r.plan.total, charge: r.charge, chargeFrom: r.chargeFrom,
     licence: r.plan.licence, group: r.group, errors: r.errors,
-    takes: r.takes.map((t) => ({ name: t.name, hash: t.hash, credits: t.credits, request: t.request ?? null, rank: t.rank ?? null, fits: t.fits ?? null, distance: t.distance === undefined ? null : round(t.distance), dur: round(t.measure.duration), lufs: Number.isFinite(t.measure.lufs) ? round(t.measure.lufs) : null, centroid: Math.round(t.measure.centroid), attack: round(t.measure.attackMs), words: t.words.join(' ') })),
+    takes: r.takes.map((t) => ({ name: t.name, hash: t.hash, credits: t.credits, request: t.request ?? null, rank: t.rank ?? null, fits: t.fits ?? null, distance: t.distance === undefined ? null : round(t.distance), distanceWithLevel: t.distanceWithLevel === undefined ? null : round(t.distanceWithLevel), dur: round(t.measure.duration), lufs: Number.isFinite(t.measure.lufs) ? round(t.measure.lufs) : null, centroid: Math.round(t.measure.centroid), attack: round(t.measure.attackMs), words: t.words.join(' ') })),
   };
 }
 
