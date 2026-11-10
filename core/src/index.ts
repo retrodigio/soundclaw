@@ -47,6 +47,7 @@ export * from './pcm.ts';
 export * from './audiofile.ts';
 export * from './samples.ts';
 export * from './numquery.ts';
+export * from './library.ts';
 export * from './stretch.ts';
 export * from './interp.ts';
 export * from './sampleears.ts';
