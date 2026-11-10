@@ -3,7 +3,7 @@
 // copy of the sounds, and only if all of it fits is it appended to the tape as one group. A
 // running server owns the Writer; the CLI sends its writing commands to that server.
 
-import { BIBLE_FILE, STYLE_FILE, musicGuide, type MusicGuide } from '@soundclaw/core';
+import { BIBLE_FILE, STYLE_FILE, decodeAudio, musicGuide, type MusicGuide } from '@soundclaw/core';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { activeGroups, renderKey, AUTHOR_RE, builtinInstruments, lookupInstrument, songProblems, songText, songToJson, type Instrument, type SongDoc, analyze, applyCommand, copyLibrary, FAMILIES, historyTarget, joinChannels, matchGain, loudnessOf, measuredChannels, fullScaleOf, measureSet, nextGroup, parse, replay, resolveStyle, runChecks, samplesHash, sha256Text, serializeSet, serializeSound, soundExport, soundStyle, classTable, loudnessFor, setTarget, type LoudnessRule, type Command, type Diag, type Parsed, type Library, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry } from '@soundclaw/core';
@@ -18,6 +18,7 @@ import { normalizePlan } from './normalize.ts';
 import { SongBench, type SongMeasured } from './songs.ts';
 import { LEAN_AT, type BatchProgress, type CardLite, type ServerMessage, type Snapshot, type SoundSummary } from './protocol.ts';
 import { Thumbs } from './thumbs.ts';
+import { SampleCards } from './samplecards.ts';
 import { readRequestRecords, readRequests } from './requests.ts';
 
 export interface RunRequest {
@@ -68,6 +69,8 @@ export class Writer {
   readonly samples: SampleStore;
   /** The cards (numbers, checks, thumbnails) worked out in worker threads. */
   readonly thumbs: Thumbs;
+  /** Each sample's numbers and small waveform for the dashboard, worked out in a worker thread, once for each distinct audio. */
+  readonly sampleCards: SampleCards;
   /** What the checks are held to: the project's `style`, else the defaults. */
   readonly style: Style;
   private readonly measured = new Map<string, Measured>();
@@ -86,6 +89,7 @@ export class Writer {
     this.bench = new SongBench(this);
     this.samples = new SampleStore(project.dir, () => this.library.samples, project.json.licences);
     this.thumbs = new Thumbs(this);
+    this.sampleCards = new SampleCards(project.dir, this.samples.store, (hash) => { const b = this.samples.objectBytes2(hash); return b ? decodeAudio(b, { lenient: true }).audio : undefined; });
     try {
       this.style = resolveStyle(project.json.style);
     } catch (e) {

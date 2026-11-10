@@ -6,6 +6,19 @@ import type { SampleInfo } from './samples.ts';
 import type { Diag, Instrument, RequestTarget, SetDoc, SongJson, Sound, Style, TapeEntry, WorkRequest } from '@soundclaw/core';
 
 export type { Presence, SampleInfo };
+export type { SampleDetail } from './sampledetail.ts';
+export type { SampleCard } from './samplecards.ts';
+
+/** A registered sample library, as `GET /api/libraries` lists it. */
+export interface LibraryListing { id: string; name: string; licence: string; attribution?: string; declared: string; /** Files in its index, or null when it has not been indexed. */ files: number | null }
+
+/** One library file in a search page (`GET /api/library/search`): the numbers a row shows, and where it is. */
+export interface LibraryHitJson {
+  ref: string;
+  dur?: number | null; lufs?: number | null; note?: string | null; centroid?: number; attack?: number | null; onsets?: number; channels?: number; rate?: number;
+  error?: string; licence: string; state: string; desc: string; tags?: string[];
+}
+export interface LibrarySearchReply { offset: number; total: number; notIndexed: string[]; hits: LibraryHitJson[] }
 
 /** What the list shows about a sound's last known render: the numbers and the checks (the server works them out in a worker thread and keeps them). */
 export interface CardLite {

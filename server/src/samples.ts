@@ -36,6 +36,13 @@ export interface SampleInfo {
   loopMode?: string;
   /** A 0.1.x file that is not on the tape yet (`soundclaw upgrade` moves it into the store). */
   legacy?: true;
+  /** Who added it and when (a UTC date), for the feed and the Takes list. */
+  author?: string;
+  date?: string;
+  /** For generated audio: the prompt (cut at 160 characters), which take it is and the credits it cost. */
+  prompt?: string;
+  take?: string;
+  credits?: number;
 }
 
 /** What `sample import` and `sample list` say about one sample: length, rate (and how a rate other than 44,100 Hz is converted), channels and how to use them. */
@@ -269,6 +276,8 @@ export class SampleStore extends MapBank {
       name: e.name, sha256: e.hash, rate: e.rate, frames: e.frames, seconds: e.frames / e.rate, channels: e.channels, bytes: x.bytes, format: e.format,
       licence: e.licence.id, licenceState: licenceState(e.licence, this.policy).state, source: e.prov.source, tags: e.tags,
       ...(e.root !== undefined ? { root: noteLabel(e.root) } : {}), ...(e.slices?.length ? { slices: e.slices } : {}), ...(e.loop ? { loop: e.loop } : {}), ...(e.loopMode ? { loopMode: e.loopMode } : {}), ...(x.legacy ? { legacy: true as const } : {}),
+      ...(e.prov.author ? { author: e.prov.author } : {}), ...(e.prov.date ? { date: e.prov.date } : {}),
+      ...(e.prov.prompt ? { prompt: e.prov.prompt.length > 160 ? `${e.prov.prompt.slice(0, 159)}…` : e.prov.prompt } : {}), ...(e.prov.take ? { take: e.prov.take } : {}), ...(e.prov.credits !== undefined ? { credits: e.prov.credits } : {}),
     };
   }
 

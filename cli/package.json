@@ -39,6 +39,7 @@
     "dist/thumbs-worker.js",
     "dist/decode-worker.js",
     "dist/library-worker.js",
+    "dist/samplecards-worker.js",
     "dist/ui/",
     "dist/skill/",
     "dist/LICENSE",

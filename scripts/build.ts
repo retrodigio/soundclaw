@@ -17,7 +17,7 @@ rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 const result = await build({
   // the card service's, the upload reader's and the library index's worker threads are files next to the bundle (the server starts them by name)
-  entryPoints: { soundclaw: join(REPO, 'cli', 'bin', 'soundclaw.js'), 'thumbs-worker': join(REPO, 'server', 'src', 'thumbs-worker.ts'), 'decode-worker': join(REPO, 'server', 'src', 'decode-worker.ts'), 'library-worker': join(REPO, 'server', 'src', 'library-worker.ts') },
+  entryPoints: { soundclaw: join(REPO, 'cli', 'bin', 'soundclaw.js'), 'thumbs-worker': join(REPO, 'server', 'src', 'thumbs-worker.ts'), 'decode-worker': join(REPO, 'server', 'src', 'decode-worker.ts'), 'library-worker': join(REPO, 'server', 'src', 'library-worker.ts'), 'samplecards-worker': join(REPO, 'server', 'src', 'samplecards-worker.ts') },
   outdir: OUT,
   entryNames: '[name]',
   outExtension: { '.js': '.js' },

@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
 import { AUTHOR_RE, HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, pcmToWav, renderExact, type SampleSource } from '@soundclaw/core';
 import { decodeInWorker } from './decode.ts';
-import { libraryAudioFile } from './library.ts';
+import { hitJson, libraryAudioFile, loadIndex, readRegistry, searchLibraries, stateUnder, useLibraryFile } from './library.ts';
+import { sampleDetail } from './sampledetail.ts';
 import { generateBodyFrom, generateFromBody, setProjectCap } from './generate.ts';
 import { commitImports } from './sampleimport.ts';
 import { songJsonObject } from './songs.ts';
@@ -302,6 +303,19 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       }).catch((e: unknown) => json(res, e instanceof ProjectError || e instanceof SyntaxError ? 400 : 500, { error: (e as Error).message }));
       return;
     }
+    if (url.pathname === '/api/library/use' && req.method === 'POST') {
+      // A file of a registered library copied into the project as a person's action (the same as `library use`): { ref: "<library>:<path>", as?, by: "human:<name>" }.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      readBody(req, 16384).then(async (b) => {
+        const j = JSON.parse(b.toString('utf8')) as { ref?: unknown; as?: unknown; by?: unknown };
+        if (typeof j.by !== 'string' || !HUMAN_RE.test(j.by)) throw new ProjectError('by is human:<name> (letters, digits, . _ -)');
+        if (typeof j.ref !== 'string') throw new ProjectError('ref is <library>:<path>');
+        const as = typeof j.as === 'string' && j.as ? j.as : undefined;
+        const r = await o.writer.enqueue(() => useLibraryFile(o.writer, j.ref as string, { by: j.by as string, ...(as ? { as } : {}) }));
+        json(res, 200, { group: r.group, items: r.items.map((x) => ({ name: x.info.name, hash: x.info.sha256, created: x.created, notes: x.notes, sameAs: x.sameAs })), warnings: r.warnings });
+      }).catch((e: unknown) => json(res, e instanceof ProjectError || e instanceof SyntaxError ? 400 : 500, { error: (e as Error).message }));
+      return;
+    }
     if (url.pathname === '/api/generation/cap' && req.method === 'POST') {
       // the project's generation cap, set by a person from the page. An agent has no way to this: no MCP tool and no command of the language sets a cap,
       // and this route takes only a human author.
@@ -395,6 +409,44 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
         if (!o.writer.hasSet(stm[1]!)) { json(res, 404, { error: `no set '${stm[1]}'` }); return; }
         json(res, 200, o.writer.measureSetDoc(stm[1]!));
       }).catch((e: unknown) => json(res, 500, { error: (e as Error).message }));
+      return;
+    }
+    if (url.pathname === '/api/libraries') {
+      // the registered sample libraries (outside projects) and how many files each index holds
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      json(res, 200, readRegistry().map((e) => ({ id: e.id, name: e.name ?? e.id, licence: e.licence ?? 'unknown', ...(e.attribution ? { attribution: e.attribution } : {}), declared: e.declared, files: loadIndex(e.id)?.files.length ?? null })));
+      return;
+    }
+    if (url.pathname === '/api/library/search') {
+      // ?q= words and a numbers query, ?library= one library, ?offset=&limit= a page (48 rows at a time); hits are the compact form `library search --json` prints
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      try {
+        const limit = Math.max(1, Math.min(96, Number(url.searchParams.get('limit') ?? 48) || 48));
+        const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0) || 0);
+        const library = url.searchParams.get('library') || undefined;
+        const policy = o.writer.samples.shipPolicy;
+        const r = searchLibraries(url.searchParams.get('q') ?? '', { ...(library ? { library } : {}), limit: offset + limit, policy });
+        json(res, 200, { offset, total: r.total, notIndexed: r.notIndexed, hits: r.hits.slice(offset).map((h) => hitJson(h, stateUnder(policy))) });
+      } catch (e) { json(res, e instanceof ProjectError ? 400 : 500, { error: (e as Error).message }); }
+      return;
+    }
+    const scm = /^\/api\/sample-card\/([0-9a-f]{64})\.json$/.exec(url.pathname);
+    if (scm) {
+      // a sample's numbers and small waveform, worked out in a worker thread once for these bytes (they never change under a hash)
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      if (req.headers['if-none-match'] === `"${scm[1]}"`) { res.writeHead(304, { ...HEADERS, ETag: `"${scm[1]}"` }).end(); return; }
+      o.writer.sampleCards.card(scm[1]!).then((c) => {
+        const body = Buffer.from(JSON.stringify(c));
+        res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/json', 'Content-Length': body.length, 'Cache-Control': 'private, max-age=31536000, immutable', ETag: `"${scm[1]}"` });
+        res.end(body);
+      }, (e: unknown) => json(res, e instanceof ProjectError ? 404 : 500, { error: (e as Error).message }));
+      return;
+    }
+    const sdm = /^\/api\/sample-detail\/([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);
+    if (sdm) {
+      // everything the sample page shows beyond the list: provenance, licence and why, metadata, and what uses it
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      try { json(res, 200, sampleDetail(o.writer, sdm[1]!)); } catch (e) { json(res, e instanceof ProjectError ? 404 : 500, { error: (e as Error).message }); }
       return;
     }
     if (url.pathname === '/api/samples') {
@@ -530,6 +582,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   if (lastErr) {
     unsubscribe();
     void o.writer.thumbs.close();
+    void o.writer.sampleCards.close();
     throw lastErr;
   }
   port = (server.address() as AddressInfo).port;
@@ -541,6 +594,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       unsubscribe();
       o.writer.hub.close();
       void o.writer.thumbs.close();
+    void o.writer.sampleCards.close();
       void mcpHandler?.close();
       for (const s of sockets) s.close(1001);
       server.close(() => resolve());
