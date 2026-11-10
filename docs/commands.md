@@ -225,7 +225,18 @@ of a sound that only plays a file measures the file (a trimmed layer, or one wit
 (20.9 kHz when a 48 or 96 kHz file goes down, so nothing folds back), its length gives a transition band of about 5% of that rate,
 and its passband gain is 1, so the loudness is kept (within 0.2 LU, tested on 22.05, 32, 48 and 96 kHz files). `sample import`
 prints this method for a file whose rate is not 44,100 Hz. After that the sample is trimmed by `start` and `end` (seconds of the
-file), transposed by `pitch` (linear interpolation between samples; its length changes with it) and optionally backwards.
+file), transposed by `pitch` (its length changes with it) and optionally backwards. The edits below (`slice`, `stretch`, `loop`, fades) come between
+the trim and the pitch; `interp` says how the sample is read between its frames.
+
+*Edits of one layer.* `slice=<n>` plays slice *n* of the sample (counted from 1, from its slice point to the next; see `sample slice`).
+`fade-in` and `fade-out` are straight-line fades over the first and last seconds that play. `stretch=<ratio>` makes it longer or shorter without a change of
+pitch (`2` plays twice as long), by `method=wsola` (hits, speech, noise: onsets are kept in place) or `method=pv` (a phase vocoder, for tones and pads);
+a stereo layer is stretched with both channels together, so they stay aligned. `loop=<seconds>` repeats the sample's loop points (or, with none, the part that
+plays) until the layer is that long, with an equal-power crossfade of `xfade` seconds at each seam. `interp=linear|cubic|sinc` reads between frames: `sinc` is
+a windowed sinc whose cut-off follows the playback ratio, so pitching up does not fold high content back (alias energy under -60 dB an octave up, tested);
+**a layer added now is written with `interp=sinc`**, while a document that never names `interp` reads, renders and keeps its render key exactly as it did
+before the setting existed (`linear`). None of these is in a layer's text or render key until it is set. Slice and loop points are the sample's own
+(`sample slice`, `sample loop`): changing them changes the render key of the sounds that play the sample, and nothing else.
 
 *Stereo.* Channels are kept in the store. `side=mix` (the default) plays the average of all the file's channels; `side=left` and
 `side=right` play one channel of a stereo file; `side=stereo` plays both, the left channel to the left and the right to the right,
@@ -248,6 +259,14 @@ the project is refused. The render key includes the audio's hash.
 | `pitch` | -48 to 48 semitones | 0 | yes | transposition (the sample's length changes with it) |
 | `reverse` | 0 to 1 (whole) | 0 | - | 1 plays it backwards |
 | `side` | `mix`, `left`, `right`, `stereo` | mix | - | which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each), or stereo: both channels, left to the left and right to the right, through one layer's filter, envelope and effects (the layer's pan does not apply; a mono file plays in both) |
+| `slice` | 0 to 1024 (whole) | 0 | - | play only slice n of the sample (1 = from its first slice point to the next; 0 = the whole sample): see `sample slice` |
+| `fade-in` | 0 to 10 s | 0 | - | fade the start of what plays in over this long |
+| `fade-out` | 0 to 10 s | 0 | - | fade the end of what plays out over this long |
+| `stretch` | 0.25 to 4 | 1 | - | time stretch without a change of pitch: 2 plays it twice as long (applied before `pitch`) |
+| `method` | `wsola`, `pv` | wsola | - | how `stretch` works: wsola (hits, speech, noise) or pv (a phase vocoder: tones, pads) |
+| `loop` | 0 to 120 s | 0 | - | repeat the sample's loop (its loop points, else the part that plays) until the layer is this long; 0 plays it once |
+| `xfade` | 0 to 2 s | 0.01 | - | crossfade at each seam of `loop` |
+| `interp` | `linear`, `cubic`, `sinc` | linear | - | how the sample is read between its frames: linear (what documents without this setting use), cubic, or sinc (a windowed sinc whose cut-off follows the pitch, so pitching up does not alias; new layers are made with sinc) |
 
 **Envelopes.** `env <id> <target> "<breakpoints>"` replaces a fixed value with breakpoints `time:value`, times in seconds from the
 start of the layer (the master chain's from the start of the sound), rising. Each point may carry a curve for the segment
@@ -1024,6 +1043,98 @@ and `undo` brings the old audio back. The fields, in the order the normal form w
 | `parents`, `ops` | for derived audio: the parents' hashes and the operations |
 | `licence`, `attribution`, `terms` | see below |
 
+### Editing samples
+
+Editing is a command, and it is worked out once, when it runs: whatever is measured (an onset, a loudness, a loop point, a silence threshold) is written onto the
+tape as plain numbers, and a replay applies the numbers and measures nothing. A derived sample is a `sample add` with `source=derived`, the parents' hashes
+and the settled chain in `ops=`; its audio goes into the store like any object. A project that is opened without such an object makes it again from its
+parents and that chain, and refuses to open if the hash comes out different.
+
+```
+sample derive <new> from=<name> op="<operations separated by ;>" [<field>=<value> ...]
+sample slice <name> at=onsets [sensitivity=<0-1>] [min-gap=<s>] | at=<t,t,...> | grid=<n> [tempo=<bpm>]
+sample loop <name> find [near=<start>-<end>] [min=<s>] | sample loop <name> <start> <end>
+sample bounce <new> from=<sound|song> [layer=<n>] [channel=<name>] [loop=yes] [<field>=<value> ...]
+layer align <id> <n> to=<m>|start [by=onset|peak]
+layer match <id> <n> to=<m> [db=<offset>]
+env <id> <n>.amp follow=<layer number>|sample:<name> [attack=<s>] [release=<s>]
+```
+
+**`sample derive`** takes a chain of operations (at most 32). Times are seconds, `250ms` or `1234f` (frames); the result is stored as 32-bit float at the
+parent's rate. It keeps the parent's licence and tags (so it ships as the parent does); `licence=`, `tags=`, `root=`, `note=` and the other fields of a sample may be given.
+
+| Operation | Does | Settled as |
+|---|---|---|
+| `trim <start> <end>` | keeps the part (`end` is the end) | `trim <n>f <n>f` |
+| `fade in=<t>[@curve] out=<t>[@curve]` | fades the ends; curve `lin`, `exp` or `ease` | `fade in=<n>f out=<n>f` |
+| `gain <dB>` | | as given |
+| `normalize peak <dBFS>` / `normalize lufs <target>` | the gain that puts the peak, or the integrated loudness (at 44.1 kHz, K-weighted), on the target | `gain <dB>` |
+| `silence-trim <dBFS>` | cuts the leading and trailing frames below the threshold (every channel) | `trim <n>f <n>f` |
+| `dc` | a one-pole 10 Hz high-pass that removes an offset | |
+| `reverse`, `mono`, `left`, `right` | backwards; the channels averaged; one channel of a stereo sample | |
+| `pitch <semitones> [method=resample\|stretch]` | `resample` changes the length with the pitch; `stretch` keeps the length (a stretch, then a resample) | `pitch <s> method=<m>` |
+| `stretch <ratio>` \| `to=<seconds>` \| `tempo=<from>:<to>` `[method=wsola\|pv]` | time stretch without a change of pitch; the length is exact to the frame | `stretch <ratio> method=<m>` |
+| `loop <start> <end> [xfade=<t>]` | the part, with its last `xfade` blended into its first, so that playing round from the end to the loop start is continuous; the result carries `loop=` points | `loop <n>f <n>f xfade=<n>f` |
+| `slice <n>` | the n-th slice of the parent (first in the chain) | `trim <n>f <n>f` |
+| `mix <sample> [at=<t>] [gain=<dB>]` | adds another sample (at the rate and channels of this one) | `mix hash:<sha256> at=<n>f gain=<dB>` |
+
+WSOLA and the phase vocoder are written in `core` (no GPL or LGPL code), deterministic like the renderer (twiddles from the engine's sine, a fixed order): a tone keeps
+its pitch within 5 cents over ratios 0.5 to 2, the length is exact, and WSOLA keeps a click train's attack times within 5 ms.
+
+**`sample slice`** stores slice points (frames, ascending, the first at 0). `at=onsets` measures the onsets (`sensitivity` 0 to 1, default 0.5; `min-gap` seconds,
+default 0.05) and writes them as frames; `at=0,0.25,0.5` takes times; `grid=<n>` makes *n* equal slices, or with `tempo=<bpm>`, *n* slices to the beat. A layer plays a slice
+with `slice=<n>`, and `op="slice <n>"` makes it a sample of its own. A layer that plays a slice a sample does not have is refused, naming the count.
+
+**`sample loop … find`** looks for loop points (positive-going zero crossings with a matching slope, the best seam by waveform and spectrum), writes the best as
+`loop=<start>-<end> loopmode=sustain` in frames and prints the seam numbers (click in dB, level step, spectral jump) of the best three. `near=` and `min=` narrow the search.
+By hand, `sample loop <name> <start> <end>` takes seconds or frames. A crossfaded loop is made by `derive`, not `loop`.
+
+**`sample bounce`** renders a sound (one layer with `layer=`) or a song (one channel with `channel=`) through core and stores the result as a sample: `source=bounce`, the
+render key and the tape position in `params`. Its licence is that of the worst sample the sound or song plays (`own` when it plays none), and those samples are its
+parents, so the licence travels. `loop=yes` is for a sound made a loop with `sound loop`. A song is bounced as it stands at the start of the batch. The audio is not
+recomputed on replay; the object is needed (it is named by hash like any other).
+
+**`layer align`** moves layer *n* by `offset=` so that its onset (the first moment its level reaches 10% of its peak) or its peak meets that of layer *m* (or the
+sound's start). **`layer match`** sets `gain=` so that layer *n*'s loudness is layer *m*'s plus `db`. **`env … follow=`** writes an amplitude envelope that follows the level of a
+layer's render (or a sample, from the layer's own start) with the given attack and release (default 5 ms and 50 ms), at most 256 points, so a synth body tracks a recorded hit.
+Each is put on the tape as the `layer set` or `env` it found.
+
+### Hearing samples
+
+`describe`, `measure`, `view` and `compare` take `sample:<name>` or `hash:<sha256 or its first 8 or more digits>` where they take a sound:
+
+```
+soundclaw describe <project> sample:<name> [--json]
+soundclaw measure <project> sample:<name>... [--json]
+soundclaw view <project> sample:<name> wave|spec|pitch|loop|slices [--out <file.png>]
+soundclaw view <project> sample:<name> compare <sound|song|sample:<other>|hash:<h>|file>
+soundclaw compare <project> <a> <b> [--json]
+soundclaw sample check <project> [<name>...]
+```
+
+The numbers are the sound's (length, peak, true peak, rms, loudness, centroid, flatness, attack, pitch) with the sample's own: rate, bit depth, channels and stereo width,
+noise floor, harmonic-to-noise ratio, pitch with confidence, cents and steadiness, onsets and their rate, a tempo estimate for loops, the time it takes to fall 60 dB (dry or roomy),
+silence at each end, runs at full scale and DC. `describe` puts them in words (tonal, noisy or mixed; the pitch and how steady it is; one hit or several; dry or roomy; mono or wide)
+and adds the provenance, the licence and the advice. `view … loop` draws the sample's loop points joined (or the whole sample when it has none), `view … slices` its slice points (or its
+measured onsets). `compare` works between any two of a sound, a song, a sample, a hash and a file, with the same distance numbers, and `compare` prints them without a picture (`--json` for scripts).
+
+**`sample check`** is advice: clipping in the source, DC, more than 20 ms of silence at an end, a noise floor above -60 dBFS, a loop seam with a click, a level step or a spectral
+jump, and slice points more than 15 ms from a transient. A sample is material: its checks never gate `work done`; the checks of the sounds and songs made from it do.
+
+### The numbers query
+
+One query language filters and searches by what is measured. `sample list <project> "<query>"` (and the MCP `sample` tool's `list` with `query`) keeps the samples a query fits, closest first:
+
+```
+soundclaw sample list demo "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k attack<20ms pitched=no onsets=1 loop=no channels=1 tag=wood source=file licence=shippable
+```
+
+Plain words (bare or quoted) match names and tags. A term is `key<op>value` with `=` (a value, or a range `a-b`; a negative number is a sign, and `lufs=-30--20` is a range), `!=`, `<`, `>`, `<=` or `>=`.
+Values take the units the knobs do: `ms`, `s`, `k` (kilo: `2.5k`), `Hz`, `dB`, `LU`, `bpm`, note names for `pitch`, and `yes` or `no`. An unknown key, or a unit the key does not take, is an error that
+names the valid ones. A sample whose number is not known does not match a term that needs it. Keys: `dur` (`duration`), `lufs` (`loudness`), `peak`, `rms`, `centroid` (`brightness`), `flatness`,
+`attack`, `decay`, `noise`, `harmonicity`, `pitch` (`note`), `pitched`, `onsets`, `onsetrate`, `tempo`, `loop`, `channels`, `samplerate` (`sr`), `bits`, `width`, `silence-start`, `silence-end`,
+`clips`, `tag` (repeat for all), `source`, `licence` (`shippable`, `attribution`, `blocked`, `unknown`, or an SPDX id) and `name`.
+
 ### Licences
 
 Each sample has a licence: an SPDX id (`CC0-1.0`, `CC-BY-4.0`), or `own`, `generated:<provider>:<plan>`, `proprietary:<note>` or `unknown`
@@ -1045,7 +1156,9 @@ The default policy ships `own`, `CC0-1.0`, `CC-BY-*` (with `ATTRIBUTION.txt`) an
 "licences": { "allow": ["own", "CC0-1.0", "CC-BY-*"], "block": ["unknown", "*-NC*"] }
 ```
 
-(patterns where `*` matches anything; `block` is looked at first; a list left out keeps its default; `unknown` is never shippable). While you work
+(patterns where `*` matches anything; `block` is looked at first; a list left out keeps its default; `unknown` is never shippable). Non-commercial and
+no-derivatives licences (`CC-BY-NC-4.0`, `CC-BY-ND-4.0`, `CC-BY-NC-SA-4.0`) stay blocked unless the `allow` list names an NC or ND pattern itself (`"CC-BY-NC-4.0"`, `"CC-BY-NC-*"`):
+a broad pattern such as `CC-BY-*` or `*` never admits them, and an explicit `allow` of one overrides only the default `*-NC*` and `*-ND*` blocks, not a block that names it. While you work
 a licence only warns; the gate is on export. `soundclaw licence check <project> [<id>...]` reports each item (default every sound, instrument and
 song) with the samples behind its verdict. A manifest export (`--all`, `--set`, `--pack`) refuses an item whose state is `unknown` or `blocked`
 unless `--allow-licence <id>` names that licence (written into the manifest as `allowedLicences`); it lists the samples used (name, hash, licence,
@@ -1424,13 +1537,13 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `run` | `commands`: a batch, as above. |
 | `history` | The tape, filtered by `sound`, `by` or `last` (default 50). Includes what people did. |
 | `render` | `sound`: the numbers of its render (samples, peaks, loudness, attack, tail, brightness, pitch, onsets), a description, and the check summary last. |
-| `view` | `sound` (a set's name for `set`), `kind` (`wave`, `spec` default, `pitch`, `layers`, `loop`, `set`, `compare`), `other` for compare (a sound, a song, or the path of a WAV or OGG file; `sound` may be a file too): a PNG image and the numbers. |
-| `describe` | `sound`, `json`: words from the numbers, then the numbers (or one JSON object). |
-| `measure` | `sounds` (ids and set names; default all), `json` (default true): the class, every number and every check of many sounds in one call. |
+| `view` | `sound` (a set's name for `set`), `kind` (for a sample: `wave`, `spec`, `pitch`, `loop`, `slices`; `wave`, `spec` default, `pitch`, `layers`, `loop`, `set`, `compare`), `other` for compare (a sound, a song, or the path of a WAV or OGG file; `sound` may be a file too): a PNG image and the numbers. |
+| `describe` | `sound` (also `sample:<name>` or `hash:<sha256>`), `json`: words from the numbers, then the numbers (or one JSON object). |
+| `measure` | `sounds` (ids and set names; default all; `sample:<name>` measures a sample), `json` (default true): the class, every number and every check of many sounds in one call. |
 | `normalize` | `sounds`, `to` (a class name, or `target=<LUFS>`): write the gain that brings sounds, a set or a song to a loudness, as one undo group. A song with layers is fitted so every mix of them is inside the class window. |
 | `check` | `sounds` (sound ids and set names; default all), `json`: the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
 | `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
-| `sample` | `action`: `import` (`file`, a file or a folder, with `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin`, `note`, `force`), `list`, `show` (`name`), `gc` (`apply`, `drop_history`), `upgrade`. Change a sample with `run` (`sample set …`, `sample rename …`, `sample remove …`). |
+| `sample` | `action`: `import` (`file`, a file or a folder, with `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin`, `note`, `force`), `list` (`query`, a numbers query; `json`), `show` (`name`), `check` (`names`: advice on samples), `gc` (`apply`, `drop_history`), `upgrade`. Change or make a sample with `run` (`sample set …`, `sample rename …`, `sample remove …`, `sample derive …`, `sample slice …`, `sample loop …`, `sample bounce …`). |
 | `licence` | `ids` (sounds, sets, songs, instruments, samples; default every sound, instrument and song), `allow_licence`: where each stands (shippable, attribution, unknown, blocked) and the samples behind it. |
 | `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too (`allow_licence` lets licence ids through a manifest export). A song: `format` `wav`, `ogg` or `midi`, `loop`, `stems`, `stemsThroughMaster`, `loops`, `pattern`. |
 | `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |

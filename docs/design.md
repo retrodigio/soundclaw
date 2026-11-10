@@ -79,6 +79,17 @@ the page renders the bytes Node renders.
 (hash, rate, channels, frames, root note, loop, cue points) is in the `sample add` line. Replay, undo and rendering never decode a compressed file, call
 out, or measure. Uploads are read in a worker thread, with a size limit, a sanitised name, and the hash checked before the name goes on the tape.
 
+**Editing settles once.** `sample derive`, `slice`, `loop find`, `bounce`, `layer align`, `layer match` and `env … follow=` are worked out when the command runs
+(in the writer, against the batch so far) and go onto the tape as the plain commands they found: a `sample add` carrying the new audio's hash, the parents' hashes and the
+chain with every measured value written as a number (`ops=`), or a `sample set slices=` / `layer set offset=`. Replay applies numbers; it measures and renders nothing. A derived
+object that is missing from the store is made again from its parents and the settled chain (all in `core`, deterministic), and a hash that differs refuses the project. Because a
+layer's `slice=` and `loop=` read the sample's slice and loop points, which change without the audio changing, the render key holds the hash together with those points
+(`sampleKeyPart`); a sample with neither is just its hash, so every earlier key is unchanged. The new layer settings (`interp`, `slice`, `fade-in`, `fade-out`, `stretch`,
+`method`, `loop`, `xfade`) are left out of a sound's text and key while they have their defaults, and a document that does not name `interp` reads as `linear`, so every earlier
+render and golden is the same; only a layer added now is written with `interp=sinc` (by the writer, so a replayed old line is not changed). Time stretch (WSOLA, phase vocoder) and
+the windowed-sinc reader are written in `core` with the renderer's rules (no platform maths). What measures samples (`sampleears.ts`, `layer-measure.ts`, `numquery.ts`) may use `Math.*`:
+its numbers are printed rounded and settled before they are used.
+
 **Licences travel with the audio.** Each sample has a licence (never inferred) and a provenance (source, origin, the original file's hash, who and when,
 and for generated or derived audio how). A sound, instrument or song carries the licences of every sample it reaches, through parents too, and a manifest
 export is gated by the project's policy. The tool records; it gives no legal advice.

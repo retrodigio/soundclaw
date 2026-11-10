@@ -121,6 +121,16 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   `--pack`) refuses a sound that reaches an unknown or blocked licence unless you pass `--allow-licence <id>` (only if the person says so), lists the
   samples used and writes `ATTRIBUTION.txt`. Pointing a name at other audio (`sample set <name> hash=…`) is undoable like any edit. A 0.1 project's
   `samples/*.wav` still work; `soundclaw upgrade <project>` moves them into the store. `sample gc` is a dry run until `--apply`.
+- Samples are material you can edit and hear. Listen first: `describe <project> sample:<name>` (words and numbers: tonal or noisy, pitch and how steady, one hit
+  or several, dry or roomy, mono or wide, silence at the ends, the licence and the advice), `view <project> sample:<name> wave|spec|pitch|loop|slices`,
+  `compare <project> sample:<name> <the synth version>` for the distance numbers, and `sample check` for advice (a sample's checks never gate `work done`; the sound's do).
+  Search the project's samples by numbers: `sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k attack<20ms pitched=no onsets=1 tag=wood licence=shippable`.
+  Make what the moment needs from them with commands that are worked out once and written on the tape as numbers: `sample derive creak from=take op="silence-trim -50;
+  fade out=80ms; normalize peak -3"` (ops: trim, fade, gain, normalize peak|lufs, silence-trim, dc, reverse, mono|left|right, pitch, stretch, loop, slice, mix; the parent's
+  licence travels), `sample slice <name> at=onsets` then a layer plays `slice=2` (or `op="slice 2"` makes it a sample), `sample loop <name> find` then `layer add … loop=<seconds>
+  xfade=0.02`, `sample bounce <new> from=<sound> [layer=<n>]` to freeze a synth render into a sample. A new sample layer is made with `interp=sinc` (no folding when pitched up);
+  `stretch=` keeps pitch (`method=wsola` for hits and noise, `pv` for tones), `fade-in`/`fade-out` shape the ends. Layer a synth body with a recording: `layer align <id> 2 to=1
+  by=onset`, `layer match <id> 2 to=1 db=-6`, `env <id> 2.amp follow=1`. Listen after each step and judge by ear, not only by the numbers.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower

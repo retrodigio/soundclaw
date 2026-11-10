@@ -24,6 +24,26 @@ All notable changes to SoundClaw are listed here. The format follows
 - **Looking after the store.** `soundclaw sample show`, `sample gc` (a dry run; `--apply`, `--drop-history`), `sample git-lfs`, a limits table,
   uploads from the page (read in a worker thread) at `POST /api/samples/import`, and the audio at `GET /api/sample-object/<hash>`.
 - **Projects from 0.1 keep working.** Their `samples/*.wav` files open and render exactly as before; `soundclaw upgrade` moves them into the store.
+- **Editing samples.** `sample derive <new> from=<name> op="…"` makes new audio by a chain of operations (trim, fade, gain, normalize peak or lufs,
+  silence-trim, dc, reverse, mono/left/right, pitch, stretch, loop, slice, mix); what is measured is written onto the history as plain numbers, the parent's
+  licence travels, and a derived object that is missing is made again from its parents and refused if its hash differs. `sample slice` (measured
+  onsets, given times or a grid), `sample loop … find` (candidate loop points with their seam numbers) and `sample bounce` (a sound, one layer of it, or a
+  song, frozen into a sample, with its render key and licence) are commands of the same kind.
+- **Sample layers learn to edit and to read better.** A sample layer takes `slice`, `fade-in`, `fade-out`, `stretch` (WSOLA for hits, a phase vocoder
+  for tones, both written in core), `loop` with a crossfade, and `interp=linear|cubic|sinc`: a windowed sinc whose cut-off follows the pitch, so pitching
+  up does not alias. A layer added now is written with `interp=sinc`; a document made before reads as linear, and every earlier render, render key and
+  golden is unchanged. `layer align`, `layer match` and `env … follow=` line a synth body up with a recording by onset or peak, level and envelope.
+- **Ears for samples.** `describe`, `measure`, `view` and `compare` take `sample:<name>` or `hash:<sha256>`: rate, bit depth, noise floor, harmonic-to-noise,
+  pitch with confidence, onsets and tempo, silence at the ends, runs at full scale, words for organic sound, a loop view and a slices view. `compare
+  <project> <a> <b>` prints the distance between any two sounds, songs, samples or files. `sample check` gives advice (clipping, DC, silence, noise floor,
+  loop seam, slices off a transient) and never gates `work done`.
+- **One numbers query.** `sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1 tag=wood licence=shippable` keeps the samples a
+  query fits, closest first, with units (`ms`, `k`, `dB`, note names); the same language will serve library search and generation.
+- **The Samples tab shows each sample.** Its numbers, a licence badge (a glyph and a word, never colour alone) and a play button.
+
+### Changed
+- Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
+- Undoing a change that would take away a sample that is still played says which sounds and instruments play it.
 
 ### Fixed
 - The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.
