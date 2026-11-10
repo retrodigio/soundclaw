@@ -162,9 +162,9 @@ describe('SFZ: regions as zones', () => {
   });
 
   it('too many regions is an error that says so', () => {
-    const many = Array.from({ length: 520 }, (_, i) => `<region> sample=a.wav key=${i % 128} loop_mode=no_loop lovel=${1 + (i >> 7) * 25} hivel=${25 + (i >> 7) * 25}`).join('\n');
+    const many = Array.from({ length: 4100 }, (_, i) => `<region> sample=a.wav key=${i % 128} loop_mode=no_loop lovel=${1 + ((i >> 7) % 32) * 4} hivel=${4 + ((i >> 7) % 32) * 4}`).join('\n');
     expect(() => plan(many)).toThrow(InstrumentImportError);
-    expect(() => plan(many)).toThrow(/at most 512/);
+    expect(() => plan(many)).toThrow(/at most 4096/);
   });
 });
 

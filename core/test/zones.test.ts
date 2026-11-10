@@ -195,6 +195,21 @@ describe('zone commands', () => {
     expect(l.instruments.get('s')!.zones).toEqual([]);
   });
 
+  it('hold up to 4096 zones, render a note from them, and refuse the next one saying so', () => {
+    const l = new Library();
+    const run = (t: string): void => { const p = parse(t); if (p.errors.length) throw new Error(p.errors[0]!.message); applyCommand(l, p.commands[0]!); };
+    run('sample add tone hash=' + 'a'.repeat(64) + ' rate=44100 channels=1 frames=44100 format=pcm16 root=A3');
+    run('instrument new big kind=zones');
+    // 128 keys by 32 velocity layers
+    for (let key = 0; key < 128; key++) for (let v = 0; v < 32; v++) run(`instrument zone add big sample=tone root=A3 keys=${key}-${key} vel=${v * 4 + 1}-${Math.min(127, v * 4 + 4)}`);
+    const big = l.instruments.get('big')!;
+    expect(big.zones).toHaveLength(4096);
+    const chs = renderNote(lookupInstrument(l, 'big')!, { midi: 57, gate: 0.2, vel: 100 }, bankOf({ tone: tone(220, 1) }));
+    expect(chs[0]!.length).toBeGreaterThan(0);
+    expect(rms(chs[0]!, 0.05, 0.15)).toBeGreaterThan(0.01);
+    expect(() => run('instrument zone add big sample=tone root=A3 keys=0-0')).toThrow(/at most 4096 zones/);
+  });
+
   it('refuse a bad setting where it is written', () => {
     for (const [text, msg] of [
       ['instrument zone add s sample=a root=H9', /root is a note/],

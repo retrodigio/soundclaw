@@ -156,7 +156,7 @@ function importSfz(w: Writer, file: string, o: InstrumentImportOptions): Instrum
     const name = namer.name(stem(s.path));
     try {
       const p = prepareImport(readLimited(path, SAMPLE_LIMITS.maxFileBytes, 'sample'), path, {
-        as: name, source: 'instrument-import', origin: `${basename(file)}:${s.path}`, note: `from ${basename(file)} (sha256 ${sfzHash.slice(0, 16)}…)`,
+        as: name, source: 'instrument-import', containerHash: sfzHash, origin: `${basename(file)}:${s.path}`, note: `from ${basename(file)} (sha256 ${sfzHash.slice(0, 16)}…)`,
         ...(o.licence ? { licence: o.licence } : {}), ...(o.attribution ? { attribution: o.attribution } : {}), ...(o.terms ? { terms: o.terms } : {}), tags: tagsOf(o, ['sfz']),
       });
       prepared.push(p);
@@ -206,7 +206,7 @@ function importSf2(w: Writer, file: string, o: InstrumentImportOptions): Instrum
     const hash = pcmHash(audio);
     const entry: SampleEntry = {
       name, hash, rate: audio.rate, channels: audio.channels, frames: audio.frames, format: audio.format, tags: tagsOf(o, ['soundfont']).split(',').filter(Boolean).sort(),
-      prov: { source: 'instrument-import', origin: `${basename(file)}:${s.header.name || `sample ${s.header.index}`}`, origHash: fileHash, origFormat: `sf2 ${audio.format === 'pcm24' ? '24-bit' : '16-bit'}` },
+      prov: { source: 'instrument-import', origin: `${basename(file)}:${s.header.name || `sample ${s.header.index}`}`, origHash: fileHash, containerHash: fileHash, origFormat: `sf2 ${audio.format === 'pcm24' ? '24-bit' : '16-bit'}` },
       licence: { id: o.licence ?? 'unknown', ...(o.attribution ? { attribution: o.attribution } : {}), ...(o.terms ? { terms: o.terms } : {}) },
       root: s.root, ...(s.tune ? { tune: s.tune } : {}), note,
     };

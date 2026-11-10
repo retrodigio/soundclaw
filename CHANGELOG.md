@@ -92,6 +92,7 @@ All notable changes to SoundClaw are listed here. The format follows
 The first release.
 
 ### Setup
+- **Bigger imported instruments.** An instrument holds up to 4096 zones (it was 512): a note from 4096 zones renders in about 30 ms, `check` takes about two seconds (zones that differ only in the keys and velocities they answer to are measured once) and the key-map view draws in under 0.1 s. Each sample of an SFZ or SoundFont 2 import records the file's own SHA-256 as `container-hash`.
 - **`soundclaw init`** sets up Claude Code in one step: it makes the project (or uses the one there), installs the skill, and
   registers the MCP server at this version with `claude mcp add` (or in `.mcp.json` when `claude` is not on the PATH).
   `--scope project` shares both with the repo.

@@ -126,21 +126,30 @@ export function checkInstrument(inst: Instrument, bank: SampleBank, style: Style
 
   // each pitched zone alone at its root: pitch and loudness
   const rule = pitchCheckOf(inst);
-  const measured = new Map<number, { lufs: number | null }>();
+  // zones that differ only in the keys and velocities they answer to sound the same alone: each sound is measured once
+  const memo = new Map<string, { l: number | null; cents: number | null }>();
   zones.forEach((z, k) => {
     if (!here(k)) return;
-    const i = alone(inst, z, true);
-    const chs = renderNote(i, { midi: z.hit !== null ? inst.root : z.root, gate: MEASURE_GATE, vel: MEASURE_VEL, hit: z.hit }, bank);
-    const lufs = integratedLoudness(chs);
-    const l = Number.isFinite(lufs) ? lufs : null;
+    const midi = z.hit !== null ? inst.root : z.root;
+    const alike = JSON.stringify([{ ...z, rr: null, keys: 0, vel: 0, trigger: 'attack', choke: 0 }, midi]);
+    let got = memo.get(alike);
+    if (!got) {
+      const chs = renderNote(alone(inst, z, true), { midi, gate: MEASURE_GATE, vel: MEASURE_VEL, hit: z.hit }, bank);
+      const lufs = integratedLoudness(chs);
+      const l = Number.isFinite(lufs) ? lufs : null;
+      let cents: number | null = null;
+      if (l !== null && z.hit === null && rule !== 'onset' && z.loopmode !== 'oneshot') {
+        const m = measureSample(chs.map((c) => c), SAMPLE_RATE, { maxSeconds: 4 });
+        if (m.pitch && m.pitch.confidence >= 0.5) cents = (m.pitch.midi - z.root) * 100 + m.pitch.cents;
+      }
+      got = { l, cents };
+      memo.set(alike, got);
+    }
+    const { l } = got;
     report[k]!.lufs = l;
-    measured.set(k, { lufs: l });
     if (l === null) { flag({ check: 'samples', severity: 'warn', zones: [k + 1], message: `zone ${k + 1} (${z.sample}) is silent when played` }); return; }
-    if (z.hit !== null || rule === 'onset' || z.loopmode === 'oneshot') return;
-    const m = measureSample(chs.map((c) => c), SAMPLE_RATE, { maxSeconds: 4 });
-    if (!m.pitch || m.pitch.confidence < 0.5) return;
-    const cents = (m.pitch.midi - z.root) * 100 + m.pitch.cents;
-    const err = rule === 'class' ? chroma(cents) : cents;
+    if (got.cents === null) return;
+    const err = rule === 'class' ? chroma(got.cents) : got.cents;
     report[k]!.pitchCents = Math.round(err * 10) / 10;
     if (Math.abs(err) > PITCH_TOLERANCE_CENTS) {
       flag({ check: 'pitch', severity: 'fail', zones: [k + 1], message: `zone ${k + 1} (${z.sample}) sounds ${err > 0 ? '+' : ''}${err.toFixed(0)} cents from its root ${noteLabel(z.root)}${rule === 'class' ? ' by pitch class' : ''}: set tune=${Math.round(z.tune - err)} (instrument zone set ${inst.id} ${k + 1} tune=…), or check the root` });

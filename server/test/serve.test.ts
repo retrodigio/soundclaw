@@ -242,6 +242,30 @@ describe('the server process', () => {
     expect(tape.filter((e) => e.cmd?.startsWith('instrument new')).map((e) => e.cmd)).toEqual(['instrument new ramps kind=zones seed=1']);
   });
 
+  it('midi import goes through the server: the file is read by the CLI, the song written by the server\'s writer', async () => {
+    await startServe();
+    const song = [
+      'song new tune tempo=100 key=C:major', 'song channel add tune lead inst=square_lead', 'song channel add tune bass inst=triangle_bass',
+      'pattern tune.verse steps=16 tpb=4 bar=8', '  lead: C5 . E5 . G5 - - . | A4 . . . G4 . E4 .', '  bass: C3 . . . C3 . . . | A2 . . . G2 . . .', 'song section add tune A verse x2', '',
+    ].join('\n');
+    expect((await cli(['run', dir, '-e', song])).code).toBe(0);
+    const out = join(root, 'midi-out');
+    const exp = await cli(['midi', 'export', dir, 'tune', '--to', out]);
+    expect(exp.err).toBe('');
+    const mid = join(out, 'tune.mid');
+    expect(existsSync(mid)).toBe(true);
+    const imp = await cli(['midi', 'import', dir, mid, '--id', 'again']);
+    expect(imp.err).toBe('');
+    expect(imp.code).toBe(0);
+    expect(imp.out).toMatch(/again/);
+    const tape = readFileSync(join(dir, 'history.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { cmd?: string; by?: string });
+    expect(tape.filter((e) => e.cmd?.startsWith('song new again')).length).toBe(1);
+    // it was the server that wrote it, and a second import of the same id is refused with nothing added
+    const before = tape.length;
+    expect((await cli(['midi', 'import', dir, mid, '--id', 'again'])).code).not.toBe(0);
+    expect(readFileSync(join(dir, 'history.jsonl'), 'utf8').trim().split('\n').length).toBe(before);
+  });
+
   it('a CLI call that cannot reach the server writes nothing behind its back', async () => {
     await startServe();
     // Hide the token file: the folder is locked but the token cannot be read.

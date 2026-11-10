@@ -737,7 +737,7 @@ The answer lists what was written and then everything the zones cannot say, per 
 
 `ampeg_hold` and every opcode not listed (`cutoff`, `fil_type`, `*_cc`, `sw_*`, `pitch_veltrack`, `polyphony`, …) are reported as lost, with the regions that had them. Opcodes that
 only label things (`region_label`, `hint_*`, `label_cc`) are ignored without a word. A region with no `sample`, or an empty key or velocity range, is left out with a note.
-More than 512 zones is refused (import a part of the library). For SoundFont 2: `--list` prints the presets (`bank:program name (zones)`); a file with one preset needs no `preset=`, with
+More than 4096 zones (an instrument's most) is refused (import a part of the library); at that size a note still renders in about 30 ms, `check` takes about two seconds (zones that differ only in their key and velocity ranges are measured once) and the key-map view draws in under 0.1 s. Each imported sample records the SFZ or SoundFont file's own SHA-256 as `container-hash`. For SoundFont 2: `--list` prints the presets (`bank:program name (zones)`); a file with one preset needs no `preset=`, with
 several it is required. Reads the RIFF structure with 16-bit samples and 24-bit (`sm24`); SoundFont 3 (compressed) and ROM samples are refused. Each preset zone × instrument zone becomes a
 zone with its key and velocity range (intersected as the format says), root (`overridingRootKey`, else the sample's), tuning (`coarseTune`, `fineTune`, the sample's correction), level
 (`initialAttenuation`), pan (a left or right half of a stereo pair is hard left or right), the loop and its address offsets (`sampleModes` 1 = `continuous`, 3 = `sustain`), the start and
@@ -1141,6 +1141,7 @@ and `undo` brings the old audio back. The fields, in the order the normal form w
 | `tags`, `gain`, `note` | up to 32 lower-case tags (`wood,door`); a default level in dB (-60 to 24); a note (at most 400 characters) |
 | `source` | `file`, `library`, `recorded`, `generated`, `derived`, `bounce` or `instrument-import` (default `file`) |
 | `origin`, `orig-hash`, `orig-format` | a file name, a library id and path, or an address (never an absolute path from a disk); the original file's SHA-256 and format |
+| `container-hash` | the SHA-256 of the SFZ or SoundFont 2 file an instrument import took the sample from |
 | `date`, `author` | when and by whom, written by the writer from the tape line |
 | `provider`, `endpoint`, `model`, `prompt`, `params`, `seed`, `take`, `request`, `credits` | for generated audio: who made it and how, take `n/m`, the provider's request id and the credits charged |
 | `parents`, `ops` | for derived audio: the parents' hashes and the operations |

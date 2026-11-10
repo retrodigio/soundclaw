@@ -2,6 +2,7 @@
 // the zones as plain commands, nothing read again on replay, all or nothing, and a 0.1.x project that is upgraded first.
 // Every file is made by test code.
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -63,6 +64,8 @@ describe('SFZ import', () => {
     const show = f.w.samples.entry('strings_mid')!;
     expect(show.prov).toMatchObject({ source: 'instrument-import', origin: 'strings.sfz:Samples/mid.wav' });
     expect(show.prov.origHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(show.prov.containerHash).toBe(createHash('sha256').update(readFileSync(file)).digest('hex'));
+    expect(tape().find((l) => l.startsWith('sample add strings_mid'))).toContain(`container-hash=${show.prov.containerHash}`);
     expect(show.licence.id).toBe('unknown');
     expect(show.note).toMatch(/^from strings\.sfz \(sha256 [0-9a-f]{16}…\)$/);
     expect(JSON.stringify(f.w.tape())).not.toContain(f.root);
@@ -179,6 +182,7 @@ describe('SoundFont 2 import', () => {
     const c4 = f.w.samples.entry('Ramps_ramp_c4')!;
     expect(c4).toMatchObject({ rate: 22050, channels: 1, frames: 4000, root: 60, tune: -12, loop: [1000, 3000], loopMode: 'sustain' });
     expect(c4.prov).toMatchObject({ source: 'instrument-import', origin: 'invented.sf2:ramp c4', origFormat: 'sf2 16-bit' });
+    expect(c4.prov.containerHash).toBe(createHash('sha256').update(readFileSync(sf2())).digest('hex'));
     expect(c4.note).toBe('SoundFont "Invented font", preset "Ramps"; Test code; sine ramps');
     expect(c4.licence.id).toBe('own');
     expect(tape().filter((l) => l.startsWith('instrument zone add'))).toEqual([
@@ -187,6 +191,18 @@ describe('SoundFont 2 import', () => {
     ]);
     expect(new Set(f.w.tape().map((t) => t.group)).size).toBe(1);
     expect(f.w.run({ commands: 'song new s tempo=100\nsong channel add s p inst=Ramps', by }).ok).toBe(true);
+  });
+
+  it('a font with one preset uses it without preset=', () => {
+    const file = join(f.root, 'single.sf2');
+    writeFileSync(file, buildSf2({
+      info: { INAM: 'Single' },
+      samples: [{ name: 'ramp c4', pcm: ramp(3000), rate: 22050, rootKey: 60 }],
+      instruments: [{ name: 'Only', zones: [{ target: 0 }] }],
+      presets: [{ name: 'Only', bank: 0, program: 0, zones: [{ target: 0 }] }],
+    }));
+    const r = importInstrument(f.w, file, { by });
+    expect(r).toMatchObject({ id: 'Only', format: 'sf2', zones: 1 });
   });
 
   it('the licence stays unknown until set, and the report says so', () => {

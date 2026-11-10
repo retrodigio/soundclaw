@@ -34,6 +34,8 @@ export interface SampleProvenance {
   origin?: string;
   origHash?: string;
   origFormat?: string;
+  /** The SHA-256 of the SFZ or SoundFont 2 file an instrument import took this sample from (a SoundFont's samples are cut from it). */
+  containerHash?: string;
   date?: string;
   author?: string;
   provider?: string;
@@ -106,7 +108,7 @@ export function sampleKeyPart(e: { hash: string; slices?: readonly number[]; loo
 export const SAMPLE_FIELDS = [
   'hash', 'rate', 'channels', 'frames', 'format',
   'root', 'tune', 'loop', 'loopmode', 'slices', 'tags', 'gain', 'note',
-  'source', 'origin', 'orig-hash', 'orig-format', 'date', 'author', 'provider', 'endpoint', 'model', 'prompt', 'params', 'seed', 'take', 'request', 'credits', 'parents', 'ops',
+  'source', 'origin', 'orig-hash', 'orig-format', 'container-hash', 'date', 'author', 'provider', 'endpoint', 'model', 'prompt', 'params', 'seed', 'take', 'request', 'credits', 'parents', 'ops',
   'licence', 'attribution', 'terms',
 ] as const;
 type Field = (typeof SAMPLE_FIELDS)[number];
@@ -167,7 +169,7 @@ function normField(k: Field, v: string): string {
       if (/^https?:\/\//.test(v)) return v.length <= 300 ? v : bad('at most 300 characters');
       if (ABS_PATH_RE.test(v)) bad('a file name (or a library id and the path inside it), not an absolute path from your disk');
       return v.length <= 300 ? v : bad('at most 300 characters');
-    case 'orig-hash': return HASH_RE.test(v) ? v : bad('64 lowercase hex digits');
+    case 'orig-hash': case 'container-hash': return HASH_RE.test(v) ? v : bad('64 lowercase hex digits');
     case 'orig-format': return v.length <= 60 ? v : bad('at most 60 characters');
     case 'date': return /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?$/.test(v) ? v : bad('a UTC date like 2026-11-09T10:00:00Z');
     case 'author': return AUTHOR_RE.test(v) || /^system:[A-Za-z0-9_.-]{1,32}$/.test(v) ? v : bad('agent:<name>, human:<name> or system:<name>');
@@ -232,7 +234,7 @@ function entryFields(e: SampleEntry): Partial<Record<Field, string>> {
     ...(e.slices?.length ? { slices: e.slices.join(',') } : {}), ...(e.tags.length ? { tags: e.tags.join(',') } : {}),
     ...(e.gain !== undefined ? { gain: String(e.gain) } : {}), ...(e.note ? { note: e.note } : {}),
     source: e.prov.source,
-    ...(e.prov.origin ? { origin: e.prov.origin } : {}), ...(e.prov.origHash ? { 'orig-hash': e.prov.origHash } : {}), ...(e.prov.origFormat ? { 'orig-format': e.prov.origFormat } : {}),
+    ...(e.prov.origin ? { origin: e.prov.origin } : {}), ...(e.prov.origHash ? { 'orig-hash': e.prov.origHash } : {}), ...(e.prov.origFormat ? { 'orig-format': e.prov.origFormat } : {}), ...(e.prov.containerHash ? { 'container-hash': e.prov.containerHash } : {}),
     ...(e.prov.date ? { date: e.prov.date } : {}), ...(e.prov.author ? { author: e.prov.author } : {}),
     ...(e.prov.provider ? { provider: e.prov.provider } : {}), ...(e.prov.endpoint ? { endpoint: e.prov.endpoint } : {}), ...(e.prov.model ? { model: e.prov.model } : {}),
     ...(e.prov.prompt ? { prompt: e.prov.prompt } : {}), ...(e.prov.params ? { params: e.prov.params } : {}),
@@ -423,6 +425,7 @@ function applyFields(e: SampleEntry, f: Partial<Record<Field, string>>, clear: r
   if (g('origin') !== undefined) p.origin = g('origin');
   if (g('orig-hash') !== undefined) p.origHash = g('orig-hash');
   if (g('orig-format') !== undefined) p.origFormat = g('orig-format');
+  if (g('container-hash') !== undefined) p.containerHash = g('container-hash');
   if (g('date') !== undefined) p.date = g('date');
   if (g('author') !== undefined) p.author = g('author');
   if (g('provider') !== undefined) p.provider = g('provider');

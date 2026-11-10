@@ -20,7 +20,7 @@ export type ZoneLoopMode = (typeof ZONE_LOOP_MODES)[number];
 export const ZONE_TRIGGERS = ['attack', 'release'] as const;
 export type ZoneTrigger = (typeof ZONE_TRIGGERS)[number];
 export const ZONE_INTERPS = ['linear', 'cubic', 'sinc'] as const;
-export const MAX_ZONES = 512;
+export const MAX_ZONES = 4096;
 /** The most a zone's `choke` group may be. */
 export const MAX_CHOKE = 99;
 /** A choked note fades out over this long, seconds. */
