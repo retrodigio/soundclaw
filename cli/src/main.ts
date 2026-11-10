@@ -4,12 +4,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, wri
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, type ViewKind } from '@soundclaw/core';
+import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, shipPolicyOf, type ViewKind } from '@soundclaw/core';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
   EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
+import { addLibrary, hitJson, listLibraries, listText, removeLibrary, searchLibraries, searchText, similarLibraries, stateUnder, tagFile, useLibraryFile } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
 import { init, runClaude, SCOPES, type ClaudeRunner, type Scope } from './init.ts';
 
@@ -192,6 +193,31 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw upgrade <project>
       Move a 0.1 project's samples/<name>.wav files into the store as one group by system:upgrade; renders are
       unchanged. Such files work without it.
+  soundclaw library add <folder> [--name <id>] [licence=<id>] [attribution="<text>"] [terms=<url>] [--yes]
+  soundclaw library list [--json]
+  soundclaw library remove <id>
+  soundclaw library index [<id>...] [--rebuild] [--workers <n>]
+  soundclaw library tag <id> <path> <tag>... [--remove]
+  soundclaw library search ["<words>"] [<numbers query>] [--library <id>] [--limit <n>] [--project <project>] [--json]
+  soundclaw library similar <project> <sound | sample:<name> | audio file> [<numbers query>] [--library <id>] [--limit <n>] [--json]
+  soundclaw library use <project> <library>:<path> [as=<name>] [licence=<id>] [attribution="<text>"] [tags=<a,b>] [--by <author>]
+      Sample libraries: folders of recordings kept outside any project and registered for you (settings in
+      ~/.soundclaw, or SOUNDCLAW_CONFIG_DIR; the index in ~/.soundclaw/cache, or SOUNDCLAW_CACHE_DIR). add records the
+      folder and its licence: licence= or --yes, or the folder's soundclaw-library.json ({"name", "description",
+      "licence", "attribution", "terms"}); a LICENSE file that says CC0, an SPDX-License-Identifier or a Creative
+      Commons title is shown and needs --yes, anything else leaves the licence unknown. index reads, hashes and
+      measures every audio file once (worker threads; only files whose size or time changed again; --rebuild
+      measures all); the numbers are those of sample list (length, loudness, pitch, centroid, attack, onsets, ...),
+      plus the root and loop a file carries and tags from its folder and file names (split on separators, lower
+      case, plurals folded) and those tag adds. search matches the words against names, tags and folders (all of
+      them must match) and filters by the numbers query ("creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no
+      onsets=1 loop=no channels=1 tag=wood licence=shippable); hits come best word match first, then nearest the
+      middle of the ranges, each with its library:path, length, loudness, note, centroid, attack, licence and a
+      line of words. --project judges licence=shippable by that project's policy. similar ranks the files by
+      distance in a feature vector (length, loudness, brightness, flatness, attack, pitch, hits per second, eight
+      energy bands; docs/commands.md lists it) from a sound, a sample or a file. use copies one file into the
+      project's store (a tape command, one undo group) as source=library, origin <library>:<path>, with the
+      library's licence; the library itself never enters the project.
   soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
       Where sounds, sets, songs, instruments and samples stand on licences: shippable, attribution, unknown or
       blocked, and the samples behind each verdict. project.json "licences": {"allow": [...], "block": [...]} sets
@@ -357,6 +383,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   reply: [['by'], []],
   cancel: [['by'], []],
   work: [['by'], []],
+  library: [['name', 'licence', 'license', 'attribution', 'terms', 'library', 'limit', 'workers', 'project', 'by', 'as', 'tags', 'note'], ['json', 'yes', 'rebuild', 'remove', 'force']],
 };
 
 /** `soundclaw work <project> <action>`: the MCP work tool's actions, for an agent with no MCP. */
@@ -562,6 +589,87 @@ function cmdSample(io: Io, p: Parsed): number {
   const r = importPath(w, file, opts);
   const one1 = r.items.length === 1 ? r.items[0]!.info.name : null;
   io.out(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}${one1 ? `\nuse it: layer add <sound> sample sample=${one1} [start=<s>] [end=<s>] [pitch=<semitones>] [reverse=1] [side=mix|left|right|stereo]` : ''}\n`);
+  return r.items.length ? 0 : 1;
+}
+
+/** `library add|list|remove|tag|search|similar|use` (`index` runs in entry.ts: it uses worker threads). */
+function cmdLibrary(io: Io, p: Parsed): number {
+  const [verb, ...rest] = p.pos;
+  const verbs = 'add | list | remove | index | tag | search | similar | use';
+  if (!verb || !verbs.split(' | ').includes(verb)) throw new UsageError(`library: ${verbs}`);
+  const int = (k: string, def: number, max: number): number => {
+    const v = one(p, k);
+    if (v === undefined) return def;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > max) throw new UsageError(`--${k} is a whole number from 1 to ${max}`);
+    return n;
+  };
+  const only = (kv: Record<string, string>, allowed: string[], what: string): void => {
+    for (const k of Object.keys(kv)) if (!allowed.includes(k)) throw new UsageError(`${what}: no field '${k}' (${allowed.join(', ')})`);
+  };
+  if (verb === 'index') throw new UsageError('library index runs from the soundclaw command itself (it measures files on worker threads): soundclaw library index [<id>...]');
+  if (verb === 'list') {
+    if (rest.length) throw new UsageError(`library list: unexpected '${rest[0]}'`);
+    const libs = listLibraries();
+    io.out(p.flags.has('json') ? JSON.stringify(libs, null, 1) + '\n' : listText(libs));
+    return 0;
+  }
+  if (verb === 'remove') {
+    if (rest.length !== 1) throw new UsageError('library remove: give a library id');
+    removeLibrary(rest[0]!);
+    io.out(`removed library ${rest[0]} from the list (its folder and the files in it are untouched)\n`);
+    return 0;
+  }
+  if (verb === 'add') {
+    const [dir, ...more] = rest;
+    if (!dir) throw new UsageError('library add: give a folder');
+    const kv = pairsFrom(more, 'library add');
+    only(kv, ['licence', 'attribution', 'terms', 'name'], 'library add');
+    const pick = (k: string): string | undefined => kv[k] ?? one(p, k) ?? (k === 'licence' ? one(p, 'license') : undefined);
+    const r = addLibrary(dir, { name: pick('name'), licence: pick('licence'), attribution: pick('attribution'), terms: pick('terms'), yes: p.flags.has('yes') });
+    io.out(`added library '${r.entry.id}' (${r.entry.dir})\n${r.notes.map((n) => `  ${n}\n`).join('')}next: soundclaw library index ${r.entry.id}\n`);
+    return 0;
+  }
+  if (verb === 'tag') {
+    const [id, path, ...tags] = rest;
+    if (!id || !path || !tags.length) throw new UsageError('library tag: library tag <id> <path> <tag>... [--remove]');
+    const now = tagFile(id, path, tags.flatMap((t) => t.split(',')), p.flags.has('remove'));
+    io.out(`${id}:${path} tags: ${now.length ? now.join(', ') : 'none'}\n`);
+    return 0;
+  }
+  const policyOf = (dir?: string) => (dir ? shipPolicyOf(loadProject(dir).json.licences) : undefined);
+  if (verb === 'search') {
+    const policy = policyOf(one(p, 'project'));
+    const r = searchLibraries(rest.join(' '), { library: one(p, 'library'), limit: int('limit', 20, 500), ...(policy ? { policy } : {}) });
+    const state = policy ? stateUnder(policy) : undefined;
+    io.out(p.flags.has('json') ? JSON.stringify(r.hits.map((h) => hitJson(h, state)), null, 1) + '\n' : searchText(r, state) + '\n');
+    return 0;
+  }
+  if (verb === 'similar') {
+    const [dir, ref, ...q] = rest;
+    if (!dir || !ref) throw new UsageError('library similar: library similar <project> <sound | sample:<name> | audio file> [<numbers query>]');
+    const w = wr(io, dir);
+    const policy = w.samples.shipPolicy;
+    const r = similarLibraries(w, ref, q.join(' '), { library: one(p, 'library'), limit: int('limit', 10, 500), policy });
+    const state = stateUnder(policy);
+    io.out(p.flags.has('json') ? JSON.stringify(r.hits.map((h) => hitJson(h, state)), null, 1) + '\n' : `like ${r.reference}:\n${searchText(r, state)}\n`);
+    return 0;
+  }
+  // use
+  const [dir, ref, ...more] = rest;
+  if (!dir || !ref) throw new UsageError('library use: library use <project> <library>:<path> [as=<name>] [licence=<id>] ...');
+  const kv = pairsFrom(more, 'library use');
+  only(kv, ['as', 'licence', 'attribution', 'terms', 'tags', 'note'], 'library use');
+  const pick = (k: string): string | undefined => kv[k] ?? one(p, k) ?? (k === 'licence' ? one(p, 'license') : undefined);
+  assertNoServer(dir, io);
+  const w = wr(io, dir);
+  const r = useLibraryFile(w, ref, {
+    ...(pick('as') ? { as: pick('as')! } : {}), ...(pick('licence') ? { licence: pick('licence')! } : {}), ...(pick('attribution') ? { attribution: pick('attribution')! } : {}),
+    ...(pick('terms') ? { terms: pick('terms')! } : {}), ...(pick('tags') ? { tags: pick('tags')! } : {}), ...(pick('note') ? { note: pick('note')! } : {}),
+    force: p.flags.has('force'), by: author(p, 'agent:claude', (n) => `agent:${n}`),
+  });
+  const name = r.items[0]?.info.name;
+  io.out(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}${name ? `\nuse it: layer add <sound> sample sample=${name} [start=<s>] [end=<s>] [pitch=<semitones>] [side=mix|left|right|stereo]` : ''}\n`);
   return r.items.length ? 0 : 1;
 }
 
@@ -979,6 +1087,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'check': return cmdCheck(io, parseArgs(rest, [], ['json']));
       case 'import': return cmdImport(io, parseArgs(rest, ...WRITE_OPTS.import!));
       case 'sample': return cmdSample(io, parseArgs(rest, ...WRITE_OPTS.sample!));
+      case 'library': return cmdLibrary(io, parseArgs(rest, ...WRITE_OPTS.library!));
       case 'upgrade': return cmdUpgrade(io, parseArgs(rest, ...WRITE_OPTS.upgrade!));
       case 'licence': case 'license': return cmdLicence(io, parseArgs(rest, ['allow-licence'], []));
       case 'changes': return cmdChanges(io, parseArgs(rest, ['since', 'by', 'as'], ['peek']));

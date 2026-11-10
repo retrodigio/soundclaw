@@ -10,6 +10,7 @@ import { builtinInstruments, guideText, openRequests, scaleText } from '@soundcl
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
+import { hitJson, listLibraries, listText, searchLibraries, searchText, similarLibraries, stateUnder, useLibraryFile, type SearchResult } from './library.ts';
 import { gcApply, gcPlan, gcReport, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject } from './sampleimport.ts';
 import { sampleCheckText, sampleDescribeText, sampleMeasureJson, isSampleRef } from './sampleview.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
@@ -68,6 +69,8 @@ Music (instruments, patterns, songs; build a song in passes and run \`check\` af
 Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-sting\` (or loudness=<LUFS>); the loudness check holds each sound to its class (standard: -16 LUFS ±1) and says which applied. \`normalize\` writes the gain that brings sounds to their class; \`measure\` returns the numbers and checks of many sounds as JSON in one call. Dynamics: \`fx add <id> compress|limit\` (a limiter on the master chain lets a spiky sound be loud without clipping). Many hits in one layer: \`env <id> 1.amp bursts(times=0.1,0.3 ...)\`. \`sound copy|rename|remove <id> ...\` manage sounds.
 
 Samples as material: \`sample derive <new> from=<name> op="trim 0.1 0.9; fade out=50ms; normalize peak -3"\` makes new audio (ops: trim, fade, gain, normalize peak|lufs, silence-trim <dB>, dc, reverse, mono|left|right, pitch <semitones> [method=resample|stretch], stretch <ratio>|to=<s>|tempo=<a>:<b> [method=wsola|pv], loop <s> <e> xfade=<t>, slice <n>, mix <sample> at=<t> gain=<dB>; measured values are written into the history as numbers). \`sample slice <name> at=onsets|<t,t,..>|grid=<n>\`, \`sample loop <name> find|<start> <end>\`, \`sample bounce <new> from=<sound|song> [layer=<n>] [loop=yes]\` freezes a render. \`layer align <id> <n> to=<m>|start by=onset|peak\`, \`layer match <id> <n> to=<m> db=<offset>\`, \`env <id> <n>.amp follow=<layer>|sample:<name>\`. Hear samples with describe, measure and view (sample:<name> or hash:<sha256>: wave, spec, pitch, loop, slices, compare), sample check (advice only), and search with a numbers query: sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1.
+
+Sample libraries (folders of recordings outside the project, registered by \`soundclaw library add\` and indexed by \`soundclaw library index\`): the \`library\` tool searches them (\`search\` with words and a numbers query such as "creak" dur=0.8-2.5 pitched=no licence=shippable), finds files that sound like a sound or sample (\`similar\`), and copies one into the project (\`use\`, with its provenance and the library's licence); then \`layer add <sound> sample sample=<name>\`.
 
 Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
 
@@ -391,6 +394,47 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       }
       if (!a.file) return fail('import needs file');
       const r = importPath(w, a.file, { ...(a.as ? { as: a.as } : {}), ...(a.licence ? { licence: a.licence } : {}), ...(a.attribution ? { attribution: a.attribution } : {}), ...(a.terms ? { terms: a.terms } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.source ? { source: a.source } : {}), ...(a.origin ? { origin: a.origin } : {}), ...(a.note ? { note: a.note } : {}), force: !!a.force, by: agentName(a.by) });
+      return { content: [text(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}`)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  }));
+
+  server.registerTool('library', {
+    title: 'Sample libraries',
+    description: 'Search the user\'s sample libraries (folders of recordings registered with `soundclaw library add`, outside any project) and copy a file into this project. list: the libraries and whether they are indexed. search: query is words (all must match names, tags and folders) and a numbers query, like "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k attack<20ms pitched=no onsets=1 loop=no channels=1 tag=wood licence=shippable; hits come best word match first, then nearest the middle of the ranges. similar: files nearest a sound of the project, sample:<name> or an audio file path (ref), optionally filtered by a query. use: ref is <library>:<path> from a hit; it copies the file into the project\'s sample store as source=library with the library\'s licence (override with licence), and then `layer add <sound> sample sample=<name>` plays it. Hits are one JSON object per line (ref, dur, lufs, note, centroid, attack, licence, state, desc); format=text prints the CLI lines. Indexing a library (soundclaw library index) is a CLI step: it can take minutes.',
+    inputSchema: z.object({
+      action: z.enum(['list', 'search', 'similar', 'use']),
+      query: z.string().optional().describe('search, similar: words and a numbers query'),
+      library: z.string().optional().describe('search, similar: only this library'),
+      limit: z.number().int().min(1).max(200).optional().describe('search (default 20), similar (default 10)'),
+      ref: z.string().optional().describe('similar: a sound id, sample:<name> or an audio file; use: <library>:<path>'),
+      format: z.enum(['json', 'text']).optional().describe('hits as JSON lines (default) or text lines'),
+      as: z.string().optional().describe('use: the sample\'s name (default: the file\'s)'),
+      licence: z.string().optional().describe('use: a licence id to write instead of the library\'s'),
+      attribution: z.string().optional().describe('use: attribution text'),
+      terms: z.string().optional().describe('use: a terms address'),
+      tags: z.string().optional().describe('use: comma-separated tags to add'),
+      note: z.string().optional().describe('use: a note'),
+      by: z.string().optional().describe('use: the author on the tape (default agent:claude)'),
+    }),
+  }, (a) => w.enqueue(() => {
+    try {
+      const hits = (r: SearchResult, head?: string): CallToolResult => {
+        const st = stateUnder(w.samples.shipPolicy);
+        if (a.format === 'text') return { content: [text((head ? head + '\n' : '') + searchText(r, st))] };
+        const lines = r.hits.map((h) => JSON.stringify(hitJson(h, st)));
+        return { content: [text([`${head ? head + ': ' : ''}${r.hits.length}${r.total > r.hits.length ? ` of ${r.total}` : ''} hit${r.hits.length === 1 ? '' : 's'}${r.notIndexed.length ? `; not indexed (CLI: soundclaw library index): ${r.notIndexed.join(', ')}` : ''}`, ...lines].join('\n'))] };
+      };
+      if (a.action === 'list') return { content: [text(listText(listLibraries()))] };
+      if (a.action === 'search') return hits(searchLibraries(a.query ?? '', { library: a.library, limit: a.limit ?? 20, policy: w.samples.shipPolicy }));
+      if (a.action === 'similar') {
+        if (!a.ref) return fail('similar needs ref (a sound id, sample:<name> or an audio file)');
+        const r = similarLibraries(w, a.ref, a.query ?? '', { library: a.library, limit: a.limit ?? 10, policy: w.samples.shipPolicy });
+        return hits(r, `like ${r.reference}`);
+      }
+      if (!a.ref) return fail('use needs ref (<library>:<path>)');
+      const r = useLibraryFile(w, a.ref, { ...(a.as ? { as: a.as } : {}), ...(a.licence ? { licence: a.licence } : {}), ...(a.attribution ? { attribution: a.attribution } : {}), ...(a.terms ? { terms: a.terms } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.note ? { note: a.note } : {}), by: a.by ?? AGENT });
       return { content: [text(`${importReport(r, sampleLine)}\n${plural(r.items.length, 'sample')}${r.group ? ` as group ${r.group}` : ''}`)] };
     } catch (e) {
       return errorResult(e);

@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { DEFAULT_PORT, serve } from '@soundclaw/server/serve';
-import { ProjectError } from '@soundclaw/server';
+import { ProjectError, indexLibrary, indexStatsText, readRegistry } from '@soundclaw/server';
 import { USAGE, UsageError, main, metaCommand, one, parseArgs, WRITE_OPTS, type Io } from './main.ts';
 import { awaitMain, forwardToServer, listenerLine, runForwarded } from './forward.ts';
 
@@ -58,6 +58,30 @@ export function resolveRunArgv(argv: string[]): string[] {
   return ['run', dir, '-e', text, '--source', source, ...(by !== undefined ? ['--by', by] : [])];
 }
 
+/** `soundclaw library index [<id>...]`: measure the files of libraries on worker threads. */
+async function libraryIndexMain(argv: string[]): Promise<number> {
+  const p = parseArgs(argv, ...WRITE_OPTS.library!);
+  const registered = readRegistry().map((l) => l.id);
+  const ids = p.pos.length ? p.pos : registered;
+  if (!ids.length) throw new ProjectError('no libraries registered (soundclaw library add <folder> [--name <id>] [licence=<id>])');
+  const w = one(p, 'workers');
+  if (w !== undefined && (!Number.isInteger(Number(w)) || Number(w) < 0 || Number(w) > 32)) throw new UsageError('--workers is a whole number from 0 (this thread) to 32');
+  for (const id of ids) {
+    let shown = -1;
+    const stats = await indexLibrary(id, {
+      rebuild: p.flags.has('rebuild'),
+      ...(w !== undefined ? { workers: Number(w) } : {}),
+      onProgress: process.stderr.isTTY ? (done, total) => {
+        const pct = Math.floor((done / total) * 100);
+        if (pct !== shown) { shown = pct; process.stderr.write(`\r${id}: ${done}/${total} files`); }
+      } : undefined,
+    });
+    if (process.stderr.isTTY && shown >= 0) process.stderr.write('\r\x1b[K');
+    process.stdout.write(indexStatsText(stats) + '\n');
+  }
+  return 0;
+}
+
 export async function cli(argv: string[]): Promise<number> {
   // A reader that stops early (`soundclaw history … | head`) closes the pipe: stop quietly, as Unix
   // tools do, instead of failing on an unhandled EPIPE.
@@ -81,6 +105,7 @@ export async function cli(argv: string[]): Promise<number> {
   }
   try {
     if (argv[0] === 'await') return await awaitMain(argv.slice(1), out);
+    if (argv[0] === 'library' && argv[1] === 'index') return await libraryIndexMain(argv.slice(2));
     const args = argv[0] === 'run' ? resolveRunArgv(argv) : argv;
     const sent = await forwardToServer(args, out);
     if (sent !== null) return sent;

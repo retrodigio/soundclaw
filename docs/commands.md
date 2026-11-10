@@ -1129,11 +1129,82 @@ One query language filters and searches by what is measured. `sample list <proje
 soundclaw sample list demo "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k attack<20ms pitched=no onsets=1 loop=no channels=1 tag=wood source=file licence=shippable
 ```
 
-Plain words (bare or quoted) match names and tags. A term is `key<op>value` with `=` (a value, or a range `a-b`; a negative number is a sign, and `lufs=-30--20` is a range), `!=`, `<`, `>`, `<=` or `>=`.
+Plain words (bare or quoted) match names and tags (`library search` also matches folders). A term is `key<op>value` with `=` (a value, or a range `a-b`; a negative number is a sign, and `lufs=-30--20` is a range), `!=`, `<`, `>`, `<=` or `>=`.
 Values take the units the knobs do: `ms`, `s`, `k` (kilo: `2.5k`), `Hz`, `dB`, `LU`, `bpm`, note names for `pitch`, and `yes` or `no`. An unknown key, or a unit the key does not take, is an error that
 names the valid ones. A sample whose number is not known does not match a term that needs it. Keys: `dur` (`duration`), `lufs` (`loudness`), `peak`, `rms`, `centroid` (`brightness`), `flatness`,
 `attack`, `decay`, `noise`, `harmonicity`, `pitch` (`note`), `pitched`, `onsets`, `onsetrate`, `tempo`, `loop`, `channels`, `samplerate` (`sr`), `bits`, `width`, `silence-start`, `silence-end`,
 `clips`, `tag` (repeat for all), `source`, `licence` (`shippable`, `attribution`, `blocked`, `unknown`, or an SPDX id) and `name`.
+
+### Sample libraries
+
+A library is a folder of recordings that lives **outside any project**. You register it once for your user, index it once, and then search it by words and by
+the numbers; a project holds only the files it uses, copied in with where they came from and the library's licence.
+
+```
+soundclaw library add ~/sounds/cellar licence=CC0-1.0            # register a folder (an id from its name; --name <id> picks one)
+soundclaw library index                                          # read, hash and measure every audio file (all libraries, or name them)
+soundclaw library search "door creak" dur=0.8-2.5 pitched=no licence=shippable --limit 8
+soundclaw library similar demo door_synth dur<3                  # files that sound like a sound of the project (or sample:<name>, or a file)
+soundclaw library use demo cellar:doors/creak_04.wav as=creak    # copy one file into the project's store
+soundclaw library tag cellar doors/creak_04.wav hinge,rusty      # add tags to a file (they survive a re-index)
+soundclaw library list [--json]    soundclaw library remove <id>
+```
+
+**Where things are kept.** The list of libraries and the tags you add are settings in `~/.soundclaw` (or `$SOUNDCLAW_CONFIG_DIR`, or `$XDG_CONFIG_HOME/soundclaw`); the
+index is a cache in `~/.soundclaw/cache` (`$SOUNDCLAW_CACHE_DIR`, `$XDG_CACHE_HOME/soundclaw`) and can be deleted and built again. Nothing about a library is written into a
+project except the files `library use` copies, and no path of your machine is written on the tape: a copied file's origin is `<library>:<path inside it>`.
+
+**The licence of a library.** `add` takes `licence=<id>` (with `attribution="…"` and `terms=<url>`), or reads the folder's own declaration, a
+`soundclaw-library.json`:
+
+```
+{ "name": "Cellar Foley", "description": "doors, bells and weather", "licence": "CC0-1.0", "attribution": "Recorded by the cellar crew", "terms": "https://example.org/terms" }
+```
+
+A `LICENSE` file that says outright `SPDX-License-Identifier: <id>`, CC0, or a Creative Commons title ("Attribution-NonCommercial 4.0") is shown as a reading of its text and needs
+`--yes` (or `licence=<id>`); a licence file that says anything else is not guessed and the licence stays `unknown`. A file copied out with `library use` takes the library's
+licence, attribution and terms (override with `licence=`), so the ship policy and `licence check` judge it like any sample. SoundClaw records licences; it gives no legal advice.
+
+**The index.** `library index [<id>...] [--rebuild] [--workers <n>]` lists the audio files below the folder (WAV, AIFF, FLAC; OGG, MP3 and M4A when ffmpeg is installed; hidden files and links are
+skipped), and for each keeps its path, size and time stamp, the canonical hash, format, rate, channels and bit depth, the numbers of `sample list` (measured over the first 20 s; the length is the
+file's), eight energy bands, the root note, loop points, one-shot flag, tempo and text the file's chunks carry, and tags from its folders and file name (split on separators and camelCase,
+lower case, plurals folded, numbers dropped). A file that cannot be read keeps an entry with the reason and is never a hit. Files are measured on worker threads (one fewer than the
+cores, 1 to 6; `$SOUNDCLAW_INDEX_WORKERS` or `--workers` sets it, 0 is this thread) and only files whose size or time changed are read again. A file over 64 MB is listed but not read.
+Plan on about 0.1 CPU-second per short one-shot: 1,000 generated one-shots take about 15 s on 8 free cores.
+
+**Search.** `library search "<words>" [<numbers query>] [--library <id>] [--limit <n>] [--project <project>] [--json]`. Every word has to match a file's name, tags or folders (plurals folded:
+`doors` finds `door`); the numbers query (see the numbers query above, with the same keys; `source` is `library`, `loop` is whether the file carries loop points) filters. Hits come
+best word match first (a file-name word beats an added tag, which beats a folder word), then those nearest the middle of the query's ranges. Each hit prints `<library>:<path>`, length,
+loudness, note, centroid, attack, a licence glyph and word and a line of words (`tonal, one hit, dry, mono`). `--project` judges `licence=shippable` by that project's policy
+(the default policy otherwise). `--json` prints one object per hit.
+
+**Sounds like.** `library similar <project> <sound | sample:<name> | audio file> [<numbers query>] [--library <id>] [--limit <n>]` ranks the files (those the query keeps) by their distance
+from the reference in this feature space, nearest first; the distance is the square root of the sum of weight × ((a − b) / scale)² over:
+
+| Feature | Value | One unit | Weight |
+|---|---|---|---|
+| duration | log10 of the length in seconds | 0.5 (×3) | 1 |
+| loudness | integrated loudness, LUFS | 8 LU | 0.6 |
+| centroid | log2 of the spectral centroid in kHz | 1.2 octaves | 1 |
+| flatness | 0 tonal … 1 noise | 0.3 | 1 |
+| attack | log10 of the attack in ms | 0.8 | 0.8 |
+| pitched | 1 when it has a clear pitch | 1 | 0.7 |
+| pitch | octaves (MIDI note ÷ 12), when pitched | 1 | 0.5 |
+| onset rate | onsets per second | 3 | 0.6 |
+| eight bands | energy in 0-100, 100-250, 250-500, 500-1k, 1-2k, 2-4k, 4-8k and above 8k Hz, dB below the total | 12 dB | 0.35 each |
+
+The reference is measured as the others are (mixed to mono at 44.1 kHz). A sound of the project is rendered first.
+
+**Use.** `library use <project> <library>:<path> [as=<name>] [licence=<id>] [attribution="…"] [terms=<url>] [tags=<a,b>] [note="…"]` copies the file into the
+project's store (one undo group, a tape command by `--by`, default `agent:claude`) as `source=library` with the origin `<library>:<path>`, the original file's hash and format, the tags from its
+path and those you added, and the library's licence. The name defaults to the file's; a name that exists with other audio is refused, and the same audio under another name is kept once.
+While a server runs, `library use` is sent to it like the other commands that write. The file must be inside the library's folder: `..`, absolute paths and links that lead out are refused.
+
+**For the dashboard.** `GET /api/library/<id>/audio?path=<path>` (behind the token) plays a library file without copying it: the server decodes it (in a worker) and sends a WAV, confined to the
+registered folder, with an ETag from the file's size and time.
+
+**MCP.** The `library` tool has `list`, `search`, `similar` and `use`; hits are one compact JSON object per line (`ref`, `dur`, `lufs`, `note`, `centroid`, `attack`, `licence`, `state`, `desc`, and
+`distance` for `similar`), or the CLI's lines with `format: "text"`. Indexing is a CLI step (it can take minutes).
 
 ### Licences
 

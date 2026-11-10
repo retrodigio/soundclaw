@@ -97,6 +97,13 @@ export is gated by the project's policy. The tool records; it gives no legal adv
 **Projects from 0.1** keep `samples/<name>.wav` files with nothing on the tape. They read as samples that are not on the tape yet, rendering the same
 floats (the decoders are tested against the 0.1 reader), until `soundclaw upgrade` moves them into the store in one group by `system:upgrade`.
 
+**Libraries stay outside projects.** A library is a registered folder; its index (per file: path, size, time, canonical hash, the measure `describe` prints, eight band energies, the
+chunks' root and loop, path tags) is a rebuildable cache in the user's cache directory, and the list of libraries and the tags added by hand are settings in the user's config directory.
+Nothing about a library is written into a project but the files that `library use` copies in, through the same import as any file (so provenance, licence and the store's rules apply).
+The index is built by worker threads, each handed a batch of paths and returning entries, and only files whose size or time changed are read again; search, ranking and the sounds-like
+distance are pure functions in `core` over those entries (they measure, so they may use `Math.*`; nothing here feeds a render). A page auditions a library file through a route that decodes
+it to a WAV in the upload reader's worker and refuses any path that leaves the registered folder, so a library is never loaded whole and never enters a project unasked.
+
 ## Rendering
 
 `renderSound` produces 44,100 Hz mono samples. It is deterministic by construction: fixed

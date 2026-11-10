@@ -9,8 +9,9 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
-import { HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, renderExact, type SampleSource } from '@soundclaw/core';
+import { HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, pcmToWav, renderExact, type SampleSource } from '@soundclaw/core';
 import { decodeInWorker } from './decode.ts';
+import { libraryAudioFile } from './library.ts';
 import { commitImports } from './sampleimport.ts';
 import { songJsonObject } from './songs.ts';
 import { reviewOf } from './changes.ts';
@@ -133,7 +134,7 @@ export interface WatchOptions {
 }
 
 /** Commands the CLI may send to the server (the ones that write). */
-export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi', 'upgrade'];
+export const FORWARDED_COMMANDS = ['run', 'export', 'import', 'sample', 'library', 'request', 'reply', 'cancel', 'work', 'normalize', 'midi', 'upgrade'];
 
 export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
   o.writer.samples.list(); // the samples' hashes are worked out (or read from the cache) now, not when the first page connects
@@ -339,6 +340,19 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       if (!bytes) { json(res, 404, { error: `no sample object ${om[1]!.slice(0, 12)}` }); return; }
       res.writeHead(200, { ...HEADERS, 'Content-Type': 'audio/wav', 'Cache-Control': 'private, max-age=31536000, immutable', ETag: `"${om[1]}"` });
       res.end(Buffer.from(bytes));
+      return;
+    }
+    // A file of a registered sample library, for auditioning without copying it into the project: decoded to a WAV, confined to the library's folder.
+    const lm = /^\/api\/library\/([a-z0-9][a-z0-9_-]{0,31})\/audio$/.exec(url.pathname);
+    if (lm) {
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      let src: ReturnType<typeof libraryAudioFile>;
+      try { src = libraryAudioFile(lm[1]!, url.searchParams.get('path') ?? ''); } catch (e) { json(res, 404, { error: (e as Error).message }); return; }
+      if (req.headers['if-none-match'] === src.etag) { res.writeHead(304, { ...HEADERS, ETag: src.etag }).end(); return; }
+      decodeInWorker({ bytes: src.bytes, filename: src.filename, options: { as: 'audition' } }).then((p) => {
+        res.writeHead(200, { ...HEADERS, 'Content-Type': 'audio/wav', 'Cache-Control': 'private, max-age=3600', ETag: src.etag });
+        res.end(Buffer.from(pcmToWav(p.audio)));
+      }).catch((e: unknown) => json(res, e instanceof ProjectError ? 422 : 500, { error: (e as Error).message }));
       return;
     }
     const sm = /^\/api\/samples\/([A-Za-z0-9][A-Za-z0-9_-]*)\.wav$/.exec(url.pathname);

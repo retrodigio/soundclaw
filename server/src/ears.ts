@@ -319,7 +319,7 @@ export function readAudioFile(path: string): CompareSide {
 }
 
 /** One side of a comparison: a sound or a song of the project, else an audio file. */
-function compareSide(w: Writer, what: string): CompareSide {
+export function compareSide(w: Writer, what: string): CompareSide {
   if (isSampleRef(what)) {
     const side = sampleSide(w, what);
     const mono = monoAt44(side.audio);
