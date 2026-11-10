@@ -120,7 +120,7 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   play one channel or the average). `soundclaw licence check <project>` (MCP `licence`) says which sounds may ship; a manifest export (`--all`, a set,
   `--pack`) refuses a sound that reaches an unknown or blocked licence unless you pass `--allow-licence <id>` (only if the person says so), lists the
   samples used and writes `ATTRIBUTION.txt`. Pointing a name at other audio (`sample set <name> hash=…`) is undoable like any edit. A 0.1 project's
-  `samples/*.wav` still work; `soundclaw upgrade <project>` moves them into the store. `sample gc` is a dry run until `--apply`.
+  `samples/*.wav` still work; `soundclaw upgrade <project>` moves them into the store. `sample gc` is a dry run until `--apply`. `sample remove` keeps the audio in the store (undo and earlier versions still need it): `sample gc --removed --apply` frees it.
 - Libraries are folders of recordings kept outside the project; the person (or you, from Bash or the MCP `library` tool's `add` and `index`) registers them once: `soundclaw library add <folder> licence=<id>` then
   `soundclaw library index` (minutes for thousands of files). From then on search by words and numbers, with the MCP `library` tool or the CLI:
   `library search "door creak" dur=0.8-2.5 pitched=no licence=shippable --limit 8` (every word must match a name, tag or folder; the numbers query is the one `sample list` takes; hits show length,

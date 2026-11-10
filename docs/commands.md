@@ -1479,7 +1479,7 @@ for attribution. A single-file export warns and goes ahead.
 ### Looking after the store
 
 `soundclaw sample gc <project>` lists the objects no line of the tape names (a dry run); `--apply` deletes them. Undo and redo are commands, so
-an object named by an undone group is kept. `--drop-history` also drops objects only undone or replaced states used, and lists first the tape
+an object named by an undone group is kept. **`sample remove` does not free audio**: the tape keeps its lines (the history is the source of truth, and undo of the removal and earlier versions of sounds that played the sample need the audio), so the audio of a removed sample stays, `sample remove` says so, and plain `sample gc` reports how many objects it keeps only for removed samples. `--removed` frees them: the objects only names that are no longer in the project named (the earlier audio of a name that is still there, and the parents of anything in use, stay), after listing the tape lines that will then no longer render with their audio; undoing the removal restores a name whose audio is gone. `--drop-history` also drops objects only undone or replaced states used, and lists first the tape
 lines (the versions) that will then no longer render with their audio; the parents of a derived sample that is still in use stay.
 `soundclaw sample git-lfs` prints the `.gitattributes` lines for Git LFS; plain git works and stores each object once, because objects never change.
 Libraries of recordings stay outside projects: only what a project uses is copied in.
@@ -1534,7 +1534,7 @@ soundclaw sample show <project> <name>
 soundclaw sample add|set <project> <name> <field>=<value>...
 soundclaw sample rename <project> <name> <new>
 soundclaw sample remove <project> <name>
-soundclaw sample gc <project> [--apply] [--drop-history]
+soundclaw sample gc <project> [--apply] [--removed] [--drop-history]
 soundclaw sample git-lfs
 soundclaw upgrade <project>
 soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=<n>] [as=<name>] [want="<query>"] [like=<ref|file>] [provider=<id>] [--estimate] [--json]
@@ -1876,7 +1876,7 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `normalize` | `sounds`, `to` (a class name, or `target=<LUFS>`): write the gain that brings sounds, a set or a song to a loudness, as one undo group. A song with layers is fitted so every mix of them is inside the class window. |
 | `check` | `sounds` (sound ids and set names; default all), `json`: the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
 | `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
-| `sample` | `action`: `import` (`file`, a file or a folder, with `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin`, `note`, `force`), `list` (`query`, a numbers query; `json`), `show` (`name`), `check` (`names`: advice on samples), `gc` (`apply`, `drop_history`), `upgrade`. Change or make a sample with `run` (`sample set …`, `sample rename …`, `sample remove …`, `sample derive …`, `sample slice …`, `sample loop …`, `sample bounce …`). |
+| `sample` | `action`: `import` (`file`, a file or a folder, with `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin`, `note`, `force`), `list` (`query`, a numbers query; `json`), `show` (`name`), `check` (`names`: advice on samples), `gc` (`apply`, `removed`, `drop_history`), `upgrade`. Change or make a sample with `run` (`sample set …`, `sample rename …`, `sample remove …`, `sample derive …`, `sample slice …`, `sample loop …`, `sample bounce …`). |
 | `generate` | `prompt`, `kind` (`sfx`, `music`), `duration`, `takes`, `loop`, `influence`, `model`, `as`, `want`, `like`, `provider`, `tags`, `composition`, `again`, `estimate`, `by`; `action` `ledger` or `config`: audio from a prompt, each take a sample, every cap checked before the first call. |
 | `licence` | `ids` (sounds, sets, songs, instruments, samples; default every sound, instrument and song), `allow_licence`: where each stands (shippable, attribution, unknown, blocked) and the samples behind it. |
 | `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too (`allow_licence` lets licence ids through a manifest export). A song: `format` `wav`, `ogg` or `midi`, `loop`, `stems`, `stemsThroughMaster`, `loops`, `pattern`. |

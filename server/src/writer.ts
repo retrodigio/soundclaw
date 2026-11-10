@@ -602,6 +602,7 @@ export class Writer {
               });
             }
           }
+          if (c.op === 'sample-remove') warnings.push(`line ${c.line}: ${(c as unknown as { name: string }).name} is gone from the project, but its audio stays in the store: the tape still names it, so undo and earlier versions keep it (soundclaw sample gc --removed --apply frees it)`);
           if (c.op === 'set' && before && serializeSound(before) === serializeSound(next.get(c.id)!)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
           // a command that stands for several (song new from-bible=, template=) goes on the tape as those commands
           for (const line of (normal ?? cs.text).split('\n')) added.push({ seq: ++seq, by: req.by, at, group, cmd: line });

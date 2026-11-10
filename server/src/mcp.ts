@@ -392,6 +392,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       force: z.boolean().optional().describe('import: past the store\'s 1 GB limit'),
       apply: z.boolean().optional().describe('gc: delete (default a dry run)'),
       drop_history: z.boolean().optional().describe('gc: also drop objects only undone or replaced states used'),
+      removed: z.boolean().optional().describe('gc: also free the audio of samples that were removed from the project (undo of the removal and earlier versions that used them then have no audio)'),
       by: z.string().optional().describe('the author on the tape (default agent:claude)'),
     }),
   }, (a) => w.enqueue(() => {
@@ -400,7 +401,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       if (a.action === 'check') return { content: [text(sampleCheckText(w, a.names ?? (a.name ? [a.name] : [])))] };
       if (a.action === 'show') return a.name ? { content: [text(sampleShowText(w, a.name))] } : fail('show needs name');
       if (a.action === 'gc') {
-        const plan = gcPlan(w, !!a.drop_history);
+        const plan = gcPlan(w, !!a.drop_history, !!a.removed);
         if (a.apply) gcApply(w, plan);
         return { content: [text(gcReport(plan, !!a.apply))] };
       }

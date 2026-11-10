@@ -29,6 +29,9 @@ All notable changes to SoundClaw are listed here. The format follows
   `pitchConfidence`, `harmonicity`, `inharmonic`, `pitched`, `onsets`, `silent`); no existing key changed.
 - **The pitch tracker no longer trusts a bell.** A sample's `pitch` has `harmonicity` and `inharmonic`; an inharmonic spectrum (a bell, a chime, unrelated tones layered) gets
   a lowered `confidence`, is not `pitched`, and `describe` says so. A sound's `summary` carries the same flags.
+- **`sample gc --removed`** frees the audio of samples that were removed from the project, which plain `sample gc --apply` never could: the tape still names it, so undo
+  and earlier versions keep it. `sample remove` now says that the audio stays and how to free it; plain `gc` says how many objects it keeps only for removed samples.
+  (The tape keeps its lines; names still in the project keep their earlier audio.)
 - **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
   (to 24), from the threshold and ratio the effect has then; the document holds the number.
 

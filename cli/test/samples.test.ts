@@ -132,7 +132,7 @@ describe('licence check and export', () => {
 describe('usage', () => {
   it('has blocks for sample, upgrade and licence, which the reference documents', () => {
     expect(commandHelp('sample')).toContain('soundclaw sample import <project> <file | folder>');
-    expect(commandHelp('sample')).toContain('soundclaw sample gc <project> [--apply] [--drop-history]');
+    expect(commandHelp('sample')).toContain('soundclaw sample gc <project> [--apply] [--removed] [--drop-history]');
     expect(commandHelp('upgrade')).toContain('system:upgrade');
     expect(commandHelp('licence')).toContain('licence check <project>');
     const ref = readFileSync(join(import.meta.dirname, '..', '..', 'docs', 'commands.md'), 'utf8');

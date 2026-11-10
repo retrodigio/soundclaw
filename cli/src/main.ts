@@ -171,7 +171,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw sample loop <project> <name> find [near=<s>-<e>] [min=<s>]   |   sample loop <project> <name> <start> <end>
   soundclaw sample bounce <project> <new> from=<sound|song> [layer=<n>] [channel=<name>] [loop=yes]
   soundclaw sample add|set <project> <name> <field>=<value>...   |   sample rename <project> <name> <new>   |   sample remove <project> <name>
-  soundclaw sample gc <project> [--apply] [--drop-history]
+  soundclaw sample gc <project> [--apply] [--removed] [--drop-history]
   soundclaw sample git-lfs
       Samples: audio kept once, by content, in <project>/samples/objects/, and named on the history tape
       (sample add <name> hash=...) with its provenance and licence. import reads WAV, AIFF/AIFF-C and FLAC
@@ -184,8 +184,10 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       store warns at 250 MB and refuses past 1 GB without --force) are printed when hit. set changes fields
       (root= tune= loop= loopmode= slices= tags= gain= note= licence= attribution= terms=; <field>=none
       clears; hash= with rate, channels, frames and format points the name at other audio, and undo brings
-      the old audio back). remove is refused while a sound or instrument plays it. gc lists objects nothing
-      on the tape names (--apply deletes them; --drop-history also those only undone or replaced states
+      the old audio back). remove is refused while a sound or instrument plays it, and the audio of a removed
+      sample stays in the store (the tape and undo still name it). gc lists objects nothing on the tape
+      names (--apply deletes them; --removed also those only samples removed from the project used, so undoing
+      the removal and earlier versions that played them lose their audio; --drop-history also those only undone or replaced states
       used, after listing the versions that then stop rendering). git-lfs prints .gitattributes lines.
       Editing is a command worked out once, when it runs, and written on the tape as plain numbers (a replay
       measures nothing). derive makes new audio from a sample by a chain separated by ;: trim <s> <e>, fade
@@ -424,7 +426,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   midi: [['id', 'by', 'pattern', 'to', 'out'], []],
   import: [['id', 'by'], ['quiet', 'classic']],
   normalize: [['by'], []],
-  sample: [['as', 'by', 'licence', 'license', 'attribution', 'terms', 'tags', 'source', 'origin', 'note'], ['force', 'apply', 'drop-history', 'json']],
+  sample: [['as', 'by', 'licence', 'license', 'attribution', 'terms', 'tags', 'source', 'origin', 'note'], ['force', 'apply', 'drop-history', 'removed', 'json']],
   upgrade: [['by'], []],
   request: [['note', 'by', 'tag', 'like', 'target', 'again'], []],
   reply: [['by'], []],
@@ -609,7 +611,7 @@ function cmdSample(io: Io, p: Parsed): number {
     if (rest.length) throw new UsageError(`sample gc: unexpected '${rest[0]}'`);
     if (p.flags.has('apply')) assertNoServer(dir, io);
     const w = wr(io, dir);
-    const plan = gcPlan(w, p.flags.has('drop-history'));
+    const plan = gcPlan(w, p.flags.has('drop-history'), p.flags.has('removed'));
     if (p.flags.has('apply')) gcApply(w, plan);
     io.out(gcReport(plan, p.flags.has('apply')));
     return 0;

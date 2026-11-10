@@ -275,6 +275,45 @@ describe('gc', () => {
   });
 });
 
+describe('gc --removed: the audio of removed samples', () => {
+  it('sample remove says the audio stays; plain gc keeps it and says why; --removed frees it and keeps what names still in the project use', () => {
+    const a = imp(file('a.wav', wavBytes(makeAudio('pcm16', 1, 600, 44100, 1))), { as: 'a' }).items[0]!;
+    const b = imp(file('b.wav', wavBytes(makeAudio('pcm16', 1, 650, 44100, 2))), { as: 'b' }).items[0]!;
+    const c = imp(file('c.wav', wavBytes(makeAudio('pcm16', 1, 700, 44100, 3))), { as: 'c' }).items[0]!;
+    // b's audio is pointed elsewhere: a name that is still there keeps its earlier audio
+    run(`sample set a hash=${b.info.sha256} rate=44100 channels=1 frames=650 format=pcm16`);
+    const r = f.w.run({ commands: 'sample remove c', by: 'agent:claude' });
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.warnings.join('\n')).toMatch(/c is gone from the project, but its audio stays in the store.*sample gc --removed --apply/);
+    // plain gc: nothing, and it says what only removed samples still hold
+    const plain = gcPlan(f.w, false);
+    expect(plain.objects).toEqual([]);
+    expect(plain.keptForRemoved).toBe(1);
+    expect(gcReport(plain, false)).toMatch(/nothing to remove: every object is named on the tape\n1 of them only by samples that were removed.*--removed frees those/);
+    // --removed: c's audio goes; a's earlier audio (a name still there) and b's stay
+    const gone = gcPlan(f.w, false, true);
+    expect(gone.objects.map((o) => o.hash)).toEqual([c.info.sha256]);
+    expect(gone.removed).toBe(true);
+    expect(gone.versions.map((v) => v.cmd.split(' ')[2])).toEqual(['c']);
+    expect(gcReport(gone, false)).toMatch(/would remove 1 object .*that only samples removed from the project used[\s\S]*These versions will no longer render/);
+    gcApply(f.w, gone);
+    expect(objects()).not.toContain(c.info.sha256);
+    expect(objects()).toContain(a.info.sha256);
+    expect(objects()).toContain(b.info.sha256);
+    expect(gcReport(gcPlan(f.w, false, true), false)).toMatch(/nothing to remove: every object is used by a name that is still in the project/);
+    // and the project still opens, lists and renders what is left
+    expect(f.w.samples.list().map((x) => x.name).sort()).toEqual(['a', 'b']);
+    expect(f.reopen().samples.list().map((x) => x.name).sort()).toEqual(['a', 'b']);
+  });
+  it('an undone removal keeps the name, so --removed leaves its audio alone', () => {
+    const c = imp(file('c.wav', wavBytes(makeAudio('pcm16', 1, 700, 44100, 3))), { as: 'c' }).items[0]!;
+    run('sample remove c');
+    run('undo');
+    expect(gcPlan(f.w, false, true).objects).toEqual([]);
+    expect(objects()).toContain(c.info.sha256);
+  });
+});
+
 describe('commitImports', () => {
   it('does not put objects in the store for a file whose name is taken (only a clean import changes anything)', () => {
     imp(file('x.wav', wavBytes(makeAudio('pcm16', 1, 900, 44100, 1))), { as: 'x' });

@@ -257,11 +257,36 @@ export interface GcPlan {
   /** With --drop-history: the tape entries naming an object that goes, so you can see which versions will no longer render. */
   versions: { seq: number; group: string; by: string; cmd: string }[];
   dropHistory: boolean;
+  /** `--removed`: objects of names no longer in the project went, and the audio of names that are still there stayed. */
+  removed: boolean;
+  /** Without --removed or --drop-history: objects that only names removed from the project still name (kept for undo and for earlier versions). */
+  keptForRemoved: number;
 }
 
 /** The objects that can go. By default: those no line of the tape names. With dropHistory: those the current state does not reach. */
-export function gcPlan(w: Writer, dropHistory: boolean): GcPlan {
+export function gcPlan(w: Writer, dropHistory: boolean, removed = false): GcPlan {
   const keep = new Set<string>();
+  const current = (): Set<string> => {
+    const lib = w.sampleEntries();
+    const keepNow = new Set<string>();
+    const byHash = new Map<string, SampleEntry[]>();
+    for (const e of lib.values()) byHash.set(e.hash, [...(byHash.get(e.hash) ?? []), e]);
+    const visit = (h: string): void => {
+      if (keepNow.has(h)) return;
+      keepNow.add(h);
+      for (const e of byHash.get(h) ?? []) for (const p of e.prov.parents ?? []) visit(p);
+    };
+    for (const e of lib.values()) visit(e.hash);
+    // the earlier audio of a name that is still there (pointed elsewhere, undone) is kept: only names that were removed let go of theirs
+    for (const t of w.tape()) {
+      const name = /^sample (?:add|set|derive|bounce) (\S+)/.exec(t.cmd)?.[1];
+      if (name && lib.has(name)) for (const m of t.cmd.match(HASH_IN_TEXT) ?? []) keepNow.add(m);
+    }
+    return keepNow;
+  };
+  const cur = dropHistory ? null : current();
+  if (removed && cur) for (const h of cur) keep.add(h);
+  if (!removed && !dropHistory) for (const t of w.tape()) for (const m of t.cmd.match(HASH_IN_TEXT) ?? []) keep.add(m);
   if (dropHistory) {
     const lib = w.sampleEntries();
     const byHash = new Map<string, SampleEntry[]>();
@@ -272,15 +297,15 @@ export function gcPlan(w: Writer, dropHistory: boolean): GcPlan {
       for (const e of byHash.get(h) ?? []) for (const p of e.prov.parents ?? []) visit(p);
     };
     for (const e of lib.values()) visit(e.hash);
-  } else {
-    for (const t of w.tape()) for (const m of t.cmd.match(HASH_IN_TEXT) ?? []) keep.add(m);
   }
   const objects = w.samples.store.list().filter((o) => !keep.has(o.hash));
   const gone = new Set(objects.map((o) => o.hash));
-  const versions: GcPlan['versions'] = dropHistory
+  const versions: GcPlan['versions'] = dropHistory || removed
     ? w.tape().filter((t: TapeEntry) => (t.cmd.match(HASH_IN_TEXT) ?? []).some((h) => gone.has(h))).map((t) => ({ seq: t.seq, group: t.group, by: t.by, cmd: t.cmd.length > 100 ? `${t.cmd.slice(0, 97)}...` : t.cmd }))
     : [];
-  return { objects, versions, dropHistory };
+  // (what the default keeps only because a name that was removed still has it on the tape)
+  const keptForRemoved = cur && !removed ? w.samples.store.list().filter((o) => keep.has(o.hash) && !cur.has(o.hash)).length : 0;
+  return { objects, versions, dropHistory, removed: removed && !dropHistory, keptForRemoved };
 }
 
 export function gcApply(w: Writer, plan: GcPlan): void {
@@ -289,8 +314,12 @@ export function gcApply(w: Writer, plan: GcPlan): void {
 
 export function gcReport(plan: GcPlan, apply: boolean): string {
   const total = plan.objects.reduce((n, o) => n + o.bytes, 0);
-  if (!plan.objects.length) return plan.dropHistory ? 'nothing to remove: every object is used by the current state\n' : 'nothing to remove: every object is named on the tape\n';
-  const lines = [`${apply ? 'removed' : 'would remove'} ${plan.objects.length} object${plan.objects.length === 1 ? '' : 's'} (${(total / 1024).toFixed(1)} KB)${plan.dropHistory ? ' that only undone or replaced states used' : ' that nothing on the tape names'}`];
+  if (!plan.objects.length) {
+    if (plan.dropHistory) return 'nothing to remove: every object is used by the current state\n';
+    if (plan.removed) return 'nothing to remove: every object is used by a name that is still in the project\n';
+    return `nothing to remove: every object is named on the tape${plan.keptForRemoved ? `\n${plan.keptForRemoved} of them only by samples that were removed from the project (kept so undo and earlier versions still have their audio): --removed frees those` : ''}\n`;
+  }
+  const lines = [`${apply ? 'removed' : 'would remove'} ${plan.objects.length} object${plan.objects.length === 1 ? '' : 's'} (${(total / 1024).toFixed(1)} KB)${plan.dropHistory ? ' that only undone or replaced states used' : plan.removed ? ' that only samples removed from the project used' : ' that nothing on the tape names'}`];
   for (const o of plan.objects.slice(0, 20)) lines.push(`  ${o.hash.slice(0, 12)}  ${o.bytes} bytes`);
   if (plan.objects.length > 20) lines.push(`  … and ${plan.objects.length - 20} more`);
   if (plan.versions.length) {
