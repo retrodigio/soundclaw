@@ -276,7 +276,8 @@ export class Writer {
     }
     for (const id of ids) {
       const m = matchGain(lib.get(id)!, target, this.samples, this.style);
-      if (m.command) out.commands.push(m.command);
+      // (a match may be several commands, one per line: gain and the limiter's gain)
+      if (m.command) out.commands.push(...m.command.split('\n'));
       if (m.note) out.notes.push(m.note);
       if (m.error) out.notes.push(m.error);
       onItem?.(id);
