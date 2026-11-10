@@ -1215,6 +1215,78 @@ file without the server decoding it again.
 line (`ref`, `dur`, `lufs`, `note`, `centroid`, `attack`, `licence`, `state`, `desc`, and `distance` for `similar`), or the CLI's lines with `format: "text"`. `index` can take minutes; it runs
 beside the other tools rather than holding them up. Removing a library stays a CLI step.
 
+### Generation
+
+`generate` makes audio from a prompt with an AI provider and keeps each take as a sample. Two providers come with SoundClaw: `elevenlabs` (its sound
+effects and music endpoints) and `fake`, which makes test audio from a hash of the request, with no network and no key, for tests and demos.
+
+```
+soundclaw generate demo sfx "the slow creak of an old wooden door hinge, close, dry, no reverb" duration=2 takes=3 as=creak --estimate
+soundclaw generate demo sfx "the slow creak of an old wooden door hinge, close, dry, no reverb" duration=2 takes=3 as=creak want="dur=1.5-2.5 centroid<2.5k attack<40ms"
+soundclaw generate demo --again creak_t2 takes=2          # the same prompt and parameters, new takes (new audio)
+soundclaw generate --ledger demo                          # what this project spent, by provider and day
+soundclaw generate config elevenlabs.plan=creator         # your settings
+```
+
+`generate <project> sfx|music "<prompt>" [duration=<s>] [takes=1..4] [loop=yes] [influence=<0-1>] [as=<name>] [want="<numbers query>"]
+[like=<sound|sample:name>] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]`
+
+| Setting | Sound effects | Music |
+|---|---|---|
+| `duration` | 0.5 to 30 s, default 2 | 10 to 300 s, default 30 |
+| `loop=yes` | a seamless loop | (not taken) |
+| `influence` | 0 to 1: how closely the audio follows the prompt | (not taken) |
+| `model` | `eleven_text_to_sound_v2` | `music_v1` |
+| `composition` | (not taken) | a composition plan (a JSON file, the provider's format) instead of the prompt |
+
+**Takes are samples.** Each take is one call and is stored as `<as>_t1`, `<as>_t2`, … (numbered after the takes of that name already there; `as` defaults to
+the first words of the prompt) with `source=generated`, the provider, endpoint, model, prompt, parameters, `take=<n>/<m>`, the provider's request id and the
+credits it cost, the hash and format of the bytes the provider sent, and the licence the provider's plan gives: `generated:elevenlabs:<plan>` (the default
+policy ships it from a paid plan and blocks `generated:*:free`), with the provider's terms address; the fake provider's takes are `own`. All the takes of a
+command are one undo group. Output is 16-bit PCM at 44.1 kHz on a plan that allows it (pro and above), otherwise MP3, decoded when it arrives through
+ffmpeg (the MP3's hash stays in the provenance). Generation is acquisition: replay, undo and rendering never call a provider. `--again <sample>` is a new
+call with the recorded prompt and parameters (from the ledger, else the provenance): new takes, not the same audio; it takes `takes=` and `as=`.
+
+**Each take comes back with its numbers** (length, loudness, peak, centroid, attack, pitch, credits, request id) and its words, as `describe` gives them.
+`want="<numbers query>"` ranks the takes: those that fit first, then the closest. `like=<sound | sample:name>` ranks them by the sounds-like distance of
+`library similar`. Listen before you build on one, and remove the takes you do not keep (`sample remove`; the audio stays until `sample gc`).
+
+**Costs are capped before the call.** A command is worked out first: the provider, the names, and an estimate per take (credits per second: sound
+effects 10, music 27.4, measured from the provider's cost header; `<provider>.rate.sfx` and `.rate.music` change them). Any of these refuses the whole
+command before the first call, and says which:
+
+| Cap | Default | Where |
+|---|---|---|
+| one call (one take) | 300 credits (30 s of sound effects) | `soundclaw generate config max-per-call=<credits>` |
+| the project | **0: paid generation is off until a person sets a cap** | `project.json`: `"generation": {"capCredits": <credits>}` |
+| a day, across projects (UTC) | 3,000 credits | `soundclaw generate config daily-cap=<credits>` |
+
+A paid provider is also refused when `CI` is set or `SOUNDCLAW_NO_PAID=1`, until your plan is set (`generate config elevenlabs.plan=<plan>`: it decides the
+licence on the takes), and for music until `generate config elevenlabs.music=on` (music costs about 27 credits a second, so the endpoint is held until
+you turn it on). The caps guard against a runaway loop; they are not a security boundary. `--estimate` prints the cost, the budget left and what would
+refuse the command, and calls nothing. After each call the charge is logged: the provider's `character-cost` header, else the change in the account's
+counter read before and after, else the estimate (and the ledger says which).
+
+**The key comes from the environment only.** The ElevenLabs key is read from `ELEVENLABS_API_KEY` in the environment of the process that makes the call:
+the command's own, or, while a server owns the project, the server's (the CLI sends `generate` to it, like the commands that write). It is never written
+to a file, a log, a ledger, an error message or a page; text a provider sends back has any key taken out. A missing key is an error naming the variable.
+Calls go over https (plain http only to this machine, for a local stand-in: `elevenlabs.url=`). They are the only calls SoundClaw makes, and only on an
+explicit command.
+
+**Ledgers.** Every command that called is a line in the project's `generation.jsonl` (tracked in git; no key, no path of your machine): time, author,
+provider, endpoint, model, kind, prompt, parameters, the estimate, the charge and where it came from, each take's name, hash, credits and request id, and
+the outcome (`ok`, `partial` when a take failed after others were made, `failed`). The same charge goes into your `spend.jsonl` across projects (beside
+the settings), which the daily cap reads. `generate --ledger [<project>] [--json]` totals them by provider, project and day.
+
+**Settings** (`generate config`, kept in `generation.json` beside the library settings; `<key>=none` clears one): `provider` (the default provider),
+`daily-cap`, `max-per-call`, `elevenlabs.plan`, `elevenlabs.music` (`on`/`off`), `elevenlabs.format` (`pcm_44100`, `mp3_44100_128`, …),
+`elevenlabs.rate.sfx`, `elevenlabs.rate.music`, `elevenlabs.url`; the same for `fake` (its rates are 0 unless you set them, which lets you try the caps
+without a paid call).
+
+**MCP and the page.** The MCP `generate` tool takes the same settings (`kind`, `prompt`, `duration`, `takes`, `loop`, `influence`, `model`, `as`, `want`,
+`like`, `provider`, `tags`, `composition`, `again`, `estimate`, `by`; `action: "ledger"` and `"config"` print the ledger and the settings).
+`POST /api/generate` (behind the token) takes `{ "kind", "prompt", "pairs": { "duration": …, … }, "again", "estimate", "by" }` and answers `{ "text", "json" }`.
+
 ### Licences
 
 Each sample has a licence: an SPDX id (`CC0-1.0`, `CC-BY-4.0`), or `own`, `generated:<provider>:<plan>`, `proprietary:<note>` or `unknown`
@@ -1269,6 +1341,7 @@ demo.sclaw/
   instruments/ songs/ sets/    homes for the documents later versions add
   samples/         objects/<xx>/<hash>.wav: the audio, once per content; <name>.sample: each name, written from the history
   history.jsonl    the command tape: every change, its author and undo group; the source of truth
+  generation.jsonl what each generation command asked a provider for and what it cost (no key)
   requests.jsonl   what people asked for, and how the agent answered; append-only
   exports/         WAV files (ignored by git)
   .cache/          the render cache (ignored by git)
@@ -1304,6 +1377,9 @@ soundclaw sample remove <project> <name>
 soundclaw sample gc <project> [--apply] [--drop-history]
 soundclaw sample git-lfs
 soundclaw upgrade <project>
+soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=<n>] [as=<name>] [want="<query>"] [like=<ref>] [provider=<id>] [--estimate] [--json]
+soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>]
+soundclaw generate --ledger [<project>]    soundclaw generate config [<key>=<value>...]
 soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
 soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
@@ -1624,6 +1700,7 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `check` | `sounds` (sound ids and set names; default all), `json`: the checks with scores, thresholds and flagged ranges, and `set-spread` for a set. |
 | `import` | `source` (csv, patch text or strings, or a path), `kind` (`sfxr` default, `jsfxr`, `bfxr`), `id`: make classic sounds, each row reported. |
 | `sample` | `action`: `import` (`file`, a file or a folder, with `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin`, `note`, `force`), `list` (`query`, a numbers query; `json`), `show` (`name`), `check` (`names`: advice on samples), `gc` (`apply`, `drop_history`), `upgrade`. Change or make a sample with `run` (`sample set …`, `sample rename …`, `sample remove …`, `sample derive …`, `sample slice …`, `sample loop …`, `sample bounce …`). |
+| `generate` | `prompt`, `kind` (`sfx`, `music`), `duration`, `takes`, `loop`, `influence`, `model`, `as`, `want`, `like`, `provider`, `tags`, `composition`, `again`, `estimate`, `by`; `action` `ledger` or `config`: audio from a prompt, each take a sample, every cap checked before the first call. |
 | `licence` | `ids` (sounds, sets, songs, instruments, samples; default every sound, instrument and song), `allow_licence`: where each stands (shippable, attribution, unknown, blocked) and the samples behind it. |
 | `export` | `sounds` (default all), `set`, `all`, `format` (`wav` default, `ogg`, `patch`, `csv`), `out` (default `<project>/exports`), `pack`, `quality`: with `all`, `set`, `pack` or `ogg` a `manifest.json` too (`allow_licence` lets licence ids through a manifest export). A song: `format` `wav`, `ogg` or `midi`, `loop`, `stems`, `stemsThroughMaster`, `loops`, `pattern`. |
 | `changes` | `since`, `by`, `peek`: what others changed since you last looked, with parameters and numbers before and after and a compare PNG path. |
@@ -1645,6 +1722,7 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `GET /api/sample-object/<hash>` | The stored audio of a hash, as a WAV. The bytes never change, so it is sent as cacheable for ever; the page fetches the samples a sound names by hash to render its sample layers. Byte ranges are answered. |
 | `GET /api/library/<id>/audio?path=<path>` | A file of a registered sample library, decoded to a WAV for auditioning, confined to the library's folder; byte ranges are answered. |
 | `POST /api/samples/import?by=human:<name>&name=<file name>` | An uploaded audio file (the body is its bytes, at most 200 MB), read in a worker thread and named on the tape as that person. `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin` and `note` are as for `sample import`; the file name is cut to its last part. |
+| `POST /api/generate` | `{ "kind", "prompt", "pairs", "again", "estimate", "by" }`: a `generate` command, run here with this process's key; answers `{ "text", "json" }`. |
 | `GET /api/await?timeout=…&since=…&as=agent:<name>` | Long poll for events. |
 | `GET /api/presence` | Who is listening. |
 | `POST /api/cli` | A writing CLI command, run on the server's writer (used by the CLI itself). |

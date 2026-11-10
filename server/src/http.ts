@@ -9,9 +9,10 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/server';
-import { HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, pcmToWav, renderExact, type SampleSource } from '@soundclaw/core';
+import { AUTHOR_RE, HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, pcmToWav, renderExact, type SampleSource } from '@soundclaw/core';
 import { decodeInWorker } from './decode.ts';
 import { libraryAudioFile } from './library.ts';
+import { generateBodyFrom, generateFromBody } from './generate.ts';
 import { commitImports } from './sampleimport.ts';
 import { songJsonObject } from './songs.ts';
 import { reviewOf } from './changes.ts';
@@ -287,6 +288,18 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
         if (r.problems.length && !r.items.length) throw new ProjectError(r.problems[0]!);
         json(res, 200, { group: r.group, items: r.items.map((x) => ({ name: x.info.name, hash: x.info.sha256, created: x.created, notes: x.notes, sameAs: x.sameAs })), warnings: r.warnings });
       }).catch((e: unknown) => json(res, e instanceof ProjectError ? 400 : 500, { error: (e as Error).message }));
+      return;
+    }
+    if (url.pathname === '/api/generate' && req.method === 'POST') {
+      // generate: the words of the command (kind, prompt, pairs, or again; estimate) and its author. The calls are made here, with the key in
+      // this process's environment, and the takes go through the writer.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      readBody(req, 1024 * 1024).then(async (b) => {
+        const body = generateBodyFrom(JSON.parse(b.toString('utf8')));
+        if (!AUTHOR_RE.test(body.by)) throw new ProjectError('by is agent:<name> or human:<name>');
+        const r = await generateFromBody(o.writer, body, o.writer.project.dir);
+        json(res, 200, r);
+      }).catch((e: unknown) => json(res, e instanceof ProjectError || e instanceof SyntaxError ? 400 : 500, { error: (e as Error).message }));
       return;
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {

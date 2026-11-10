@@ -2,6 +2,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
+// No browser test, nor the servers the specs start, holds a provider key.
+delete process.env.ELEVENLABS_API_KEY;
+
 // Where the helpers note the pid of every server they start, for global-teardown.ts (workers inherit this).
 process.env.SOUNDCLAW_E2E_PIDS ??= join(tmpdir(), `soundclaw-e2e-pids-${process.pid}`);
 

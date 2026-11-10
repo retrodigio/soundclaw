@@ -1,4 +1,4 @@
-// soundclaw: new | run | list | history | changes | render | view | describe | check | import | sample | export | scale | style | request | reply | cancel | work (its actions) | skill (await and serve: entry.ts). A thin layer over @soundclaw/core and the project folder.
+// soundclaw: new | run | list | history | changes | render | view | describe | check | import | sample | export | scale | style | request | reply | cancel | work (its actions) | skill (await, serve, library index and generate: entry.ts). A thin layer over @soundclaw/core and the project folder.
 
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -219,6 +219,27 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       forgets a library and its index; tags added by hand go with it, so then it needs --yes. use copies one file into the
       project's store (a tape command, one undo group) as source=library, origin <library>:<path>, with the
       library's licence; the library itself never enters the project.
+  soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=1..4] [loop=yes] [influence=<0-1>] [as=<name>] [want="<numbers query>"] [like=<sound|sample:name>] [provider=elevenlabs|fake] [model=<id>] [tags=<a,b>] [composition=<file.json>] [--estimate] [--json] [--by <author>]
+  soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>] [--estimate]
+  soundclaw generate --ledger [<project>] [--json]
+  soundclaw generate config [<key>=<value>...]
+      Audio from a prompt by an AI provider (ElevenLabs sound effects and music; fake makes test audio for free, with no
+      network). Each take is one call and is stored as a sample <as>_t1, <as>_t2, ... (numbered after those there) with
+      its provenance (provider, endpoint, model, prompt, parameters, take n/m, request id, credits) and the licence
+      the provider's plan gives (generated:elevenlabs:<plan>), as one undo group; replay and undo never call. Before
+      the first call every cap is checked and any excess refuses the whole command: one take at most max-per-call
+      (300 credits), the command within what is left of the project's cap (project.json "generation":
+      {"capCredits": <n>}; 0 by default, so paid generation is off until a person sets it) and of the daily cap
+      across projects (3000). Estimates use credits per second (sound effects 10, music 27.4); the charge logged is
+      the provider's cost header, else the change in the account's counter. --estimate prints the cost and the
+      budget and calls nothing. want= and like= rank the takes; each prints its numbers and words. The key is read
+      from ELEVENLABS_API_KEY in the environment of the process that calls (a running server's, when one owns the
+      project) and is never written anywhere. Paid providers are refused when CI or SOUNDCLAW_NO_PAID=1 is set; the
+      music endpoint is held until generate config elevenlabs.music=on. Every command is logged in the project's
+      generation.jsonl and the user's spend.jsonl; --ledger totals them. config shows or sets: provider,
+      daily-cap, max-per-call, elevenlabs.plan (free, starter, creator, pro, ...: it decides the licence and whether
+      the output is PCM or MP3, which needs ffmpeg), elevenlabs.music, elevenlabs.format, elevenlabs.rate.sfx,
+      elevenlabs.rate.music, elevenlabs.url (key=none clears one).
   soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
       Where sounds, sets, songs, instruments and samples stand on licences: shippable, attribution, unknown or
       blocked, and the samples behind each verdict. project.json "licences": {"allow": [...], "block": [...]} sets
@@ -1101,6 +1122,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'sample': return cmdSample(io, parseArgs(rest, ...WRITE_OPTS.sample!));
       case 'library': return cmdLibrary(io, parseArgs(rest, ...WRITE_OPTS.library!));
       case 'upgrade': return cmdUpgrade(io, parseArgs(rest, ...WRITE_OPTS.upgrade!));
+      case 'generate': throw new UsageError('generate runs from the soundclaw command itself (it waits on the network): soundclaw generate <project> sfx "<prompt>" ...');
       case 'licence': case 'license': return cmdLicence(io, parseArgs(rest, ['allow-licence'], []));
       case 'changes': return cmdChanges(io, parseArgs(rest, ['since', 'by', 'as'], ['peek']));
       case 'export': return cmdExport(io, parseArgs(rest, ...WRITE_OPTS.export!));

@@ -40,6 +40,15 @@ All notable changes to SoundClaw are listed here. The format follows
 - **One numbers query.** `sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1 tag=wood licence=shippable` keeps the samples a
   query fits, closest first, with units (`ms`, `k`, `dB`, note names); the same language will serve library search and generation.
 - **The Samples tab shows each sample.** Its numbers, a licence badge (a glyph and a word, never colour alone) and a play button.
+- **Generation.** `soundclaw generate <project> sfx "<prompt>" duration=2 takes=3` makes sound effects with ElevenLabs (music too, held until you turn it on)
+  and keeps each take as a sample (`<as>_t1`, …) with its prompt, provider, model, parameters, request id, credits and the licence your plan gives, as one undo
+  group; replay and undo never call. Every cap is checked before the first call: one call at most 300 credits, the project's cap (`project.json`
+  `"generation": {"capCredits": n}`, 0 by default, so paid generation is off until a person sets it) and a daily cap across projects (3,000). `--estimate`
+  prints the cost and the budget and calls nothing; `want=` and `like=` rank the takes, each printed with its numbers and words; `--again <sample>` makes new
+  takes with the recorded prompt. The charge is read from the provider's cost header, else the account's counter, and logged in the project's `generation.jsonl`
+  and your `spend.jsonl` (`generate --ledger` totals them). The key is read only from `ELEVENLABS_API_KEY` in the environment of the process that calls, and
+  is never written anywhere; paid calls are refused in CI and with `SOUNDCLAW_NO_PAID=1`. A `fake` provider makes test audio with no network. The same is in
+  the MCP `generate` tool and `POST /api/generate`; `generate config` holds your plan, caps and rates.
 - **Sample libraries.** `soundclaw library add <folder>` registers a folder of recordings kept outside any project, with its licence (`licence=`, a `soundclaw-library.json`, or a
   licence file's text that you confirm). `library index` reads, hashes and measures every file once on worker threads (and again only what changed), keeping the numbers of `sample list`,
   the root and loop a file carries and tags from its folders and name. `library search "door creak" dur=0.8-2.5 pitched=no licence=shippable` ranks by word match and then by closeness to the

@@ -21,6 +21,7 @@ import { MCP_STEPS, agentName, agentWork, awaitRequests, listenerNote, markSeen,
 import { historyText, soundSummary } from './summary.ts';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
 import { readFileSync } from 'node:fs';
+import { configText, generateFromBody, ledgerText, ledgerTotals, readGenerationConfig } from './generate.ts';
 import type { Writer } from './writer.ts';
 
 /** The author name every MCP batch is written with. */
@@ -71,6 +72,8 @@ Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-st
 Samples as material: \`sample derive <new> from=<name> op="trim 0.1 0.9; fade out=50ms; normalize peak -3"\` makes new audio (ops: trim, fade, gain, normalize peak|lufs, silence-trim <dB>, dc, reverse, mono|left|right, pitch <semitones> [method=resample|stretch], stretch <ratio>|to=<s>|tempo=<a>:<b> [method=wsola|pv], loop <s> <e> xfade=<t>, slice <n>, mix <sample> at=<t> gain=<dB>; measured values are written into the history as numbers). \`sample slice <name> at=onsets|<t,t,..>|grid=<n>\`, \`sample loop <name> find|<start> <end>\`, \`sample bounce <new> from=<sound|song> [layer=<n>] [loop=yes]\` freezes a render. \`layer align <id> <n> to=<m>|start by=onset|peak\`, \`layer match <id> <n> to=<m> db=<offset>\`, \`env <id> <n>.amp follow=<layer>|sample:<name>\`. Hear samples with describe, measure and view (sample:<name> or hash:<sha256>: wave, spec, pitch, loop, slices, compare), sample check (advice only), and search with a numbers query: sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1.
 
 Sample libraries (folders of recordings outside the project, registered by \`soundclaw library add\` or the tool's \`add\`, and indexed by \`soundclaw library index\` or \`index\`): the \`library\` tool searches them (\`search\` with words and a numbers query such as "creak" dur=0.8-2.5 pitched=no licence=shippable), finds files that sound like a sound or sample (\`similar\`), and copies one into the project (\`use\`, with its provenance and the library's licence); then \`layer add <sound> sample sample=<name>\`.
+
+Generation (the \`generate\` tool): sound effects from a prompt by an AI provider, each take kept as a sample with its prompt, provider, credits and licence. Call it with estimate: true first; every cap is checked before the first call and nothing is called if one would be passed (the project's cap is 0 until a person sets one, so ask them). Rank takes with want (a numbers query) or like; listen with describe and compare before you build on one; remove the takes you do not keep. Shape a take in the tool (sample derive, layers with synthesis) rather than generating again and again.
 
 Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
 
@@ -468,6 +471,45 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     }
     }
   };
+
+  server.registerTool('generate', {
+    title: 'Generate audio',
+    description: 'Make sound effects (or music) from a prompt with an AI provider and keep each take as a sample (<as>_t1, <as>_t2, ...: numbered after takes already there) with its provenance (provider, model, prompt, parameters, take, request id, credits) and the licence the provider\'s plan gives, as one undo group. Every cap is checked before the first call, and nothing is called if one would be passed: one take at most the per-call maximum (300 credits by default), the whole command within what is left of the project\'s cap (project.json "generation": {"capCredits": n}; 0 by default, so paid generation is off until a person sets one) and of the user\'s daily cap (3000). estimate: true prints the cost and the budget and calls nothing: use it first. Paid providers are refused in CI and with SOUNDCLAW_NO_PAID=1; provider "fake" makes test audio for free. Each take comes back with its numbers and words; want (a numbers query) and like (a sound or sample:<name>) rank them. Write the prompt as a sound designer would: the source, the action, the material, the space ("the slow creak of an old wooden door hinge, close, dry, no reverb"). again: a generated sample\'s prompt and parameters for new takes (not the same audio). action ledger: what this project has spent; config: the user\'s generation settings.',
+    inputSchema: z.object({
+      action: z.enum(['generate', 'ledger', 'config']).optional().describe('generate (default), ledger, config'),
+      kind: z.enum(['sfx', 'music']).optional().describe('sfx (default) or music (held until the user turns it on)'),
+      prompt: z.string().optional().describe('what the sound is, in words'),
+      duration: z.number().optional().describe('seconds (sfx 0.5-30, default 2; music 10-300, default 30)'),
+      takes: z.number().int().min(1).max(4).optional().describe('takes, one call each (default 1)'),
+      loop: z.boolean().optional().describe('sfx: a seamless loop'),
+      influence: z.number().min(0).max(1).optional().describe('sfx: how closely the audio follows the prompt (0-1)'),
+      model: z.string().optional().describe('the provider\'s model id (default: its sound effects or music model)'),
+      as: z.string().optional().describe('the takes are <as>_t1, ... (default: words of the prompt)'),
+      want: z.string().optional().describe('a numbers query to rank the takes by, like "dur=1.5-2.5 centroid<2.5k attack<40ms"'),
+      like: z.string().optional().describe('a sound or sample:<name> to rank the takes by closeness to'),
+      provider: z.string().optional().describe('elevenlabs or fake (default: the user\'s setting, else elevenlabs)'),
+      tags: z.string().optional().describe('comma-separated tags for the takes'),
+      composition: z.string().optional().describe('music: a composition plan as JSON text, instead of the prompt'),
+      again: z.string().optional().describe('a generated sample: new takes with its recorded prompt and parameters (takes and as may change)'),
+      estimate: z.boolean().optional().describe('the cost and the budget only; nothing is called'),
+      by: z.string().optional().describe('the author on the tape (default agent:claude)'),
+    }),
+  }, async (a) => {
+    try {
+      if (a.action === 'config') return { content: [text(configText(readGenerationConfig()))] };
+      if (a.action === 'ledger') return { content: [text(ledgerText(ledgerTotals(w.project.dir), w.project.dir))] };
+      const pairs: Record<string, string> = {};
+      for (const k of ['duration', 'takes', 'influence', 'model', 'as', 'want', 'like', 'provider', 'tags', 'composition'] as const) if (a[k] !== undefined) pairs[k] = String(a[k]);
+      if (a.loop !== undefined) pairs.loop = a.loop ? 'yes' : 'no';
+      const body = a.again
+        ? { again: a.again, pairs: Object.fromEntries(Object.entries(pairs).filter(([k]) => k === 'takes' || k === 'as')), estimate: !!a.estimate, by: agentName(a.by) }
+        : { kind: a.kind ?? 'sfx', prompt: a.prompt ?? '', pairs, estimate: !!a.estimate, by: agentName(a.by) };
+      const r = await generateFromBody(w, body, w.project.dir);
+      return { content: [text(r.text)] };
+    } catch (e) {
+      return errorResult(e);
+    }
+  });
 
   server.registerTool('licence', {
     title: 'Licence check',

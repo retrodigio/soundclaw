@@ -128,6 +128,15 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   `library use <project> <library>:<path> as=creak_lib` to copy one in (it keeps where it came from and the library's licence; a library with no declared licence is `unknown` and
   blocks a manifest export until someone sets one). Listen to a hit before building on it: after `library use`, `describe`, `view … sample:<name>` and `compare` it with your synth version.
   Add your own tags with `library tag` so the next search finds a file by what it is. Never read a library's folder by hand to find files: search it.
+- Generate a sound effect when neither synthesis nor a library has it (voices, creatures, crowds, organic one-shots): first `soundclaw generate <project> sfx
+  "<prompt>" duration=2 takes=3 as=creak --estimate` (MCP `generate` with `estimate: true`): it prints the cost, the budget left and what would refuse it, and
+  calls nothing. Write the prompt as a sound designer would: source, action, material, distance, space ("the slow creak of an old wooden door hinge, close, dry,
+  no reverb"); keep it dry and let the tool add the room. Then run it with `want="dur=1.5-2.5 centroid<2.5k attack<40ms"` (or `like=<your synth version>`) so
+  the takes come back ranked, each with its numbers and words. Every take costs credits: the project's cap is 0 until the person sets one in `project.json`
+  (`"generation": {"capCredits": n}`), and you never raise a cap or turn on music yourself; ask. Never put a key in a command, a file or a message; it comes
+  from the environment (`ELEVENLABS_API_KEY`). Pick a take by listening (`describe`, `compare` with your synth version), shape it in the tool (`sample derive
+  … op="silence-trim -50; fade out=80ms"`, layers with synthesis) rather than generating again and again, and `sample remove` the takes you drop.
+  `generate <project> --again <take>` gives new takes of the same prompt; `generate --ledger <project>` shows what was spent. `provider=fake` makes free test audio.
 - Samples are material you can edit and hear. Listen first: `describe <project> sample:<name>` (words and numbers: tonal or noisy, pitch and how steady, one hit
   or several, dry or roomy, mono or wide, silence at the ends, the licence and the advice), `view <project> sample:<name> wave|spec|pitch|loop|slices`,
   `compare <project> sample:<name> <the synth version>` for the distance numbers, and `sample check` for advice (a sample's checks never gate `work done`; the sound's do).

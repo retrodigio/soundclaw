@@ -1,4 +1,4 @@
-// The soundclaw executable: every command but `serve` and `await` is synchronous (main.ts);
+// The soundclaw executable: every command but `serve`, `await`, `library index` and `generate` is synchronous (main.ts);
 // `serve` runs until the agent disconnects or the process is stopped.
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -6,6 +6,7 @@ import { DEFAULT_PORT, serve } from '@soundclaw/server/serve';
 import { ProjectError, indexLibrary, indexStatsText, readRegistry } from '@soundclaw/server';
 import { USAGE, UsageError, main, metaCommand, one, parseArgs, WRITE_OPTS, type Io } from './main.ts';
 import { awaitMain, forwardToServer, listenerLine, runForwarded } from './forward.ts';
+import { generateMain } from './generate.ts';
 
 const out: Pick<Io, 'out' | 'err'> = { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) };
 
@@ -106,6 +107,7 @@ export async function cli(argv: string[]): Promise<number> {
   try {
     if (argv[0] === 'await') return await awaitMain(argv.slice(1), out);
     if (argv[0] === 'library' && argv[1] === 'index') return await libraryIndexMain(argv.slice(2));
+    if (argv[0] === 'generate') return await generateMain(argv.slice(1));
     const args = argv[0] === 'run' ? resolveRunArgv(argv) : argv;
     const sent = await forwardToServer(args, out);
     if (sent !== null) return sent;

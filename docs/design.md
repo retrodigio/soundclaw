@@ -97,6 +97,14 @@ export is gated by the project's policy. The tool records; it gives no legal adv
 **Projects from 0.1** keep `samples/<name>.wav` files with nothing on the tape. They read as samples that are not on the tape yet, rendering the same
 floats (the decoders are tested against the 0.1 reader), until `soundclaw upgrade` moves them into the store in one group by `system:upgrade`.
 
+**Generation is acquisition.** A provider (`server/src/providers.ts`: `fake` and `elevenlabs`, behind one interface: limits, terms, the licence a plan
+gives, a rate for the estimate, one call per take) is called only by `generate`, never by core, replay or a render. The command is planned on the writer
+first (names, estimate, every cap; any excess refuses it before the first call), the calls are made outside the writer's queue so the dashboard and the
+agent keep working, and the takes then go into the store and onto the tape as one group of `sample add … source=generated` lines carrying the provider,
+prompt, parameters, take, request id and credits. Commands in one process run their calls one after another, so two of them cannot both pass a cap only
+one fits. The key is read from the calling process's environment at the call and every text that comes back is redacted. The project's `generation.jsonl`
+and the user's `spend.jsonl` record what each command cost.
+
 **Libraries stay outside projects.** A library is a registered folder; its index (per file: path, size, time, canonical hash, the measure `describe` prints, eight band energies, the
 chunks' root and loop, path tags) is a rebuildable cache in the user's cache directory, and the list of libraries and the tags added by hand are settings in the user's config directory.
 Nothing about a library is written into a project but the files that `library use` copies in, through the same import as any file (so provenance, licence and the store's rules apply).
