@@ -341,6 +341,11 @@ Take requests before anything else:
 
 A request leaves the sound marked `rejected`; the person approves it again when it is right.
 
+**A request about a sample** arrives with the item `sample:<name>` (the person used *Ask for changes* on a sample's page). `work` shows the sample's
+numbers, where it came from and what plays it. A sample is material, so no check holds `done`: change it with `sample derive`, `sample set`, `sample loop`
+or `sample slice` (or bring other audio in with `library` or `generate`), point what played it at the new sample, say what you did in `work done`, and the
+person approves it or asks again on the sample's page. A request on a sound that plays the sample is an ordinary sound request.
+
 **Read a request's target.** A request may be pinned to part of its item: the line says so after the note, in words.
 `— pinned to 0.31–0.38 s` is a stretch of the sound (change what is heard there and leave the rest alone;
 `view` with a window and `check` show it), `— bars 9–12 of lead` is bars of a song, optionally of one channel (edit

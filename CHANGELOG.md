@@ -71,6 +71,23 @@ All notable changes to SoundClaw are listed here. The format follows
   regions become plain `instrument zone add` lines, all one undo group, and nothing is read again on replay. Every opcode or generator the zones cannot carry is named, per region or zone, as lost or
   approximated; a sample that cannot be read names its region and nothing is written. `--list` shows a font's presets. SFZ export now writes the loop crossfade and counts a zone's `start` into its loop
   points, so an exported instrument imports back to the same zones and renders the same bytes.
+- **The instrument page.** `#/instrument/<id>` draws a sampled instrument's key-map: keys across, velocity up, every zone a labelled box that wears its check as a
+  glyph and a word (round robins stacked, release zones dashed). Letting go of a zone's edge writes one `instrument zone set`; the arrow keys move an edge and Enter
+  writes it. A sample dragged from the Samples tab onto a key (or *Add zone…*) writes one `instrument zone add`, rooted at the sample's own root, else its measured
+  pitch, else the key. The table, a zone's fields and the check's findings sit beside it (`GET /api/instrument-check/<id>.json`, worked out in a worker thread).
+- **Playing an instrument in the page.** Click the piano strip, use the computer keyboard (A W S E D F T G Y H U J K O L P ;, Z and X for the octave) or a MIDI
+  keyboard when the browser offers Web MIDI. Notes are rendered in the page by core, so they are the bytes a song renders; a held key fades over the instrument's
+  release and a fixed length plays out as written.
+- **The generation panel.** *Generate…* in the Takes mode, on the session page and in the palette: kind, prompt, length, takes and name, the estimate and every
+  reason a call would be refused, the project's and today's budget as words and bars, and a confirm before anything is spent. A person can set the project cap there
+  (as `human:<name>`; no agent route sets one). The free test provider costs nothing. The takes of one call are one item in the feed, and the session page shows the
+  spend and the latest calls (`GET /api/generation`, which never carries a key).
+- **Requests about a sample.** A request's item may be `sample:<name>` (`request <project> sample:<name>`, the MCP `request` tool, or *Ask for changes* on the sample's
+  page, which can pin it to the selected stretch). No mark is written and no check holds `done`; the brief shows the sample's numbers and what plays it. The sample's page
+  lists its requests with what the agent said, and offers *Approve* and *Ask again*. A request on a sound that plays the sample still works.
+- **Keep remembers the take.** A kept take gets `kept-from=<take name>` in its provenance as well as the `kept` tag, so editing the tag does not bring it back to the Takes list.
+- **An unsaved trim says so.** A trim dragged on a sample's page is a draft; the header and toolbar show *unsaved trim* until *Make* writes the one `sample derive`, and *Reset* takes it back.
+- **Long library files stream.** A library audition asks for byte ranges: a file over 2 MB starts playing from its first 2 MB while the rest arrives in 1 MB ranges.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.
@@ -78,6 +95,8 @@ All notable changes to SoundClaw are listed here. The format follows
 - A project's generation cap is set by a person: `soundclaw generate cap <project> <credits>`, or `POST /api/generation/cap` from the page (which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap.
 
 ### Fixed
+- Counts read right in the singular everywhere: "1 sound", "1 song", "1 member", "1 slice", "1 sample asks for attribution".
+- A library audition is decoded without hashing the file (a long file started seconds late).
 - The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.
 - `midi import` sent through a running server names the right project folder.
 

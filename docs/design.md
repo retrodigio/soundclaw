@@ -324,7 +324,7 @@ brings in is visible as it happens.
   (`dur>1.4 centroid<2k pitched=yes`), words and chips; a query that does not parse says why and keeps the list. ↑↓ moves (and plays the row after a
   short pause when preview on select is on), Space plays, Enter opens the sample's page, and a row drags onto a layer list (`layer add <sound> sample
   sample=<name>`). *Library* searches the registered sample libraries with the same query, 48 files a page; nothing is loaded until a file is played,
-  which streams from the server, and *Use* copies one into the project with the library's licence and where it came from. *Takes* lists what generation
+  which streams from the server (a file over 2 MB plays from its first 2 MB while the rest comes in 1 MB byte ranges), and *Use* copies one into the project with the library's licence and where it came from. *Takes* lists what generation
   made, newest first, with the prompt, the take and the credits; *Keep* names it and asks the person to confirm its licence, *Discard* removes the
   name (the audio stays in the store until `sample gc`).
 - **Cards.** A sample's numbers and small waveform are worked out once per distinct audio by a worker thread on the server and kept in
@@ -336,8 +336,22 @@ brings in is visible as it happens.
   focused one) and the trim (a `sample derive` when the person asks for it; from a layer, `#/sample/<name>/layer/<sound>/<n>`, the layer's own `start`
   and `end`). Below are the numbers, the words, the advisory checks, where the audio came from (source, origin, prompt, provider, take and credits,
   parents and operations, the original and the instrument file's hashes), the licence and why it stands as it does (editable), and what uses the sample.
-  Actions: derive, make an instrument, generate again (the estimate and the budget first, then a confirm) and ask for changes (a request is made on a
-  sound that plays the sample).
+  Actions: derive, make an instrument, generate again (the estimate and the budget first, then a confirm) and ask for changes (a request on the sample
+  itself, `sample:<name>`, optionally pinned to the selected stretch, or on a sound that plays it). The requests made on the sample are listed on its
+  page with what the agent said; a done one offers *Approve* and *Ask again*. A trim dragged on the plain page is a draft: the page says *unsaved trim*
+  (in the header and the toolbar) until *Make* writes the one `sample derive`, and *Reset* takes it back.
+- **The instrument page** `#/instrument/<id>` draws the key-map in SVG from the instrument's zones (the same document the renderer plays) and the
+  instrument's check from `GET /api/instrument-check/<id>.json`, which a worker thread works out once for each distinct instrument and set of audio.
+  Dragging an edge of the selected zone, or moving it with the arrows and Enter, writes one `instrument zone set`; a sample dropped on a key writes one
+  `instrument zone add` rooted at the sample's own root, else its measured pitch (with the tuning that cancels the error), else the key it was dropped on.
+  Playing renders the note in the page with core (the bytes a song renders) and starts it; a held key fades over the instrument's release, a fixed
+  length plays out as written. The computer keyboard and Web MIDI input play the same way.
+- **Generating.** The generation panel (the Takes mode's *Generate…*, the session page, the palette) shows the kind, prompt, length, takes and name, the
+  estimate the server works out (a `POST /api/generate` with `estimate: true`, which calls nothing), the budget it comes out of against the project cap and the daily cap,
+  and every reason a call would be refused. Nothing is called until *Generate*, and a paid call also needs the person to tick that it spends about N
+  credits. Paid generation is off until a person sets a project cap, which the panel can do (only as a human author; no agent route sets one). The takes
+  arrive in Takes, and the feed shows the takes of one call as one item. The session page carries the spend (`GET /api/generation`: the budget, the
+  providers and whether each has a key set, never the key, and the latest ledger lines).
 - **Dropping and recording.** Files dropped anywhere on the window (or chosen from the palette) open a dialog that asks for the licence, `unknown`
   unless the person says otherwise, and upload as a human import. The record button in the top bar opens the microphone through `getUserMedia` into an
   AudioWorklet at the device's own rate, with an input meter and an optional count-in; nothing is trimmed, and the take is saved as `source=recorded
