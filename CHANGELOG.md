@@ -6,6 +6,10 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-10
+
+Sampled sources: recorded, library and generated audio beside synthesis, pinned by hash so every render stays exact.
+
 ### Samples
 - **A store for audio.** Samples are kept once per content, as `samples/objects/<xx>/<hash>.wav`, under a hash of the audio itself (not of a file,
   so the chunks around it change nothing). Objects are written atomically and never rewritten. Names are on the history tape (`sample add`, `sample
@@ -532,6 +536,7 @@ The first release.
   MCP `await_requests`; `soundclaw work list|claim|progress|block|done` and the MCP `work`.
 - Per-command `--help` and `--version`; a Claude Code skill (`soundclaw skill install`).
 
-[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/retrodigio/soundclaw/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/retrodigio/soundclaw/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/retrodigio/soundclaw/releases/tag/v0.1.0

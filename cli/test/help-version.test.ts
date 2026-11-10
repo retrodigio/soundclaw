@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { VERSION as SERVER_VERSION } from '../../server/src/serve.ts';
 import { commandHelp, main, type Io } from '../src/main.ts';
 
 const BIN = join(import.meta.dirname, '..', 'bin', 'soundclaw.js');
@@ -22,6 +23,9 @@ describe('--version', () => {
     expect(direct(['--version'])).toMatchObject({ code: 0, out: `soundclaw ${version}\n` });
     expect(execFileSync(process.execPath, [BIN, '--version'], { encoding: 'utf8' })).toBe(`soundclaw ${version}\n`);
     expect(execFileSync(process.execPath, [BIN, '-V'], { encoding: 'utf8' })).toBe(`soundclaw ${version}\n`);
+  });
+  it('the MCP server reports the package version too', () => {
+    expect(SERVER_VERSION).toBe(version);
   });
 });
 
