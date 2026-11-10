@@ -5,7 +5,7 @@
 //
 // Everything is a pure function over channels (`Float32Array[]`, each at the sample's own rate) and the rate.
 
-import { analyze, fft, hzToMidi, loudnessRange, midiName, toDb, type Analysis } from './analysis.ts';
+import { analyze, fft, hzToMidi, loudnessRange, midiName, noteName, toDb, type Analysis } from './analysis.ts';
 import { FORMAT_BYTES, type PcmAudio, type PcmFormat } from './pcm.ts';
 import { resample } from './resample.ts';
 
@@ -154,7 +154,17 @@ export interface SampleMeasure {
   noiseFloorDb: number;
   /** Harmonic-to-noise ratio of the loudest part from its autocorrelation, dB (negative for noise). */
   hnrDb: number;
-  pitch: { hz: number; note: string; midi: number; cents: number; confidence: number; /** spread of the pitch over time, cents */ steadiness: number } | null;
+  pitch: {
+    hz: number; note: string; midi: number; cents: number;
+    /** How sure the tracker is: the share of voiced frames times their clarity, lowered when the spectrum is inharmonic (a bell, a layered chord of unrelated tones: the strongest partial is not a note). */
+    confidence: number;
+    /** Spread of the pitch over time, cents. */
+    steadiness: number;
+    /** Share of the strongest spectral peaks' energy that sits at whole multiples of `hz`, 0 … 1; 1 when there are too few peaks to say. */
+    harmonicity: number;
+    /** `harmonicity` under 0.6: the pitch is the strongest partial, not a note to build a scale on. */
+    inharmonic: boolean;
+  } | null;
   /** Confidence ≥ 0.8 and HNR over 6 dB. */
   pitched: boolean;
   onsets: { count: number; times: number[]; perSecond: number };
@@ -214,7 +224,62 @@ function hnrOf(x: Float32Array, rate: number): number {
   return 10 * Math.log10(r / (1 - r));
 }
 
-function pitchOf(a: Analysis): SampleMeasure['pitch'] {
+/** Under this a spectrum counts as inharmonic. */
+export const INHARMONIC_BELOW = 0.6;
+
+/**
+ * How harmonic a spectrum is around a pitch: of the strongest peaks of the loudest stretch (within 40 dB of the biggest, at most 10), the mean of the share of their
+ * energy and the share of their number that lie within 0.06 of a whole multiple of `hz` (as a ratio to it: close for the low partials of a tone, tight for the high ones). A harmonic tone is near 1; a bell, whose partials are not
+ * whole multiples, is well under 0.6. With fewer than three peaks there is nothing to compare, and it is 1.
+ */
+export function harmonicityOf(x: Float32Array, rate: number, hz: number): number {
+  const N = 1 << Math.max(11, Math.min(14, Math.floor(Math.log2(Math.max(2, x.length)))));
+  if (x.length < 2048 || !(hz > 0)) return 1;
+  // the loudest stretch of N frames
+  let best = 0, bestE = -1;
+  const step = Math.max(512, N >> 2);
+  for (let a = 0; a + N <= x.length; a += step) {
+    let e = 0;
+    for (let i = a; i < a + N; i++) e += x[i]! * x[i]!;
+    if (e > bestE) { bestE = e; best = a; }
+  }
+  if (bestE <= 0) return 1;
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let i = 0; i < N; i++) re[i] = (best + i < x.length ? x[best + i]! : 0) * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1)));
+  fft(re, im);
+  const mag = new Float64Array(N / 2);
+  let top = 0;
+  for (let k = 1; k < N / 2; k++) { mag[k] = Math.hypot(re[k]!, im[k]!); if (mag[k]! > top) top = mag[k]!; }
+  const floor = top * 0.01;
+  const peaks: { f: number; m: number }[] = [];
+  for (let k = 2; k < N / 2 - 1; k++) {
+    const m = mag[k]!;
+    if (m < floor || m < mag[k - 1]! || m <= mag[k + 1]!) continue;
+    const a = mag[k - 1]!, c = mag[k + 1]!;
+    const d = a - 2 * m + c;
+    const off = d !== 0 ? (0.5 * (a - c)) / d : 0;
+    peaks.push({ f: ((k + off) * rate) / N, m });
+  }
+  peaks.sort((p, q) => q.m - p.m);
+  const kept: { f: number; m: number }[] = [];
+  for (const p of peaks) {
+    if (kept.length >= 10) break;
+    if (kept.some((q) => Math.abs(q.f - p.f) < (6 * rate) / N)) continue; // the same partial's skirt
+    kept.push(p);
+  }
+  if (kept.length < 3) return 1;
+  let all = 0, fit = 0, nFit = 0;
+  for (const p of kept) {
+    const e = p.m * p.m;
+    all += e;
+    const k = Math.round(p.f / hz);
+    if (k >= 1 && Math.abs(p.f / hz - k) <= 0.06) { fit += e; nFit++; }
+  }
+  // (half by energy, half by count: the strongest partial is the one the tracker locked on, so it fits whatever the rest do)
+  return all > 0 ? 0.5 * (fit / all) + 0.5 * (nFit / kept.length) : 1;
+}
+
+function pitchOf(a: Analysis, x: Float32Array, rate: number): SampleMeasure['pitch'] {
   const frames = a.pitch.track.filter((f) => f.clarity > 0);
   const voiced = frames.filter((f) => f.hz !== null);
   if (!voiced.length) return null;
@@ -226,7 +291,10 @@ function pitchOf(a: Analysis): SampleMeasure['pitch'] {
   const midi = hzToMidi(med);
   const near = Math.round(midi);
   const clarity = voiced.reduce((s, f) => s + f.clarity, 0) / voiced.length;
-  return { hz: med, note: midiName(near), midi: near, cents: (midi - near) * 100, confidence: (voiced.length / frames.length) * clarity, steadiness };
+  const harmonicity = harmonicityOf(x, rate, med);
+  const inharmonic = harmonicity < INHARMONIC_BELOW;
+  const confidence = (voiced.length / frames.length) * clarity * (inharmonic ? 0.3 + 0.7 * harmonicity : 1);
+  return { hz: med, note: midiName(near), midi: near, cents: (midi - near) * 100, confidence, steadiness, harmonicity, inharmonic };
 }
 
 /** Everything measurable about a sample. Pure and deterministic; about 0.3 s for 5 s of stereo audio. */
@@ -300,7 +368,7 @@ export function measureSample(input: readonly Float32Array[], rate: number, opts
 
   const times = silent ? [] : findOnsets(x, rate);
   const hnrDb = silent ? -Infinity : hnrOf(mix44, 44100);
-  const pitch = silent ? null : pitchOf(a);
+  const pitch = silent ? null : pitchOf(a, x, rate);
   const pitched = !!pitch && pitch.confidence >= PITCHED_CONFIDENCE && hnrDb > PITCHED_HNR_DB;
   const lra = duration >= 3 && !a.silent ? loudnessRange(at44) : null;
 
@@ -516,7 +584,7 @@ export function describeSample(m: SampleMeasure): string[] {
   if (m.pitch && (m.pitched || m.pitch.confidence >= 0.5)) {
     const c = Math.round(m.pitch.cents);
     const steady = m.pitch.steadiness < 15 ? 'steady' : m.pitch.steadiness < 50 ? 'wavering' : 'moving';
-    lines.push(`pitch ${hzText(m.pitch.hz)} (${m.pitch.note}${c ? ` ${c > 0 ? '+' : ''}${c} cents` : ''}), ${steady} (spread ${Math.round(m.pitch.steadiness)} cents), confidence ${m.pitch.confidence.toFixed(2)}.`);
+    lines.push(`pitch ${hzText(m.pitch.hz)} (${m.pitch.note}${c ? ` ${c > 0 ? '+' : ''}${c} cents` : ''}), ${steady} (spread ${Math.round(m.pitch.steadiness)} cents), confidence ${m.pitch.confidence.toFixed(2)}${m.pitch.inharmonic ? '; inharmonic (bell-like): the partials are not whole multiples, so this is the strongest partial and not a note to build on' : ''}.`);
   } else lines.push('no clear pitch.');
   const n = m.onsets.count;
   lines.push(`${n <= 1 ? 'one hit' : `${n} hits (${m.onsets.perSecond.toFixed(1)} per second${m.tempo ? `, about ${Math.round(m.tempo)} bpm` : ''})`}; attack ${m.attackMs < 10 ? m.attackMs.toFixed(1) : Math.round(m.attackMs)} ms.`);
@@ -573,4 +641,56 @@ export function loudestWindow(chs: readonly Float32Array[], win: number): number
     if (a >= last) break;
   }
   return best;
+}
+
+
+// ---- one summary for sounds and samples -------------------------------------------------------------------------------
+
+/**
+ * The same numbers, under the same keys and in the same units, for a sound (`measure` / `describe --json` → `summary`) and for a sample
+ * (`sample:<name>` → `summary`), so a script can read either with one reader. Seconds, milliseconds, Hz and dB as the key says; null when the
+ * number does not exist (a silent sound has no loudness; an unpitched one no pitch).
+ */
+export interface MeasureSummary {
+  durationS: number;
+  lufs: number | null;
+  peakDb: number | null;
+  truePeakDb: number | null;
+  rmsDb: number | null;
+  centroidHz: number | null;
+  flatness: number | null;
+  attackMs: number | null;
+  /** The pitch in Hz (a sample: the median of the track; a sound: the middle of its start and end), and its note name. */
+  pitchHz: number | null;
+  pitchNote: string | null;
+  /** How sure the tracker is (a sample; null for a sound, whose tracker does not say). */
+  pitchConfidence: number | null;
+  /** See SampleMeasure.pitch: 0 … 1 and whether it is under the limit of an inharmonic (bell-like) spectrum; null with no pitch. */
+  harmonicity: number | null;
+  inharmonic: boolean | null;
+  pitched: boolean;
+  onsets: number;
+  silent: boolean;
+}
+
+const fin4 = (v: number): number | null => (Number.isFinite(v) ? Math.round(v * 1e4) / 1e4 : null);
+
+export function summaryOfSample(m: SampleMeasure): MeasureSummary {
+  return {
+    durationS: fin4(m.duration)!, lufs: fin4(m.lufs), peakDb: fin4(m.peakDb), truePeakDb: fin4(m.truePeakDb), rmsDb: fin4(m.rmsDb), centroidHz: fin4(m.centroid), flatness: fin4(m.flatness),
+    attackMs: fin4(m.attackMs), pitchHz: m.pitch ? fin4(m.pitch.hz) : null, pitchNote: m.pitch ? m.pitch.note : null, pitchConfidence: m.pitch ? fin4(m.pitch.confidence) : null,
+    harmonicity: m.pitch ? fin4(m.pitch.harmonicity) : null, inharmonic: m.pitch ? m.pitch.inharmonic : null, pitched: m.pitched, onsets: m.onsets.count, silent: m.silent,
+  };
+}
+
+/** The summary of a sound's analysis; `harmonicity` (see `harmonicityOf`, measured on the render) is given when the sound has a pitch. */
+export function summaryOfAnalysis(a: Analysis, harmonicity: number | null = null): MeasureSummary {
+  const { start, end } = a.pitch;
+  const hz = start !== null && end !== null ? Math.sqrt(start * end) : start ?? end;
+  return {
+    durationS: fin4(a.duration)!, lufs: fin4(a.lufs), peakDb: fin4(a.peakDb), truePeakDb: fin4(a.truePeakDb), rmsDb: fin4(a.rmsDb), centroidHz: fin4(a.centroid.mean), flatness: fin4(a.flatness),
+    attackMs: fin4(a.attack * 1000), pitchHz: hz === null ? null : fin4(hz), pitchNote: hz === null ? null : noteName(hz), pitchConfidence: null,
+    harmonicity: hz === null ? null : harmonicity, inharmonic: hz === null || harmonicity === null ? null : harmonicity < INHARMONIC_BELOW,
+    pitched: hz !== null && a.pitch.voiced >= 0.5, onsets: a.onsets, silent: a.silent,
+  };
 }

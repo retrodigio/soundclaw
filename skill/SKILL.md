@@ -394,6 +394,7 @@ class they are made for. `check` and `measure` say which class applied.
   `pitch` the note it actually sounds (slides, vibrato); `layers` (layered sounds) each layer on its own; `compare <sound> other=<sound>` stacks two
   and shows the difference with distance numbers (use it for "more like that one" and to see what a
   `mutate` changed). The image is a PNG; the tool also prints the numbers. The spectral distance depends on level, so it is printed as it is and with the level matched (`matchLevel` / `--match-level` puts the matched one first): judge "same sound?" by the matched one, then fix the level with `normalize`. A reference outside the project is a file path (`other=~/refs/target.wav`).
+- `measure --json` gives a `summary` for a sound and for a sample with the same keys and units (`pitchHz`, `attackMs`, `centroidHz`, ...). A pitch marked `inharmonic` (a bell, a chime) is the strongest partial, not a note: do not tune or key an instrument from it.
 - `describe <sound>` is the same measurements in plain words. `describe`, `measure` and `view` also take the path of a reference audio file (read, never imported), so you can read a target's numbers without bringing it into the project.
 - A request's `work done` is refused while the sound's checks fail, and, for a sound in a set of two or more, while the set's `set-spread` fails; fix it, then finish.
 

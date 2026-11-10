@@ -24,6 +24,11 @@ All notable changes to SoundClaw are listed here. The format follows
 - **`generate … trim=yes`** cuts each take that comes back longer than the requested duration (a provider's habit: about twice) to that duration, around
   its loudest part, or with `like=` the part closest to the reference. The cut ends fade over 3 ms; the take line and `--json` say what was cut. The fake provider
   returns longer takes when `SOUNDCLAW_FAKE_LONGER=<factor>` is set.
+- **One summary in `measure --json`.** A sound (`numbers`) and a sample (`measure`) described the same things under different keys and units. Both now also carry
+  `summary`, with the same keys and units (`durationS`, `lufs`, `peakDb`, `truePeakDb`, `rmsDb`, `centroidHz`, `flatness`, `attackMs`, `pitchHz`, `pitchNote`,
+  `pitchConfidence`, `harmonicity`, `inharmonic`, `pitched`, `onsets`, `silent`); no existing key changed.
+- **The pitch tracker no longer trusts a bell.** A sample's `pitch` has `harmonicity` and `inharmonic`; an inharmonic spectrum (a bell, a chime, unrelated tones layered) gets
+  a lowered `confidence`, is not `pitched`, and `describe` says so. A sound's `summary` carries the same flags.
 - **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
   (to 24), from the threshold and ratio the effect has then; the document holds the number.
 

@@ -1631,6 +1631,10 @@ class and target, every number `describe` prints and every check's result. `--js
   "sets": [ { "id", "pass", "members", "loudness", "distances", "check" } ] }
 ```
 
+**The `summary` block.** A sound's JSON keeps its `numbers` (seconds, `centroid` and `pitch` as objects) and a sample's keeps its `measure` (milliseconds, `centroid` a number, `pitch.hz`); both also carry `summary`, one object with the same keys and units for either: `durationS`, `lufs`, `peakDb`, `truePeakDb`, `rmsDb`, `centroidHz`, `flatness`, `attackMs`, `pitchHz`, `pitchNote`, `pitchConfidence` (null for a sound: its tracker does not say), `harmonicity`, `inharmonic`, `pitched`, `onsets`, `silent`. A sound's `pitchHz` is the middle (geometric mean) of its start and end pitch.
+
+**Inharmonic pitch.** The tracker reports the strongest partial, so a bell, a chime or a stack of unrelated tones can read as a clear, confident note that is not what the ear hears (a mid bell read as B6, 2 kHz, confidence 0.95). The sample's `pitch` therefore has `harmonicity` (0 … 1: of the strongest spectral peaks of the loudest stretch, how many and how much of their energy sit at whole multiples of the pitch) and `inharmonic` (under 0.6); when inharmonic the `confidence` is lowered by `0.3 + 0.7 × harmonicity`, so such a sample is not `pitched`, and `describe` says `inharmonic (bell-like)`. A sound's `summary` has the same two. A note-based instrument built on an inharmonic sample is a thing to listen to, not to trust.
+
 A number that is not finite (a silent sound has no loudness) is `null`. Numbers are rounded to four decimals. `measure` and `check` exit 1 when any check fails.
 `--json` is also on `check` (the same document), `describe` (one sound's object) and `render` (the same, with `renderKey` and `samplesHash`). The MCP `measure` tool does the same.
 

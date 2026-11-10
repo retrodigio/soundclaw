@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  CHECK_NAMES, SAMPLE_RATE, audibleLayers, readSampleWav, resample, resampleMethod, sha256Hex, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
+  CHECK_NAMES, SAMPLE_RATE, harmonicityOf, summaryOfAnalysis, audibleLayers, readSampleWav, resample, resampleMethod, sha256Hex, checkSummary, isStereo, layerLabel, layersView, mixdown, renderParts, checksPass, classicWav, compareView, describe, formatChecks, formatCsv, formatDistance, formatNumbers, formatPatchNamed, patchFileText, parsePatch, readCsv,
   pitchView, renderExact, specView, waveView, ClassicError, SOUND_ID_RE, fmtStep, loopView, seamNumbers, setView, formatSpread, type Analysis, type CheckResult, type LoudnessRule, type ClassicPatch, type CsvRow, type Sound, type ViewKind,
 } from '@soundclaw/core';
 import { attributionText, itemSamples, licenceIds, reachedSamples, Library, applyCommand, bindingRules, momentLine, momentOf, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
@@ -106,6 +106,13 @@ export function numbersJson(a: Analysis): Record<string, unknown> {
   };
 }
 
+/** Harmonicity of a sound's render around its pitch (null with no pitch): the one FFT that lets `summary` say whether a bell-like sound's pitch is a note. */
+function soundHarmonicity(w: Writer, id: string, a: Analysis): number | null {
+  const { start, end } = a.pitch;
+  const hz = start !== null && end !== null ? Math.sqrt(start * end) : start ?? end;
+  return hz === null || a.silent ? null : Math.round(harmonicityOf(w.render(id).samples, SAMPLE_RATE, hz) * 1e4) / 1e4;
+}
+
 /** One check as JSON. */
 export function checkJson(c: CheckResult): Record<string, unknown> {
   return { name: c.name, pass: c.pass, score: r4(c.score), value: c.value, threshold: c.threshold, ranges: c.ranges.map((g) => ({ from: g.from, to: g.to, note: g.note })) };
@@ -119,7 +126,7 @@ export function soundJson(w: Writer, id: string, extra: Record<string, unknown> 
     id, voice: s.voice, status: s.status,
     moment: momentOf(s, w.sets()),
     class: { name: m.rule.className, target: m.rule.target, tolerance: m.rule.tolerance, basis: m.rule.basis },
-    pass: checksPass(m.checks), numbers: numbersJson(m.analysis), description: describe(m.analysis),
+    pass: checksPass(m.checks), numbers: numbersJson(m.analysis), summary: summaryOfAnalysis(m.analysis, soundHarmonicity(w, id, m.analysis)), description: describe(m.analysis),
     checks: m.checks.map(checkJson), binding: bindingRules(m.checks), ...extra,
   };
 }

@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  analyze, checkSample, describeSample, FORMAT_BITS, findOnsets, licenceState, loopView, matchQuery, measureSample, mixdown, parseQuery, pcmChannels, pcmHash, pitchView, resample,
+  analyze, checkSample, describeSample, FORMAT_BITS, findOnsets, licenceState, loopView, matchQuery, measureSample, mixdown, parseQuery, pcmChannels, pcmHash, pitchView, resample, summaryOfSample,
   seamNumbers, specView, waveView, type Image, type PcmAudio, type QueryFacts, type SampleCheck, type SampleEntry, type SampleMeasure,
 } from '@soundclaw/core';
 import { audioOf } from './sampleedit.ts';
@@ -134,7 +134,7 @@ export function sampleMeasureJson(w: Writer, ref: string): Record<string, unknow
   const m = measureHash(s);
   const e = s.entry;
   return {
-    ref: s.label, hash: s.hash, measure: m, words: describeSample(m),
+    ref: s.label, hash: s.hash, measure: m, summary: summaryOfSample(m), words: describeSample(m),
     ...(e ? { name: e.name, format: e.format, bits: FORMAT_BITS[e.format], source: e.prov.source, licence: e.licence.id, licenceState: licenceState(e.licence, w.samples.shipPolicy).state, tags: e.tags, ...(e.root !== undefined ? { root: e.root } : {}), ...(e.loop ? { loop: e.loop } : {}), ...(e.slices ? { slices: e.slices } : {}), checks: sampleChecks(s, m) } : {}),
   };
 }

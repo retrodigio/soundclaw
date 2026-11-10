@@ -179,3 +179,34 @@ describe('choosing a window of a longer take', () => {
     expect(windowStarts(100, 100)).toEqual([0]);
   });
 });
+
+describe('inharmonic spectra', () => {
+  const partials = (secs: number, hz: number, ratios: number[], amps: number[], decay = 3): Float32Array =>
+    make(secs, (t) => ratios.reduce((s, r, k) => s + amps[k]! * Math.sin(2 * Math.PI * hz * r * t) * Math.exp(-decay * (1 + k * 0.4) * t), 0));
+  it('a bell (partials at 1, 2.76, 5.4, 8.93 times the hum) is flagged inharmonic and its confidence is lowered', () => {
+    const bell = partials(2, 700, [1, 2.76, 5.4, 8.93], [0.2, 0.5, 0.35, 0.2]);
+    const m = measureSample([bell], RATE);
+    expect(m.pitch).not.toBeNull();
+    expect(m.pitch!.inharmonic).toBe(true);
+    expect(m.pitch!.harmonicity).toBeLessThan(0.6);
+    expect(m.pitch!.confidence).toBeLessThan(0.8);
+    expect(m.pitched).toBe(false);
+    expect(describeSample(m).join(' ')).toMatch(/inharmonic \(bell-like\)/);
+  });
+  it('two unrelated tones layered (a tritone-ish pair) are inharmonic too', () => {
+    const m = measureSample([make(2, (t) => 0.3 * Math.sin(2 * Math.PI * 440 * t) + 0.3 * Math.sin(2 * Math.PI * 622.25 * t) + 0.2 * Math.sin(2 * Math.PI * 1100 * t))], RATE);
+    expect(m.pitch!.inharmonic).toBe(true);
+    expect(m.pitched).toBe(false);
+  });
+  it('a harmonic tone (a saw-like stack, a sine, a square) is left alone: harmonic, confidence as before', () => {
+    const saw = make(2, (t) => [1, 2, 3, 4, 5, 6].reduce((s, k) => s + (0.4 / k) * Math.sin(2 * Math.PI * 220 * k * t), 0));
+    for (const x of [saw, sine(2, 220)]) {
+      const m = measureSample([x], RATE);
+      expect(m.pitch!.inharmonic).toBe(false);
+      expect(m.pitch!.harmonicity).toBeGreaterThan(0.85);
+      expect(m.pitch!.confidence).toBeGreaterThan(0.8);
+      expect(m.pitched).toBe(true);
+      expect(describeSample(m).join(' ')).not.toMatch(/inharmonic/);
+    }
+  });
+});
