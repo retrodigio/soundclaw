@@ -147,7 +147,7 @@ export function GenerateDialog({ store, onClose }: { store: Store; onClose(): vo
         {spends && refusals.length === 0 && (
           <label className="smp-confirm"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} data-testid="gen-confirm" />I understand this spends about {credits} credits of the {prov?.id} account</label>
         )}
-        {prov && <p className="dim smp-hint">{prov.terms} The takes are stored as samples with the prompt, the provider and what they cost, and wait in Takes to keep or discard. The licence is the provider{'’'}s, for the plan set in the configuration; keeping a take asks you to confirm it.</p>}
+        {prov && <p className="dim smp-hint">{prov.terms.replace(/[.\s]*$/, '')}. The takes are stored as samples with the prompt, the provider and what they cost, and wait in Takes to keep or discard. The licence is the provider{'’'}s, for the plan set in the configuration; keeping a take asks you to confirm it.</p>}
         <div className="smp-form-actions"><button type="submit" className="btn btn-agent" disabled={!canGo} data-testid="gen-go">{busy ? 'Generating…' : 'Generate'}</button><button type="button" className="btn btn-quiet" onClick={onClose}>Cancel</button></div>
       </form>
     </Dialog>

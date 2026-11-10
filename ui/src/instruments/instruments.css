@@ -22,7 +22,7 @@
 .km-zone:focus-visible { outline: none; }
 .km-zone:focus-visible .km-box { stroke-width: 3; stroke: var(--text); }
 .ip-table tr:focus-visible { outline: 2px solid var(--you); outline-offset: -2px; }
-.km-zone .km-text { fill: var(--text); font: 500 10px var(--font-mono); pointer-events: none; }
+.km-zone .km-text { fill: var(--text); font: 500 10px/13px var(--font-mono); pointer-events: none; paint-order: stroke; stroke: var(--ground); stroke-width: 3px; stroke-linejoin: round; }
 .km-zone:hover .km-box { fill: color-mix(in srgb, var(--zc) 30%, transparent); }
 .km-handle { fill: var(--text); stroke: var(--ground); stroke-width: 1; }
 .km-handle:focus-visible { outline: 2px solid var(--focus, var(--you)); outline-offset: 1px; }

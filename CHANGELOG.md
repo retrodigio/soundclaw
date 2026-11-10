@@ -77,7 +77,7 @@ All notable changes to SoundClaw are listed here. The format follows
   pitch, else the key. The table, a zone's fields and the check's findings sit beside it (`GET /api/instrument-check/<id>.json`, worked out in a worker thread).
 - **Playing an instrument in the page.** Click the piano strip, use the computer keyboard (A W S E D F T G Y H U J K O L P ;, Z and X for the octave) or a MIDI
   keyboard when the browser offers Web MIDI. Notes are rendered in the page by core, so they are the bytes a song renders; a held key fades over the instrument's
-  release and a fixed length plays out as written.
+  release, and a key that plays release samples starts them when it comes up, for the time it was held; a fixed length plays out as written.
 - **The generation panel.** *Generate…* in the Takes mode, on the session page and in the palette: kind, prompt, length, takes and name, the estimate and every
   reason a call would be refused, the project's and today's budget as words and bars, and a confirm before anything is spent. A person can set the project cap there
   (as `human:<name>`; no agent route sets one). The free test provider costs nothing. The takes of one call are one item in the feed, and the session page shows the
@@ -95,6 +95,9 @@ All notable changes to SoundClaw are listed here. The format follows
 - A project's generation cap is set by a person: `soundclaw generate cap <project> <credits>`, or `POST /api/generation/cap` from the page (which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap.
 
 ### Fixed
+- The generation dialog's help text ends the provider's terms with a full stop.
+- The library rail's five tabs fit at 1440 px and every width above 900: they share the strip, which scrolls sideways when they do not all fit.
+- On the key-map, the small text of a zone (root, round robin, loop mode) no longer overlaps its name line.
 - Counts read right in the singular everywhere: "1 sound", "1 song", "1 member", "1 slice", "1 sample asks for attribution".
 - A library audition is decoded without hashing the file (a long file started seconds late).
 - The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.

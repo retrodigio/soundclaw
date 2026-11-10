@@ -275,7 +275,7 @@ function KeyMap({ store, inst, check, sel, onSelect, run, player }: KeyMapProps)
                 onPointerDown={(e) => { e.stopPropagation(); onSelect(k); }} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onSelect(k); } }}>
                 <title>{`zone ${k + 1}: ${z.sample}, keys ${keysText(s.keys)}, velocity ${velText(s.vel)}, ${WORD[st]}`}</title>
                 <rect className="km-box" x={x0} y={y0} width={Math.max(2, x1 - x0)} height={Math.max(2, y1 - y0)} />
-                {lines.map((t, i) => (y1 - y0 > 12 + i * 10 && room > 3) ? <text key={i} className="km-text" x={x0 + 4} y={z.trigger === 'release' ? y1 - 4 - (lines.length - 1 - i) * 10 : y0 + 11 + i * 10}>{t.slice(0, room)}</text> : null)}
+                {lines.map((t, i) => (y1 - y0 > 16 + i * 13 && room > 3 && t.trim()) ? <text key={i} className="km-text" x={x0 + 4} y={z.trigger === 'release' ? y1 - 5 - (lines.length - 1 - i) * 13 : y0 + 13 + i * 13}>{t.slice(0, room)}</text> : null)}
                 {on && (['left', 'right', 'top', 'bottom'] as Edge[]).map((edge) => {
                   const hx = edge === 'left' ? x0 : edge === 'right' ? x1 : (x0 + x1) / 2;
                   const hy = edge === 'top' ? y0 : edge === 'bottom' ? y1 : (y0 + y1) / 2;

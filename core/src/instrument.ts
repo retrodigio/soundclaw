@@ -160,6 +160,12 @@ export interface NoteSpec {
   hit?: string | null;
   /** Round-robin counter or hash (see zones.ts). */
   rr?: number;
+  /**
+   * Render only part of a note, for playing a key live whose length is not known when it goes down: `attack` leaves out the release-sample zones;
+   * `release` is those zones alone, starting at `gate` as they would in the whole note (the buffer is silent before then). The two add up to the
+   * whole note when the instrument's effects are linear.
+   */
+  part?: 'attack' | 'release';
 }
 
 /** The pitch offset (semitones) a note has at time t beyond its steady pitch. */
@@ -224,14 +230,14 @@ export function noteSoundWith(i: Instrument, n: NoteSpec, bank?: SampleBank): { 
   delete s.loop;
   delete s.family;
   const st0 = i.pitched ? n.midi - i.root : 0;
-  const chosen = zonesOf(i, n);
+  const chosen = zonesOf(i, n).filter((c) => (n.part === 'attack' ? c.zone.trigger === 'attack' : n.part === 'release' ? c.zone.trigger === 'release' : true));
   const zoneSemis = (z: Zone): number => (z.hit !== null ? 0 : i.pitched ? n.midi - z.root : 0) + z.tune / 100;
   const total = noteLength(i, n.gate, chosen.length ? zonesLength(chosen, bank, zoneSemis, n.gate) : 0);
   s.duration = total;
   const P = pitchOffset(i, n);
   const env = noteEnvelope(i, n.gate);
   const ratio = exp2(st0 / 12);
-  s.layers = s.layers.map((l: Layer): Layer => {
+  s.layers = (n.part === 'release' ? [] : s.layers).map((l: Layer): Layer => {
     const out: Layer = { ...l, p: { ...l.p }, envs: { ...l.envs }, fx: l.fx };
     out.amp = l.amp ? multiply(l.amp, env, total) : env;
     const dur = Math.min(123, total + (l.p.offset as number));

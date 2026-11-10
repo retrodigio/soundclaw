@@ -148,6 +148,25 @@ describe('zones', () => {
     expect(f1 / f2).toBeCloseTo(1, 1);
   });
 
+  it('a note can be rendered in two parts, the attack zones and then the release zones from a time chosen later, and they add up to the whole note', () => {
+    const b = bankOf({ a3: A3, rel: burst(9, 0.2, 0.8) });
+    const inst = lookupInstrument(lib('instrument new s kind=zones\ninstrument set s adsr=0.002,0,1,0.05\ninstrument zone add s sample=a3 root=A3 keys=A3-A3\ninstrument zone add s sample=rel root=A3 keys=A3-A3 trigger=release release-decay=6'), 's')!;
+    for (const gate of [0.5, 0.85]) {
+      const whole = renderNote(inst, { midi: 57, gate }, b)[0]!;
+      const attack = renderNote(inst, { midi: 57, gate, part: 'attack' }, b)[0]!;
+      const release = renderNote(inst, { midi: 57, gate, part: 'release' }, b)[0]!;
+      // the release part is silent until the key came up, and holds the burst after it
+      expect(rms(release, 0, gate - 0.01)).toBe(0);
+      expect(rms(release, gate + 0.01, gate + 0.1)).toBeGreaterThan(0.02);
+      // the attack part has no release burst
+      expect(rms(attack, gate + 0.06, gate + 0.15)).toBeLessThan(rms(whole, gate + 0.06, gate + 0.15));
+      const n = Math.max(whole.length, attack.length, release.length);
+      for (let i = 0; i < n; i += 13) expect((attack[i] ?? 0) + (release[i] ?? 0)).toBeCloseTo(whole[i] ?? 0, 5);
+    }
+    // a note asked for whole is what it was: the part is only read when given
+    expect(Buffer.from(renderNote(inst, { midi: 57, gate: 0.5 }, b)[0]!.buffer).equals(Buffer.from(renderNote(inst, { midi: 57, gate: 0.5, part: undefined }, b)[0]!.buffer))).toBe(true);
+  });
+
   it('a kit instrument is keyed by hit name, not by pitch', () => {
     const b = bankOf({ k: burst(1, 0.2), s: burst(2, 0.2, 0.2) });
     const l = lib('instrument new kit kind=zones\ninstrument set kit pitched=no\ninstrument zone add kit sample=k root=C3 hit=kick loopmode=oneshot\ninstrument zone add kit sample=s root=C3 hit=snare loopmode=oneshot');

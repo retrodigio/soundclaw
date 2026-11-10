@@ -345,7 +345,8 @@ brings in is visible as it happens.
   Dragging an edge of the selected zone, or moving it with the arrows and Enter, writes one `instrument zone set`; a sample dropped on a key writes one
   `instrument zone add` rooted at the sample's own root, else its measured pitch (with the tuning that cancels the error), else the key it was dropped on.
   Playing renders the note in the page with core (the bytes a song renders) and starts it; a held key fades over the instrument's release, a fixed
-  length plays out as written. The computer keyboard and Web MIDI input play the same way.
+  length plays out as written. A key that plays release samples is rendered in two parts (`renderNote` with `part: 'attack'`, then `part: 'release'` at key up for the
+  time the key was held, begun that many seconds into its buffer), so the release samples sound after a held key. The computer keyboard and Web MIDI input play the same way.
 - **Generating.** The generation panel (the Takes mode's *Generate…*, the session page, the palette) shows the kind, prompt, length, takes and name, the
   estimate the server works out (a `POST /api/generate` with `estimate: true`, which calls nothing), the budget it comes out of against the project cap and the daily cap,
   and every reason a call would be refused. Nothing is called until *Generate*, and a paid call also needs the person to tick that it spends about N

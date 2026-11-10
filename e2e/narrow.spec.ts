@@ -24,6 +24,27 @@ const sideways = (page: Page) => page.evaluate(() => {
   return { scroll: d.scrollWidth - innerWidth, body: document.body.scrollWidth - innerWidth, header: Math.max(header, Math.round(search.right - innerWidth)), out };
 });
 
+/** The library's tabs: none starts left of the strip, and one that runs past its right edge is reachable because the strip scrolls. */
+const tabsFit = (page: Page) => page.evaluate(() => {
+  const list = document.querySelector('[data-testid=lib-tabs]')!;
+  const box = list.getBoundingClientRect();
+  const scrolls = list.scrollWidth > list.clientWidth + 1;
+  const tabs = [...list.querySelectorAll('[role=tab]')].map((t) => ({ name: (t.textContent ?? '').trim(), r: t.getBoundingClientRect() }));
+  return { scrolls, left: tabs.filter((t) => t.r.left < box.left - 1).map((t) => t.name), right: tabs.filter((t) => t.r.right > box.right + 1).map((t) => t.name), count: tabs.length };
+});
+
+test('at 1440 by 900 every tab of the library rail is whole', async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  await page.goto(`${agent.url}&name=ana#/sound/coin_pickup`);
+  await expect(page.getByTestId('library-panel')).toBeVisible();
+  const r = await tabsFit(page);
+  expect(r.count).toBe(5);
+  expect(r.left).toEqual([]);
+  expect(r.right).toEqual([]);
+  await ctx.close();
+});
+
 for (const width of [1180, 1024, 900, 760, 360]) {
   test(`at ${width} px no screen scrolls sideways or cuts the header${width < 1180 ? '; the rail is an icon strip' : ''}${width < 900 ? ', the library an overlay' : ''}`, async ({ browser }) => {
     test.setTimeout(240_000);
@@ -62,6 +83,12 @@ for (const width of [1180, 1024, 900, 760, 360]) {
       await page.keyboard.press('Escape');
       await expect(page.getByTestId('library-panel')).toHaveCount(0);
     } else await expect(page.getByTestId('library-panel')).toBeVisible();
+    // the library's tabs: none is cut at the left edge, and the strip scrolls when they do not all fit
+    if (width >= 900) {
+      const t = await tabsFit(page);
+      expect(t.left, `tabs cut at the left edge at ${width}`).toEqual([]);
+      if (!t.scrolls) expect(t.right, `tabs cut at the right edge at ${width}`).toEqual([]);
+    }
     await ctx.close();
   });
 }

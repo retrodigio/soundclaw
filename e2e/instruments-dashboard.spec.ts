@@ -83,6 +83,24 @@ test('the instrument page: the key-map draws every zone with its check as a glyp
   await expect(page.getByTestId('instrument-missing')).toBeVisible();
 });
 
+test('the small text inside a zone of the key-map never overlaps its own name line', async ({ page }) => {
+  await start();
+  await openHarp(page);
+  const boxes = await page.evaluate(() => [...document.querySelectorAll('.km-zone')].map((z) => ({
+    zone: z.getAttribute('data-testid'),
+    box: (() => { const r = z.querySelector('.km-box')!.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; })(),
+    lines: [...z.querySelectorAll('.km-text')].map((t) => { const r = t.getBoundingClientRect(); return { text: t.textContent, top: r.top, bottom: r.bottom }; }),
+  })));
+  expect(boxes.some((b) => b.lines.length > 1)).toBe(true);
+  for (const b of boxes) {
+    for (let i = 0; i < b.lines.length; i++) {
+      expect(b.lines[i]!.bottom, `${b.zone}: "${b.lines[i]!.text}" is inside the zone`).toBeLessThanOrEqual(b.box.bottom + 1);
+      expect(b.lines[i]!.top, `${b.zone}: "${b.lines[i]!.text}" is inside the zone`).toBeGreaterThanOrEqual(b.box.top - 1);
+      if (i > 0) expect(b.lines[i]!.top, `${b.zone}: "${b.lines[i]!.text}" starts below the line above it`).toBeGreaterThanOrEqual(b.lines[i - 1]!.bottom - 1);
+    }
+  }
+});
+
 test('letting go of an edge writes one instrument zone set; the arrow keys move a draft and Enter writes it', async ({ page }) => {
   await start();
   await openHarp(page);
@@ -170,10 +188,10 @@ test('a sample dragged from the Samples tab onto a key adds a zone at its measur
 });
 
 /** The bytes the core renders in Node for a note of the harp, from the same audio the page was given. */
-function nodeNote(inst: Instrument, midi: number, vel: number, gate: number): string {
+function nodeNote(inst: Instrument, midi: number, vel: number, gate: number, part?: 'attack' | 'release'): string {
   const bank: Record<string, ReturnType<typeof pcmToSampleData>> = {};
   for (const [name, hz] of Object.entries(HARP_HZ)) bank[name] = pcmToSampleData(decodeAudio(wavBytes(pcmFromFloats([steadyTone(hz, 1)], 44100, 'pcm16'))).audio);
-  const chans = renderNote(inst, { midi, gate, vel }, { get: (n: string) => bank[n], hash: (n: string) => (bank[n] ? n : undefined) } as never);
+  const chans = renderNote(inst, { midi, gate, vel, ...(part ? { part } : {}) }, { get: (n: string) => bank[n], hash: (n: string) => (bank[n] ? n : undefined) } as never);
   return samplesHash(joinChannels(chans));
 }
 const harpDoc = (page: Page): Promise<Instrument> => page.evaluate(() => JSON.parse(JSON.stringify((window as unknown as { soundclaw: { instruments: { id: string }[] } }).soundclaw.instruments.find((i) => i.id === 'harp'))) as never);
@@ -227,9 +245,16 @@ test('playing: the piano strip, the computer keyboard and a MIDI keyboard sound 
   await page.evaluate(() => (window as unknown as { __midi: { onmidimessage: (e: { data: Uint8Array }) => void } }).__midi.onmidimessage({ data: new Uint8Array([0x90, 52, 64]) }));
   await expect(page.getByTestId('key-52')).toHaveAttribute('aria-pressed', 'true');
   list = await played(page);
-  expect(list.at(-1)!.hash).toBe(nodeNote(inst, 52, 64, 3));
+  // E3 plays a release-sample zone: held, the note is its attack zones now, and the release zones start when the key comes up
+  expect(list.at(-1)!.hash).toBe(nodeNote(inst, 52, 64, 3, 'attack'));
+  await page.waitForTimeout(400);
   await page.evaluate(() => (window as unknown as { __midi: { onmidimessage: (e: { data: Uint8Array }) => void } }).__midi.onmidimessage({ data: new Uint8Array([0x90, 52, 0]) }));
   await expect(page.getByTestId('key-52')).toHaveAttribute('aria-pressed', 'false');
+  list = await played(page);
+  expect(list.at(-1)).toMatchObject({ id: 'harp', key: 'harp#live-release' });
+  // the release part was rendered for the time the key was held (to 50 ms): the same bytes as Node's for one of the lengths around 0.4 s
+  const lengths = [0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8];
+  expect(lengths.map((g) => nodeNote(inst, 52, 64, g, 'release'))).toContain(list.at(-1)!.hash);
 });
 
 test('a browser without Web MIDI says so', async ({ page }) => {
