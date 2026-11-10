@@ -238,25 +238,33 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
   }
   // the mix is worked out when first asked for: a measurement that is already known never needs it
   let mixed: { pre: [Float32Array, Float32Array]; mix: [Float32Array, Float32Array] } | null = null;
-  const mixOnce = (): NonNullable<typeof mixed> => (mixed ??= mixParts(song, parts, N, wrap, o.limiter));
+  const mixOnce = (): NonNullable<typeof mixed> => (mixed ??= mixParts(song, parts, N, wrap, o.limiter, o.bank));
   // stems: the channels of each layer, in the order the layers first appear (worked out when first asked for)
   let stems: SongRender['stems'] | null = null;
   return {
-    mode, length: N, window, parts, events, key: sha256Text(keys.join(',') + `|${song.gain}|${JSON.stringify([song.master, song.reverb, song.delay, song.channels.map((c) => [c.name, c.reverb, c.delay])])}`), cached,
+    mode, length: N, window, parts, events, key: sha256Text(keys.join(',') + `|${song.gain}|${JSON.stringify([song.master, song.reverb, song.delay, song.channels.map((c) => [c.name, c.reverb, c.delay])])}${convolveKey(song, o.bank)}`), cached,
     get mix() { return mixOnce().mix; },
     get pre() { return mixOnce().pre; },
-    get stems() { return (stems ??= renderStems(song, parts, N, wrap)); },
+    get stems() { return (stems ??= renderStems(song, parts, N, wrap, false, o.bank)); },
   };
+}
+
+/** What a song's convolutions depend on beyond its text: the hashes of their responses, the bus's settings and what each channel sends. Empty without one. */
+function convolveKey(song: SongDoc, bank: SampleBank | undefined): string {
+  const fx = [...song.master, ...(song.convolve ? [song.convolve] : [])].filter((f) => f.kind === 'convolve');
+  const sends = song.channels.filter((c) => c.convolve).map((c) => `${c.name}:${c.convolve}`);
+  if (!fx.length && !sends.length) return '';
+  return `|conv:${fx.map((f) => `${JSON.stringify(f.p)}=${bank?.hash(String(f.p.ir)) ?? 'missing'}`).join(',')};${sends.join(',')}`;
 }
 
 /** Seconds -> samples the way events are placed. */
 export const sampleAt = (t: number): number => Math.round(t * SR);
 
 /** The channels summed with the song's gain, before and after the master chain. In a loop the chain runs over the region twice and the second pass is kept. */
-export function mixParts(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean, limiter?: { value: LimiterMemo | null }[]): { pre: [Float32Array, Float32Array]; mix: [Float32Array, Float32Array] } {
+export function mixParts(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean, limiter?: { value: LimiterMemo | null }[], bank?: SampleBank): { pre: [Float32Array, Float32Array]; mix: [Float32Array, Float32Array] } {
   const preD: [Float64Array, Float64Array] = [new Float64Array(N), new Float64Array(N)];
   for (const p of parts) for (let c = 0; c < 2; c++) { const a = p.channels[c]!, d = preD[c]!; for (let i = 0; i < N; i++) d[i] = d[i]! + a[i]!; }
-  const ret = busReturns(song, parts, N, wrap);
+  const ret = busReturns(song, parts, N, wrap, bank);
   if (ret) for (let c = 0; c < 2; c++) { const d = preD[c]!, r = ret[c]!; for (let i = 0; i < N; i++) d[i] = d[i]! + r[i]!; }
   if (song.gain !== 1) for (const d of preD) for (let i = 0; i < N; i++) d[i] = d[i]! * song.gain;
   const pre: [Float32Array, Float32Array] = [Float32Array.from(preD[0]), Float32Array.from(preD[1])];
@@ -265,11 +273,11 @@ export function mixParts(song: SongDoc, parts: readonly ChannelAudio[], N: numbe
   else if (wrap) {
     const twice: [Float64Array, Float64Array] = [new Float64Array(2 * N), new Float64Array(2 * N)];
     for (let c = 0; c < 2; c++) { twice[c]!.set(preD[c]!); twice[c]!.set(preD[c]!, N); }
-    applyFxChain(twice, song.master, limiter);
+    applyFxChain(twice, song.master, limiter, bank);
     mixD = [twice[0]!.subarray(N), twice[1]!.subarray(N)];
   } else {
     mixD = [Float64Array.from(preD[0]), Float64Array.from(preD[1])];
-    applyFxChain(mixD, song.master, limiter);
+    applyFxChain(mixD, song.master, limiter, bank);
   }
   return { pre, mix: [Float32Array.from(mixD[0]), Float32Array.from(mixD[1])] };
 }
@@ -289,7 +297,7 @@ export function wet(f: Fx): Fx {
  * their share of the whole return and the shares add up to it. In a loop the bus runs over the region twice and the
  * second pass is kept, so a tail wraps to the start as the notes' tails do.
  */
-export function busReturns(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean): [Float64Array, Float64Array] | null {
+export function busReturns(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean, bank?: SampleBank): [Float64Array, Float64Array] | null {
   let out: [Float64Array, Float64Array] | null = null;
   for (const kind of SEND_KINDS) {
     const bus = song[kind];
@@ -306,7 +314,7 @@ export function busReturns(song: SongDoc, parts: readonly ChannelAudio[], N: num
       }
     }
     if (!any) continue;
-    applyFxChain(feed, [wet(bus)]);
+    applyFxChain(feed, [wet(bus)], undefined, bank);
     out ??= [new Float64Array(N), new Float64Array(N)];
     for (let c = 0; c < 2; c++) { const d = out[c]!, f = feed[c]!, off = wrap ? N : 0; for (let i = 0; i < N; i++) d[i] = d[i]! + f[off + i]!; }
   }
@@ -335,22 +343,22 @@ export function masterChainForStems(song: SongDoc): { applied: Fx[]; skipped: { 
  * split, so the stems then sum to the mix as the filters leave it, before the compressor and limiter (louder than the mix,
  * and not limited, by what those take off).
  */
-export function renderStems(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean, throughMaster = false): { layer: string; channels: [Float32Array, Float32Array] }[] {
+export function renderStems(song: SongDoc, parts: readonly ChannelAudio[], N: number, wrap: boolean, throughMaster = false, bank?: SampleBank): { layer: string; channels: [Float32Array, Float32Array] }[] {
   const filters = throughMaster ? masterChainForStems(song).applied : [];
   return [...new Set(parts.map((p) => p.layer))].map((layer) => {
     const mine = parts.filter((p) => p.layer === layer);
     const sum: [Float64Array, Float64Array] = [new Float64Array(N), new Float64Array(N)];
     for (const p of mine) for (let c = 0; c < 2; c++) { const a = p.channels[c]!, d = sum[c]!; for (let i = 0; i < N; i++) d[i] = d[i]! + a[i]!; }
-    const ret = busReturns(song, mine, N, wrap);
+    const ret = busReturns(song, mine, N, wrap, bank);
     if (ret) for (let c = 0; c < 2; c++) { const d = sum[c]!, r = ret[c]!; for (let i = 0; i < N; i++) d[i] = d[i]! + r[i]!; }
     for (const d of sum) for (let i = 0; i < N; i++) d[i] = d[i]! * song.gain;
     if (filters.length) {
       if (wrap) {
         const twice: [Float64Array, Float64Array] = [new Float64Array(2 * N), new Float64Array(2 * N)];
         for (let c = 0; c < 2; c++) { twice[c]!.set(sum[c]!); twice[c]!.set(sum[c]!, N); }
-        applyFxChain(twice, filters);
+        applyFxChain(twice, filters, undefined, bank);
         for (let c = 0; c < 2; c++) sum[c]!.set(twice[c]!.subarray(N));
-      } else applyFxChain(sum, filters);
+      } else applyFxChain(sum, filters, undefined, bank);
     }
     return { layer, channels: [Float32Array.from(sum[0]), Float32Array.from(sum[1])] as [Float32Array, Float32Array] };
   });

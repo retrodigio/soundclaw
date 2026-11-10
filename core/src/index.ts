@@ -30,6 +30,7 @@ export * from './resample.ts';
 export * from './music.ts';
 export * from './pattern.ts';
 export * from './instrument.ts';
+export * from './convolve.ts';
 export * from './zones.ts';
 export * from './instrumentchecks.ts';
 export * from './sfz.ts';

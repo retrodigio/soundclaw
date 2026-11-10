@@ -79,7 +79,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         layer align <id> <n> to=<m>|start [by=onset|peak]   layer match <id> <n> to=<m> [db=<offset>]   (measured, written as layer set offset= / gain=)
         env <id> <n>.amp follow=<layer>|sample:<name> [attack=<s>] [release=<s>]   an envelope that follows a layer's or a sample's level
         env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | bursts(times=...|count=... over=...) | clear
-        fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit [<param>=<value> ...] [at=<k>]
+        fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit|convolve [<param>=<value> ...] [at=<k>]   (convolve ir=<sample> [mix=] [predelay=] [gain=] [len=<s>])
         fx set|remove|move <id> [layer=<n>] <k> ...
         undo [group=<g>] [by=<author>]    redo [group=<undo group>] [by=<author>]   (each alone in its batch)
         instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample|zones]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= adsr=a,d,s,r range= ...
@@ -91,7 +91,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         pattern <song>.<name> steps=16 tpb=4 [bar=8], then indented rows:  lead: C5 . E5 - | G5v80 . E5~slide .      pattern set|remove|copy|rename <song>.<name> ...
         pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> ...   (one note at a time: add C5 len=2, move step= note=, set vel= fx=)
         song section add|set|remove <song> <name> <pattern>... [x<n>]   song order|intro|ending|loop|fx|copy|rename|remove|mark <song> ...   (music: docs/commands.md)
-        song set <id> tags=a,b kind=song|stinger   song channel set <song> <ch> harmony=yes   song new <id> from-bible=<entry> | kind=stinger template=victory|game-over|level-up|item-get
+        song set <id> tags=a,b kind=song|stinger   song channel set <song> <ch> harmony=yes   song send <song> reverb|delay|convolve [<param>=<value> ...]|off (convolve ir=<sample>)   song channel set <song> <ch> reverb=|delay=|convolve=<0..1>   song new <id> from-bible=<entry> | kind=stinger template=victory|game-over|level-up|item-get
         helpers (they write notes into <pattern>, and go on the tape with the rows they wrote; docs/commands.md "Composition helpers"):
         chords <song> <pattern> <channel> "I vi ii65 V7/V bVII" [bars=] [rhythm=hold|beats|offbeat|"x-.x"] [range=]   bass ... "<prog>"|from=<ch> [style=root|root-fifth|walking|octave]
         arp ... "<prog>"|from=<ch> [pattern=up|down|updown|random(<seed>)] [rate=1/16]   drums <song> <pattern> <ch>[,<hats>] <template> [fill=<n>] [seed=]

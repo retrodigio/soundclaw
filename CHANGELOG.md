@@ -88,6 +88,12 @@ All notable changes to SoundClaw are listed here. The format follows
 - **Keep remembers the take.** A kept take gets `kept-from=<take name>` in its provenance as well as the `kept` tag, so editing the tag does not bring it back to the Takes list.
 - **An unsaved trim says so.** A trim dragged on a sample's page is a draft; the header and toolbar show *unsaved trim* until *Make* writes the one `sample derive`, and *Reset* takes it back.
 - **Long library files stream.** A library audition asks for byte ranges: a file over 2 MB starts playing from its first 2 MB while the rest arrives in 1 MB ranges.
+- **Convolution.** `fx add <id> [layer=<n>] convolve ir=<sample> [mix=] [predelay=] [gain=] [len=]` runs a layer, a sound's master chain, an instrument's template or a song's
+  master chain through a sample used as an impulse response (a recorded room, a plate, a speaker, or a `sample bounce` of a reverb tail). It is a uniformly partitioned FFT
+  convolution written in core, so it renders to the same bytes in Node and in the browser; the response is scaled to unit energy, a stereo response gives each side of a stereo
+  sound its own channel, and `fx add` writes the response's length (to 12 s) into the command, so the tape holds the number. A song has a third send bus beside the reverb and the
+  delay: `song send <song> convolve ir=<sample>`, fed by `song channel set <song> <ch> convolve=0.3`. The render key holds the response's hash; a sample that is read as a
+  response cannot be removed while a sound, instrument or song reads it, a rename follows, and its licence reaches the sound and the song.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.

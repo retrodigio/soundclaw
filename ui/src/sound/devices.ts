@@ -81,6 +81,14 @@ export function sketch(kind: FxKind, p: Record<string, Value>): string {
       for (let i = 0; i <= 40; i++) { const u = i / 40; pts.push([x(u), y(0.9 * Math.exp(-u * (6 - 4.5 * size)))]); }
       return line(pts);
     }
+    case 'convolve': {
+      // the response: nothing for the predelay, then a fall over `len`
+      const len = clamp(num(p.len, 2), 0.05, 12);
+      const pre = clamp(num(p.predelay, 0), 0, 0.5) / (len + clamp(num(p.predelay, 0), 0, 0.5));
+      const pts: [number, number][] = [[x(0), y(0)], [x(pre), y(0)]];
+      for (let i = 0; i <= 40; i++) { const u = i / 40; pts.push([x(pre + u * (1 - pre)), y(0.9 * Math.exp(-u * 5))]); }
+      return line(pts);
+    }
     case 'compress': {
       const th = clamp(num(p.threshold, -18), -60, 0);
       const ratio = clamp(num(p.ratio, 4), 1, 20);
@@ -121,6 +129,7 @@ const unitText = (sp: PSpec, v: Value): string => {
 
 /** The two or three values a card shows: the effect's first parameters. */
 export function mainValues(kind: FxKind, p: Record<string, Value>): { k: string; v: string }[] {
+  if (kind === 'convolve') return [{ k: 'ir', v: String(p.ir || '(none)') }, { k: 'mix', v: unitText(FX_SPECS.convolve[1]!, p.mix ?? 0.3) }, { k: 'len', v: unitText(FX_SPECS.convolve[4]!, p.len ?? 2) }];
   return FX_SPECS[kind].slice(0, 3).map((sp) => ({ k: sp.name, v: unitText(sp, p[sp.name] ?? sp.default) }));
 }
 

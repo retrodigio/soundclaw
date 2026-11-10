@@ -13,6 +13,7 @@ import { TAU, exp2, log2, sineCycles, sinRad, tanPi } from './mathx.ts';
 import { hashText } from './generators.ts';
 import { resample } from './resample.ts';
 import { readerFor, type Interp } from './interp.ts';
+import { convolve } from './convolve.ts';
 import { stretchChannels } from './stretch.ts';
 import { DIED_AWAY, SAMPLE_RATE } from './sound.ts';
 
@@ -500,6 +501,7 @@ export function fxTail(f: Fx): number {
     const taps = fb > 0 ? 1 + Math.ceil(-LOG2_LEVEL_66DB / -log2(fb)) : 1;
     return Math.min(MAX_FX_TAIL, (f.p.time as number) * taps);
   }
+  if (f.kind === 'convolve' && mixOn) return Math.min(MAX_FX_TAIL, (f.p.predelay as number) + (f.p.len as number));
   if (f.kind === 'reverb' && mixOn) {
     const fb = 0.7 + 0.28 * (f.p.size as number);
     return Math.min(MAX_FX_TAIL, (COMBS[COMBS.length - 1]! + 23) / SR * (EXP_DECAY_60DB / -log2(fb)) + 0.05);
@@ -665,11 +667,45 @@ function runLimiter(buf: Float64Array, f: Fx, memo?: { value: LimiterMemo | null
   }
 }
 
-function runFx(buf: Float64Array, f: Fx, channel: number): void {
+/** A cut of a sample as an impulse response at the engine's rate: one channel, `len` seconds, scaled to unit energy. Kept for the sample's data. */
+const irCache = new WeakMap<SampleData, Map<string, Float64Array | null>>();
+function impulseResponse(smp: SampleData, channel: number, len: number): Float64Array | null {
+  let per = irCache.get(smp);
+  if (!per) irCache.set(smp, (per = new Map()));
+  const key = `${channel}|${len}`;
+  if (per.has(key)) return per.get(key)!;
+  const src = channel === 0 ? (smp.left ?? smp.data) : channel === 1 ? (smp.right ?? smp.data) : smp.data;
+  const full = resample(src, smp.rate, SR);
+  const n = Math.min(full.length, Math.max(1, Math.round(len * SR)));
+  let energy = 0;
+  for (let i = 0; i < n; i++) energy += full[i]! * full[i]!;
+  let out: Float64Array | null = null;
+  if (energy > 1e-12) {
+    const g = 1 / Math.sqrt(energy);
+    out = new Float64Array(n);
+    for (let i = 0; i < n; i++) out[i] = full[i]! * g;
+  }
+  per.set(key, out);
+  return out;
+}
+
+function runFx(buf: Float64Array, f: Fx, channel: number, bank?: SampleBank): void {
   const n = buf.length;
   const P = (name: string): Reader => param(f.p, f.envs, name);
   const dynamic = (name: string): boolean => f.envs[name] !== undefined;
   switch (f.kind) {
+    case 'convolve': {
+      // a response that is not there leaves the sound as it is (the server refuses a batch that names one)
+      const smp = f.p.ir ? bank?.get(String(f.p.ir)) : undefined;
+      const ir = smp ? impulseResponse(smp, channel, f.p.len as number) : null;
+      if (!ir) return;
+      const pre = Math.round((f.p.predelay as number) * SR);
+      const wet = convolve(buf, ir, Math.max(0, n - pre));
+      const g = exp2((f.p.gain as number) * DB_TO_LOG2);
+      const mix = P('mix');
+      for (let i = n - 1; i >= 0; i--) buf[i] = wetDry(buf[i]!, i >= pre ? wet[i - pre]! * g : 0, mix(i));
+      return;
+    }
     case 'filter':
       runFilter(buf, f.p.type as string, P('cutoff'), P('q'), dynamic('cutoff') || dynamic('q'));
       return;
@@ -793,7 +829,7 @@ function buildLayer(s: LayeredSound, l: Layer, bank: SampleBank | undefined, src
     for (let i = 0; i < Math.min(FADE, len); i++) buf[i] = buf[i]! * (i / FADE);
     for (let i = Math.max(0, len - FADE); i < len; i++) buf[i] = buf[i]! * ((len - 1 - i) / FADE);
   }
-  for (const f of l.fx) runFx(buf, f, channel);
+  for (const f of l.fx) runFx(buf, f, channel, bank);
   if (l.envs.gain) {
     const r = envReader(l.envs.gain);
     for (let i = 0; i < buf.length; i++) buf[i] = buf[i]! * r(i);
@@ -886,7 +922,7 @@ function renderLoop(s: LayeredSound, bank: SampleBank | undefined): Float32Array
 export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[] {
   if (s.loop) return renderLoop(s, bank);
   const built = buildAll(s, bank);
-  const stereo = isStereo(s);
+  const stereo = isStereo(s, bank);
   const n = totalLength(s, built);
   const mix = stereo ? [new Float64Array(n), new Float64Array(n)] : [new Float64Array(n)];
   for (const b of built) {
@@ -895,7 +931,7 @@ export function renderLayered(s: LayeredSound, bank?: SampleBank): Float32Array[
   }
   mix.forEach((ch, c) => {
     if (s.gain !== 1) for (let i = 0; i < n; i++) ch[i] = ch[i]! * s.gain;
-    for (const f of s.master) runFx(ch, f, c);
+    for (const f of s.master) runFx(ch, f, c, bank);
     if (s.out) { const g = exp2(s.out * DB_TO_LOG2); for (let i = 0; i < n; i++) ch[i] = ch[i]! * g; } // the output level, after the master chain
   });
   let end = n;
@@ -944,13 +980,13 @@ export interface LayerPart {
 /** Each sounding layer on its own, before the master chain: what the `layers` view draws. */
 export function renderParts(s: LayeredSound, bank?: SampleBank): { length: number; stereo: boolean; parts: LayerPart[] } {
   const built = buildAll(s, bank);
-  const stereo = isStereo(s);
+  const stereo = isStereo(s, bank);
   const length = renderLayered(s, bank)[0]!.length;
   return { length, stereo, parts: built.map((b) => ({ index: b.index, layer: b.layer, channels: place(b, length, stereo).map((c) => Float32Array.from(c)) })) };
 }
 
-export function layeredChannelCount(s: LayeredSound): number {
-  return isStereo(s) ? 2 : 1;
+export function layeredChannelCount(s: LayeredSound, bank?: SampleBank): number {
+  return isStereo(s, bank) ? 2 : 1;
 }
 
 // ---- the limiter (applied on export) --------------------------------------------------------------------------
@@ -1039,11 +1075,11 @@ export function limitChannels(chans: readonly Float32Array[], ceilingDb: number)
  * Run a chain of effects over each channel. `memo` (one slot per channel) lets a limiter at the head of the
  * chain reuse what it worked out last time over the same length of audio (the same samples come out).
  */
-export function applyFxChain(chans: readonly Float64Array[], fx: readonly Fx[], memo?: { value: LimiterMemo | null }[]): void {
+export function applyFxChain(chans: readonly Float64Array[], fx: readonly Fx[], memo?: { value: LimiterMemo | null }[], bank?: SampleBank): void {
   chans.forEach((ch, c) => {
     fx.forEach((f, k) => {
       if (k === 0 && f.kind === 'limit' && memo?.[c]) runLimiter(ch, f, memo[c]);
-      else runFx(ch, f, c);
+      else runFx(ch, f, c, bank);
     });
   });
 }

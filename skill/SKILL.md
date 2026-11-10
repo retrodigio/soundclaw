@@ -156,6 +156,10 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   10 cents off its root, a level step over 3 LU between neighbours, a looped zone's seam, round robins too alike) and `view <project> <instrument> keymap` (zones as boxes coloured by their checks):
   fix what it says (`instrument zone set <id> <n> tune=… gain=…`) before you write the song, then judge it in the song by ear and with `render-match`. `from-sample <id> <sample> loop=find` makes
   a one-sample instrument. `soundclaw instrument export <project> <id> --format sfz` takes it to a DAW. `soundclaw instrument import <project> <file.sfz|file.sf2> --id <id> [preset=<bank>:<program>] licence=<id>` brings an SFZ or one SoundFont 2 preset in (`--list` shows a font's presets; read the `lost` and `approximated` lines in the answer, then `check` and `view … keymap`; the licence is `unknown` until you set it, so ask the person what the file's licence is). The samples' licences reach the instrument and every song that plays it.
+- A real room instead of a reverb. `fx add <id> [layer=<n>] convolve ir=<sample> mix=0.3` runs a layer (or, with no `layer=`, the sound) through a recorded or generated impulse
+  response; `len` is written for you as the response's length (to 12 s), `predelay=` and `gain=` (dB) shape it. The response is scaled to unit energy, so `gain=0` keeps a noisy sound
+  about as loud as it was; `sample bounce <new> from=<sound>` makes a response from a reverb tail. On a song: `song fx add <song> convolve ir=…` over the mix, or one room for the whole
+  piece, `song send <song> convolve ir=<sample>` fed by `song channel set <song> <ch> convolve=0.3`.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower

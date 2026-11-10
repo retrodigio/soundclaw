@@ -20,8 +20,10 @@ export const MAX_SOURCE_DURATION = 123;
 
 export type SourceKind = 'classic' | 'osc' | 'fm' | 'ks' | 'sample';
 export const SOURCE_KINDS: readonly SourceKind[] = ['classic', 'osc', 'fm', 'ks', 'sample'];
-export type FxKind = 'filter' | 'distort' | 'bitcrush' | 'chorus' | 'delay' | 'reverb' | 'compress' | 'limit';
-export const FX_KINDS: readonly FxKind[] = ['filter', 'distort', 'bitcrush', 'chorus', 'delay', 'reverb', 'compress', 'limit'];
+export type FxKind = 'filter' | 'distort' | 'bitcrush' | 'chorus' | 'delay' | 'reverb' | 'compress' | 'limit' | 'convolve';
+export const FX_KINDS: readonly FxKind[] = ['filter', 'distort', 'bitcrush', 'chorus', 'delay', 'reverb', 'compress', 'limit', 'convolve'];
+/** The longest part of an impulse response a convolution uses, seconds. */
+export const MAX_IR_SECONDS = 12;
 
 export type Value = number | string;
 
@@ -170,6 +172,13 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
     fxNum('release', 1, 1000, 20, 'ms', 'how fast the gain comes back after a peak (20 ms lets a train of hits each be limited on its own; a long release makes the hits after a loud one quieter)'),
     fxNum('lookahead', 0, 20, 5, 'ms', 'how long before a peak the gain starts to come down (0: it drops at once; in true mode at least 1 ms)'),
     choice('mode', ['true', 'sample'], 'true', 'true: the 4x-oversampled peak between the samples is held under the ceiling (0.1 dB inside it), so the clip check passes; sample: only the samples are'),
+  ],
+  convolve: [
+    text('ir', '', 'the name of the sample that is the impulse response: a recorded room, a plate, a speaker or a tube (import or generate one, or `sample bounce` a reverb tail)'),
+    fxNum('mix', 0, 1, 0.3, '', 'dry/wet', true),
+    fxNum('predelay', 0, 0.5, 0, 's', 'silence before the wet signal starts'),
+    fxNum('gain', -24, 12, 0, 'dB', 'level of the wet signal. The response is scaled to unit energy first, so 0 dB keeps a noisy sound about as loud as it was'),
+    fxNum('len', 0.05, MAX_IR_SECONDS, 2, 's', 'how much of the response is used, and how long the tail is. `fx add` sets it to the length of the response (to 12 s) when it is not given'),
   ],
 };
 
@@ -361,7 +370,7 @@ export function parseValue(spec: PSpec, raw: string, what: string): Value {
     return raw;
   }
   if (spec.text) {
-    if (spec.name === 'sample') {
+    if (spec.name === 'sample' || spec.name === 'ir') {
       if (raw !== '' && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/.test(raw)) throw new Error(`${what}: '${raw}' is not a sample name (letters, digits, _ and -)`);
     } else if (spec.name === 'table') {
       parseTable(raw, what);
@@ -458,7 +467,7 @@ export function serializeLayered(s: LayeredSound): string[] {
 
 /** The canonical text the render key is a hash of: everything the audio depends on, in a fixed order. `sampleHash` says which bytes a sample name stood for. */
 export function layeredBody(s: LayeredSound, sampleHash: (name: string) => string): string {
-  const fx = (f: Fx): string => `${f.kind}(${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(',')};${Object.keys(f.envs).sort().map((k) => `${k}=${formatEnv(f.envs[k]!)}`).join(',')})`;
+  const fx = (f: Fx): string => `${f.kind}(${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(',')};${Object.keys(f.envs).sort().map((k) => `${k}=${formatEnv(f.envs[k]!)}`).join(',')})${f.kind === 'convolve' ? `[${sampleHash(String(f.p.ir))}]` : ''}`;
   const parts = [`dur=${s.duration ?? 'auto'}`, `gain=${s.gain}`, `seed=${s.seed}`];
   if (s.out) parts.push(`out=${s.out}`);
   if (s.loop) parts.push(`loop=${s.loop.length}/${s.loop.fade}`);
@@ -473,9 +482,26 @@ export function layeredBody(s: LayeredSound, sampleHash: (name: string) => strin
   return parts.join('|');
 }
 
-/** Is any layer panned off centre (so the sound has two channels)? */
-export function isStereo(s: LayeredSound): boolean {
-  return s.layers.some((l) => l.p.pan !== 0 || l.envs.pan !== undefined || (l.kind === 'sample' && l.p.side === 'stereo'));
+/** The names of the samples a layer reads: its source's, and the impulse responses of its effects. */
+export function layerSamples(l: Layer): string[] {
+  const out: string[] = [];
+  if (l.kind === 'sample' && l.p.sample) out.push(String(l.p.sample));
+  out.push(...fxSamples(l.fx));
+  return out;
+}
+
+/** The names of the samples an effects chain reads (impulse responses). */
+export function fxSamples(fx: readonly Fx[]): string[] {
+  return fx.flatMap((f) => (f.kind === 'convolve' && f.p.ir ? [String(f.p.ir)] : []));
+}
+
+/** What a sample bank must answer for a stereo check: does the sample have two channels? */
+export interface ChannelProbe { get(name: string): { left?: unknown } | undefined }
+
+/** Is any layer panned off centre (so the sound has two channels)? A convolution on the master chain with a stereo response makes it stereo too, when the bank is given. */
+export function isStereo(s: LayeredSound, bank?: ChannelProbe): boolean {
+  return s.layers.some((l) => l.p.pan !== 0 || l.envs.pan !== undefined || (l.kind === 'sample' && l.p.side === 'stereo'))
+    || (!!bank && s.master.some((f) => f.kind === 'convolve' && !!f.p.ir && f.p.mix !== 0 && !!bank.get(String(f.p.ir))?.left));
 }
 
 /** Layers that sound: not muted, and if any is soloed, only those. */

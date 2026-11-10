@@ -11,7 +11,7 @@ import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
 import { expand, MEASURED_OPS, restoreDerived } from './sampleedit.ts';
-import { instrumentSamples, isSampleOp, settleSampleAdd, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
+import { MAX_IR_SECONDS, type Fx, fxSamples, instrumentSamples, isSampleOp, layerSamples, settleSampleAdd, songDirectSamples, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
 import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSamples, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
 import { normalizePlan } from './normalize.ts';
@@ -499,6 +499,21 @@ export class Writer {
     return outcome;
   }
 
+  /** A convolution that is given no `len` gets the length of its impulse response (to 12 s), so the tail is a number on the tape and not a measurement a replay makes. */
+  private settleConvolve(next: Library, c: Parsed): Parsed {
+    const x = c as unknown as { op: string; kind?: string; off?: boolean; values: [string, string | number][]; text: string };
+    const isFx = x.op === 'fx-add' && x.kind === 'convolve';
+    const isBus = x.op === 'song-send' && x.kind === 'convolve' && !x.off;
+    if (!isFx && !isBus) return c;
+    const ir = x.values.find(([k]) => k === 'ir')?.[1];
+    if (typeof ir !== 'string' || !ir || x.values.some(([k]) => k === 'len')) return c;
+    const e = next.samples.get(ir) ?? this.samples.entry(ir);
+    if (!e || !e.rate) return c;
+    const len = Math.min(MAX_IR_SECONDS, Math.max(0.05, Math.ceil((e.frames / e.rate) * 100) / 100));
+    const text = isFx ? x.text.replace(/( at=\d+)?$/, ` len=${len}$1`) : `${x.text} len=${len}`;
+    return { ...c, values: [...x.values, ['len', isBus ? len : String(len)]], text } as unknown as Parsed;
+  }
+
   private runBatch(req: RunRequest, commands: Parsed[], group: string, tell: (phase: 'item', label?: string) => void, counted: boolean): RunOutcome {
     const parsed = { commands };
     let seq = this.entries.reduce((n, e) => Math.max(n, e.seq), 0);
@@ -524,6 +539,9 @@ export class Writer {
       const gone = new Map<string, string[]>();
       for (const [kind, id, snd] of [...[...trial.library].map(([k, v]) => ['sound', k, v] as const), ...[...trial.library.instruments].map(([k, v]) => ['instrument', k, v] as const)]) {
         for (const n of (kind === 'instrument' ? instrumentSamples(snd as never) : soundSamples(snd as never))) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.set(n, [...(gone.get(n) ?? []), `${kind} ${id}`]);
+      }
+      for (const [id, song] of trial.library.songs) {
+        for (const n of songDirectSamples(song)) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.set(n, [...(gone.get(n) ?? []), `song ${id}`]);
       }
       if (gone.size) {
         const list = [...gone].slice(0, 3).map(([n, who]) => `sample '${n}' is still played by ${who.slice(0, 6).join(', ')}${who.length > 6 ? ` and ${who.length - 6} more` : ''}`);
@@ -572,7 +590,8 @@ export class Writer {
           const loopBefore = loopCmd ? next.get(loopCmd.id) : undefined;
           // A new sample layer reads its sample with the windowed sinc: the writer adds it, so it is written on the tape. A line without `interp` (a document made before it
           // existed) replays as linear, so every earlier render is unchanged.
-          const normal = applyCommand(next, c.op === 'layer-add' && c.kind === 'sample' && !c.values.some(([k]) => k === 'interp') ? { ...c, values: [...c.values, ['interp', 'sinc'] as [string, string]] } : c);
+          const cs: Parsed = c.op === 'fx-add' || c.op === 'song-send' ? this.settleConvolve(next, c) : c;
+          const normal = applyCommand(next, cs.op === 'layer-add' && cs.kind === 'sample' && !cs.values.some(([k]) => k === 'interp') ? { ...cs, values: [...cs.values, ['interp', 'sinc'] as [string, string]] } : cs);
           if (loopCmd && loopBefore && loopBefore.voice === 'layered') {
             const after = next.get(loopCmd.id);
             if (after && after.voice === 'layered') {
@@ -584,7 +603,7 @@ export class Writer {
           }
           if (c.op === 'set' && before && serializeSound(before) === serializeSound(next.get(c.id)!)) warnings.push(`line ${c.line}: ${c.id} already had those values; nothing changed`);
           // a command that stands for several (song new from-bible=, template=) goes on the tape as those commands
-          for (const line of (normal ?? c.text).split('\n')) added.push({ seq: ++seq, by: req.by, at, group, cmd: line });
+          for (const line of (normal ?? cs.text).split('\n')) added.push({ seq: ++seq, by: req.by, at, group, cmd: line });
           // Loudness matching measures a render; the result goes on the tape as plain `sound set … gain=` commands, so a replay never measures.
           const match = this.matchAfter(next, c, counted && (c.op === 'set-new' || c.op === 'set-regen') ? (id) => tell('item', `${c.text.split(' ').slice(0, 3).join(' ')}: ${id}`) : undefined);
           for (const text of match.commands) {
@@ -598,6 +617,33 @@ export class Writer {
         }
       }
       if (errors.length) return { ok: false, errors };
+      // An effect that convolves must name a sample that is in the project, in a sound, an instrument's template or a song.
+      const missingIr = (fx: readonly Fx[], where: string, line: number): void => {
+        fx.forEach((f, k) => {
+          if (f.kind !== 'convolve') return;
+          const ir = String(f.p.ir);
+          if (!ir) errors.push({ line, col: 1, message: `${where} effect ${k + 1} (convolve) has no impulse response (fx set … ir=<sample>)` });
+          else if (!(next.samples.has(ir) || this.samples.info(ir))) errors.push({ line, col: 1, message: `${where} effect ${k + 1} (convolve) names sample '${ir}', which is not in the project (soundclaw sample import <project> <file> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
+        });
+      };
+      for (const [id, snd] of next) {
+        if (snd.voice !== 'layered' || snd === this.library.get(id)) continue;
+        const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
+        snd.layers.forEach((l, i) => missingIr(l.fx, `${id} layer ${i + 1}`, at?.line ?? 1));
+        missingIr(snd.master, `${id} master`, at?.line ?? 1);
+      }
+      for (const [id, ins] of next.instruments) {
+        if (ins === this.library.instruments.get(id)) continue;
+        const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
+        ins.voice.layers.forEach((l, i) => missingIr(l.fx, `instrument ${id} layer ${i + 1}`, at?.line ?? 1));
+        missingIr(ins.voice.master, `instrument ${id} master`, at?.line ?? 1);
+      }
+      for (const [id, song] of next.songs) {
+        if (song === this.library.songs.get(id)) continue;
+        const at = parsed.commands.filter((c) => ('id' in c && c.id === id) || ('song' in c && c.song === id)).at(-1);
+        missingIr(song.master, `song ${id} master`, at?.line ?? 1);
+        for (const k of ['reverb', 'delay', 'convolve'] as const) if (song[k]) missingIr([song[k]!], `song ${id} ${k} bus`, at?.line ?? 1);
+      }
       // A sample layer must name a sample that is in the project.
       for (const [id, snd] of next) {
         if (snd.voice !== 'layered' || snd === this.library.get(id)) continue;

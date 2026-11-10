@@ -17,7 +17,8 @@ import { noteLabel } from './music.ts';
 import { PCM_FORMATS, SAMPLE_LIMITS, type PcmFormat } from './pcm.ts';
 import type { Library } from './sets.ts';
 import { AUTHOR_RE } from './commands.ts';
-import { cloneLayered, type LayeredSound } from './layered.ts';
+import { cloneLayered, fxSamples, layerSamples, type Fx, type LayeredSound } from './layered.ts';
+import { cloneSong, type SongDoc } from './song.ts';
 import type { Sound } from './sound.ts';
 
 /** A sample's name keeps its case, like a sound's id; two names that differ only in case are one name too many. */
@@ -460,10 +461,16 @@ function applyFields(e: SampleEntry, f: Partial<Record<Field, string>>, clear: r
   }
 }
 
-/** The names of the samples a sound's layers play. */
+/** The names of the samples a sound's layers play and its effects convolve with. */
 export function soundSamples(s: Sound): string[] {
   if (s.voice !== 'layered') return [];
-  return [...new Set(s.layers.flatMap((l) => (l.kind === 'sample' && l.p.sample ? [String(l.p.sample)] : [])))];
+  return [...new Set([...s.layers.flatMap(layerSamples), ...fxSamples(s.master)])];
+}
+
+/** The names of the samples a song reads itself, not through its instruments: the impulse responses of its master chain and send buses. */
+export function songDirectSamples(s: SongDoc): string[] {
+  const fx: Fx[] = [...s.master, ...(s.reverb ? [s.reverb] : []), ...(s.delay ? [s.delay] : []), ...(s.convolve ? [s.convolve] : [])];
+  return [...new Set(fxSamples(fx))];
 }
 
 /** The names of the samples an instrument plays: its template's sample layers and its zones. */
@@ -477,12 +484,28 @@ export function sampleUsers(lib: Library): Map<string, string[]> {
   const add = (n: string, who: string) => out.set(n, [...(out.get(n) ?? []), who]);
   for (const s of lib.values()) for (const n of soundSamples(s)) add(n, `sound ${s.id}`);
   for (const i of lib.instruments.values()) for (const n of instrumentSamples(i)) add(n, `instrument ${i.id}`);
+  for (const s of lib.songs.values()) for (const n of songDirectSamples(s)) add(n, `song ${s.id}`);
   return out;
+}
+
+function renameInFx(fx: readonly Fx[], from: string, to: string): void {
+  for (const f of fx) if (f.kind === 'convolve' && f.p.ir === from) f.p.ir = to;
 }
 
 function renameInLayers(s: LayeredSound, from: string, to: string): LayeredSound {
   const c = cloneLayered(s);
-  for (const l of c.layers) if (l.kind === 'sample' && l.p.sample === from) l.p.sample = to;
+  for (const l of c.layers) {
+    if (l.kind === 'sample' && l.p.sample === from) l.p.sample = to;
+    renameInFx(l.fx, from, to);
+  }
+  renameInFx(c.master, from, to);
+  return c;
+}
+
+function renameInSong(s: SongDoc, from: string, to: string): SongDoc {
+  const c = cloneSong(s);
+  renameInFx(c.master, from, to);
+  for (const f of [c.reverb, c.delay, c.convolve]) if (f) renameInFx([f], from, to);
   return c;
 }
 
@@ -518,6 +541,7 @@ export function applySample(lib: Library, cmd: Command): string | undefined {
       samples.clear();
       for (const [k, v] of entries) samples.set(k, v);
       for (const [id, s] of lib) if (s.voice === 'layered' && soundSamples(s).includes(c.name)) lib.set(id, renameInLayers(s, c.name, c.to));
+      for (const [id, s] of lib.songs) if (songDirectSamples(s).includes(c.name)) lib.songs.set(id, renameInSong(s, c.name, c.to));
       for (const [id, i] of lib.instruments) if (instrumentSamples(i).includes(c.name)) lib.instruments.set(id, { ...i, voice: renameInLayers(i.voice, c.name, c.to), ...(i.zones ? { zones: i.zones.map((z) => (z.sample === c.name ? { ...z, sample: c.to } : z)) } : {}) });
       return undefined;
     }
@@ -636,7 +660,7 @@ export function songSamples(lib: Library, songId: string): string[] {
     if (c.inst) insts.add(c.inst);
     for (const i of Object.values(c.kit ?? {})) insts.add(i);
   }
-  return [...new Set([...insts].flatMap((i) => (lib.instruments.get(i) ? instrumentSamples(lib.instruments.get(i)!) : [])))];
+  return [...new Set([...[...insts].flatMap((i) => (lib.instruments.get(i) ? instrumentSamples(lib.instruments.get(i)!) : [])), ...songDirectSamples(song)])];
 }
 
 export type ItemKind = 'sound' | 'instrument' | 'song' | 'sample';

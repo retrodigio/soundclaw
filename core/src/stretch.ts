@@ -73,7 +73,7 @@ function planFor(n: number): FftPlan {
 }
 
 /** In-place forward FFT (e^{-i...}); `inverse` runs the conjugate transform without scaling. */
-function fft(re: Float64Array, im: Float64Array, inverse: boolean): void {
+export function fftInPlace(re: Float64Array, im: Float64Array, inverse: boolean): void {
   const { n, cos, sin, rev } = planFor(re.length);
   for (let i = 0; i < n; i++) {
     const j = rev[i]!;
@@ -229,7 +229,7 @@ export function vocoderStretch(x: Float32Array, ratio: number, rate: number): Fl
     const inCentre = Math.round(c / ratio);
     const a0 = inCentre - N / 2;
     for (let i = 0; i < N; i++) { const p = a0 + i; re[i] = p >= 0 && p < n ? x[p]! * w[i]! : 0; im[i] = 0; }
-    fft(re, im, false);
+    fftInPlace(re, im, false);
     for (let b = 0; b < bins; b++) { mag[b] = Math.sqrt(re[b]! * re[b]! + im[b]! * im[b]!); ph[b] = atan2d(im[b]!, re[b]!); }
     if (k === 0) {
       for (let b = 0; b < bins; b++) syn[b] = ph[b]!;
@@ -268,7 +268,7 @@ export function vocoderStretch(x: Float32Array, ratio: number, rate: number): Fl
     }
     for (let b = 1; b < N / 2; b++) { re[N - b] = re[b]!; im[N - b] = -im[b]!; }
     im[0] = 0; im[N / 2] = 0;
-    fft(re, im, true);
+    fftInPlace(re, im, true);
     const o0 = c - N / 2;
     for (let i = 0; i < N; i++) {
       const o = o0 + i;

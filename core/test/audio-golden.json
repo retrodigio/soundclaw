@@ -1,0 +1,34 @@
+{
+ "renders": {
+  "convolve-layer-room": {
+   "hash": "72baae2bd2015957c77a2114eba6408e29c4f214e64c7762f80389d3e101db09",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "convolve-layer-predelay-gain": {
+   "hash": "713a9d3addde5c9b81f0d0cd25ac7960e7e70b157cf380cc844fba6edabe875f",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "convolve-layer-envelope": {
+   "hash": "b4faa138b1b3d85634838a89c15f4401d5c16bf8eb639998a7eb31f4bf199647",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "convolve-master-stereo-hall": {
+   "hash": "662f25cf8c52b7c41f0750fa4a401c1fc9a6bf19609969beea43623f8590c4b7",
+   "detail": "2 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "convolve-master-mono-room": {
+   "hash": "a07f9be348dffb8c556cfa0ba84c5dc6e33ba129d6bf0d9b8a580969e2f57115",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "convolve-impulse-late": {
+   "hash": "29be0a877630ec4aa418adab61789d43935416785114d6d96c0543404002c15a",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  }
+ }
+}
