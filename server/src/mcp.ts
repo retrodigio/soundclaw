@@ -12,7 +12,7 @@ import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
 import { addLibrary, hitJson, indexLibrary, indexStatsText, listLibraries, listText, readRegistry, searchLibraries, searchText, similarLibraries, stateUnder, useLibraryFile, type SearchResult } from './library.ts';
 import { gcApply, gcPlan, gcReport, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject } from './sampleimport.ts';
-import { sampleCheckText, sampleDescribeText, sampleMeasureJson, isSampleRef } from './sampleview.ts';
+import { sampleCheckText, sampleDescribeText, sampleMeasureJson, isRef } from './sampleview.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { failureLines, normalizePlan } from './normalize.ts';
 import { ProjectError } from './project.ts';
@@ -246,7 +246,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     title: 'Describe a sound or sample',
     description: 'A plain-words summary built only from the measured numbers (length, tonal or noisy, brightness, pitch motion, attack, tail, peak, loudness, onsets), then the numbers and the check summary.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sound: z.string().describe('A sound, a song, `sample:<name>` or `hash:<sha256>` (a sample: the same numbers and words, its provenance and licence, its advisory checks)'), json: z.boolean().optional().describe('The result as one JSON object') }),
+    inputSchema: z.object({ sound: z.string().describe('A sound, a song, `sample:<name>`, `hash:<sha256>` or the path of an audio file outside the project, a reference you may not ship (a sample or file: the same numbers and words, its provenance and licence, its advisory checks)'), json: z.boolean().optional().describe('The result as one JSON object') }),
   }, (a) => w.enqueue(() => {
     try {
       if (w.hasSong(a.sound)) return { content: [text(a.json ? JSON.stringify(songJsonObject(w, a.sound), null, 2) : songNumbersText(w, a.sound))] };
@@ -314,11 +314,11 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     description: 'The numbers and the loudness class of many sounds in one call (all sounds when none are named): per sound its class and target, every number describe gives and every check result. ' +
       'json (default true) returns one JSON document for scripts: {format, pass, sounds: [{id, class: {name, target, tolerance, basis}, numbers, checks, binding}], sets}. A sound\'s class: `sound set <id> class=<name>` or loudness=<LUFS>.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names (default all); `sample:<name>` or `hash:<sha256>` measures a sample'), json: z.boolean().optional().describe('Default true; false gives text') }),
+    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names (default all); `sample:<name>`, `hash:<sha256>` or the path of an audio file (a reference outside the project) measures it as a sample'), json: z.boolean().optional().describe('Default true; false gives text') }),
   }, (a) => w.enqueue(() => {
     try {
-      const refs = (a.sounds ?? []).filter(isSampleRef);
-      const ids = (a.sounds ?? []).filter((x) => !isSampleRef(x));
+      const refs = (a.sounds ?? []).filter((x) => isRef(w, x));
+      const ids = (a.sounds ?? []).filter((x) => !isRef(w, x));
       const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : refs.length ? [] : w.songs().map((x) => x.id);
       const soundIds = ids.filter((x) => !w.hasSong(x));
       const only = (refs.length > 0 && !ids.length) || (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);

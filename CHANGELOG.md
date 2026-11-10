@@ -18,6 +18,9 @@ All notable changes to SoundClaw are listed here. The format follows
   printed twice, as it is and with the second turned to the first's loudness; `compare --match-level` (and `view … compare --match-level`, MCP `view` with
   `matchLevel`) puts the matched one first. The JSON adds `spectralMatchedDb`, `averageSpectrumMatchedDb` and `levelMatchDb`. `generate … like=` ranks
   the takes with the level matched and prints the distance both ways (`distanceWithLevel` in the JSON); `want=` depends on level only when it names it.
+- **`describe`, `measure` and `view` take a reference file path** where they take a sound, as `compare` and `view … compare` already did (and
+  `generate … like=`), so a reference that may not be shipped need not be imported to be read. The numbers, words and views are the sample's; nothing is
+  written to the project.
 - **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
   (to 24), from the threshold and ratio the effect has then; the document holds the number.
 

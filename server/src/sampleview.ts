@@ -2,21 +2,32 @@
 // take a sound; `sample list` filters by the numbers query; `sample check` reports the advisory checks of a sample (a sample is material:
 // its checks never gate `work done`).
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  analyze, checkSample, describeSample, FORMAT_BITS, findOnsets, licenceState, loopView, matchQuery, measureSample, mixdown, parseQuery, pcmChannels, pitchView, resample,
+  analyze, checkSample, describeSample, FORMAT_BITS, findOnsets, licenceState, loopView, matchQuery, measureSample, mixdown, parseQuery, pcmChannels, pcmHash, pitchView, resample,
   seamNumbers, specView, waveView, type Image, type PcmAudio, type QueryFacts, type SampleCheck, type SampleEntry, type SampleMeasure,
 } from '@soundclaw/core';
 import { audioOf } from './sampleedit.ts';
+import { decodeFileBytes } from './sampleimport.ts';
 import { ProjectError } from './project.ts';
 import type { Writer } from './writer.ts';
 
 export const SAMPLE_REF_RE = /^(sample|hash):/;
 export const isSampleRef = (s: string): boolean => SAMPLE_REF_RE.test(s);
 
+/** An audio file outside the project named where a sound is: it must exist, and be no sound, song or set of the project. */
+export function isFileRef(w: Writer, s: string): boolean {
+  if (isSampleRef(s) || w.has(s) || w.hasSong(s) || w.hasSet(s) || !/[\\/.]/.test(s)) return false;
+  try { return existsSync(s) && statSync(s).isFile(); } catch { return false; }
+}
+/** `sample:<name>`, `hash:<sha256>` or the path of an audio file: what `describe`, `measure` and `view` read as numbers of audio rather than a sound of the project. */
+export const isRef = (w: Writer, s: string): boolean => isSampleRef(s) || isFileRef(w, s);
+
 export interface SampleSide {
   label: string;
+  /** Set when the audio is a file outside the project (read, not imported). */
+  file?: string;
   hash: string;
   entry?: SampleEntry;
   audio: PcmAudio;
@@ -25,7 +36,12 @@ export interface SampleSide {
 /** `sample:<name>` or `hash:<digits>` to the audio and its entry (when the tape names it). */
 export function sampleSide(w: Writer, ref: string): SampleSide {
   const m = /^(sample|hash):(.*)$/.exec(ref);
-  if (!m) throw new ProjectError(`'${ref}' is not sample:<name> or hash:<sha256>`);
+  if (!m && isFileRef(w, ref)) {
+    let d;
+    try { d = decodeFileBytes(new Uint8Array(readFileSync(ref)), ref.split(/[\\/]/).pop()!); } catch (e) { throw new ProjectError(`${ref}: ${(e as Error).message}`); }
+    return { label: ref.split(/[\\/]/).pop()!, file: resolve(ref), hash: pcmHash(d.audio), audio: d.audio };
+  }
+  if (!m) throw new ProjectError(`'${ref}' is not sample:<name>, hash:<sha256> or an audio file`);
   if (m[1] === 'sample') {
     const entry = w.samples.entry(m[2]!);
     if (!entry) {
@@ -95,6 +111,7 @@ export function sampleNumbers(m: SampleMeasure): string {
 
 function provenanceLines(w: Writer, s: SampleSide): string[] {
   const e = s.entry;
+  if (s.file) return [`a file outside the project (${s.file}): read for its numbers, not imported`];
   if (!e) return [`not named on the tape (audio ${s.hash.slice(0, 12)} in the store)`];
   const lic = licenceState(e.licence, w.samples.shipPolicy);
   const lines = [`source ${e.prov.source}${e.prov.origin ? ` (${e.prov.origin})` : ''}; licence ${e.licence.id} (${lic.state})${e.tags.length ? `; tags ${e.tags.join(', ')}` : ''}`];

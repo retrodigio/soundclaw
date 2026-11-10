@@ -11,7 +11,7 @@ import {
 import { attributionText, itemSamples, licenceIds, reachedSamples, Library, applyCommand, bindingRules, momentLine, momentOf, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
 import { encodeOgg } from './ogg.ts';
 import { ProjectError } from './project.ts';
-import { isSampleRef, monoAt44, sampleDescribeText, sampleMeasureJson, sampleSide, sampleView } from './sampleview.ts';
+import { isRef, isSampleRef, monoAt44, sampleDescribeText, sampleMeasureJson, sampleSide, sampleView } from './sampleview.ts';
 import { plural } from './report.ts';
 import type { Writer } from './writer.ts';
 
@@ -29,7 +29,7 @@ export function checkLine(m: Measured): string {
 
 /** `describe`: the plain-words summary, then the numbers. */
 export function describeText(w: Writer, id: string): string {
-  if (isSampleRef(id)) return sampleDescribeText(w, id);
+  if (isRef(w, id)) return sampleDescribeText(w, id);
   const m = w.measure(id);
   const moment = momentOf(w.sound(id), w.sets());
   return `${id}: ${describe(m.analysis)}\n${moment ? `${momentLine(moment)}\n` : ''}${formatNumbers(m.analysis)}\n${checkLine(m)}`;
@@ -225,7 +225,7 @@ export function normalizeCommands(w: Writer, names: string[], spec?: string): { 
 
 /** `describe --json` and `render --json`: the sound's JSON (class, numbers, description, checks); render adds the key and the samples' hash. */
 export function describeJson(w: Writer, id: string, extra: Record<string, unknown> = {}): string {
-  if (isSampleRef(id)) return JSON.stringify(sampleMeasureJson(w, id), null, 1);
+  if (isRef(w, id)) return JSON.stringify(sampleMeasureJson(w, id), null, 1);
   return JSON.stringify(soundJson(w, id, extra), null, 1);
 }
 
@@ -248,7 +248,7 @@ export interface ViewResult {
  * compare takes a second sound and adds the difference spectrogram and distance numbers.
  */
 export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers' | 'loop' | 'set' | 'slices', o: { other?: string; out?: string; matchLevel?: boolean } = {}): ViewResult {
-  if (isSampleRef(id) && kind !== 'compare') return sampleView(w, id, kind, o.out);
+  if (isRef(w, id) && kind !== 'compare') return sampleView(w, id, kind, o.out);
   if (kind === 'set') return viewSet(w, id, o.out);
   if (kind === 'compare') return viewCompare(w, id, o.other, o.out, o.matchLevel);
   const m = w.measure(id);

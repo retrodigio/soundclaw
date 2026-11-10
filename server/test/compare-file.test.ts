@@ -103,3 +103,43 @@ describe('compare does not depend on level when asked', () => {
   });
 });
 void distanceLine;
+
+describe('describe, measure and view read a reference file where they read a sound', () => {
+  it('describe and measure give the numbers of a file outside the project, and import nothing', async () => {
+    const { describeText, describeJson, measureJson, isRef } = await import('../src/index.ts');
+    const file = join(f.root, 'ref.wav');
+    writeFileSync(file, encodeWavChannels([f.w.render('a').samples]));
+    expect(isRef(f.w, file)).toBe(true);
+    expect(isRef(f.w, 'a')).toBe(false);
+    expect(isRef(f.w, join(f.root, 'nothing.wav'))).toBe(false);
+    const before = f.w.samples.names().length;
+    const text = describeText(f.w, file);
+    expect(text).toMatch(/^ref\.wav: 0\.50 s/);
+    expect(text).toMatch(/pitch A4/);
+    expect(text).toContain('a file outside the project');
+    const j = JSON.parse(describeJson(f.w, file)) as { ref: string; measure: { duration: number; pitch: { hz: number } } };
+    expect(j.ref).toBe('ref.wav');
+    expect(j.measure.duration).toBeCloseTo(0.5, 2);
+    expect(j.measure.pitch.hz).toBeCloseTo(440, 0);
+    expect(f.w.samples.names().length).toBe(before);
+    expect(measureJson(f.w, ['a']).json).toContain('"id": "a"'); // a sound of the project is still a sound
+  });
+  it('view of a file draws it like a sample, and a file that is not audio says so', () => {
+    const file = join(f.root, 'ref.wav');
+    writeFileSync(file, encodeWavChannels([f.w.render('a').samples]));
+    const v = viewSound(f.w, file, 'spec');
+    expect(v.png.length).toBeGreaterThan(1000);
+    expect(v.text).toContain('ref.wav');
+    const txt = join(f.root, 'notes.txt');
+    writeFileSync(txt, 'not audio');
+    expect(() => viewSound(f.w, txt, 'spec')).toThrow(/notes\.txt/);
+  });
+  it('the CLI: describe and measure take the path', () => {
+    const file = join(f.root, 'ref.wav');
+    writeFileSync(file, encodeWavChannels([f.w.render('a').samples]));
+    const run = (args: string[]): string => execFileSync('node', ['--no-warnings', join(__dirname, '../../cli/bin/soundclaw.js'), ...args], { encoding: 'utf8' });
+    expect(run(['describe', f.dir, file])).toMatch(/^ref\.wav: 0\.50 s/);
+    const m = JSON.parse(run(['measure', f.dir, file, '--json'])) as { samples: { ref: string }[] };
+    expect(m.samples[0]!.ref).toBe('ref.wav');
+  });
+});

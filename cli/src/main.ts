@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, shipPolicyOf, type ViewKind } from '@soundclaw/core';
 import { exportInstrument, formatInstrumentExport, formatInstrumentImport, importInstrument, isSoundFont, soundFontList, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap, SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
-  EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, failureLines, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, SAMPLE_VIEWS, isRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, failureLines, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { addLibrary, hitJson, listLibraries, listText, removeLibrary, searchLibraries, searchText, similarLibraries, stateUnder, tagFile, useLibraryFile } from '@soundclaw/server';
@@ -557,7 +557,7 @@ function cmdView(io: Io, p: Parsed): number {
     io.out(viewKeymap(wr(io, dir), id, one(p, 'out')).text + '\n');
     return 0;
   }
-  if (isSampleRef(id) && kind !== 'compare') {
+  if (isRef(wr(io, dir), id) && kind !== 'compare') {
     if (!(SAMPLE_VIEWS as readonly string[]).includes(kind)) throw new UsageError(`view: a sample has the views ${SAMPLE_VIEWS.join(', ')}, and compare <other> (not '${kind}')`);
     if (other !== undefined) throw new UsageError(`view ${kind}: unexpected '${other}'`);
     io.out(sampleView(wr(io, dir), id, kind, one(p, 'out')).text + '\n');
@@ -778,8 +778,8 @@ function cmdMeasure(io: Io, p: Parsed): number {
   let [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('measure: give a project folder');
   const w = wr(io, dir);
-  const refs = ids.filter(isSampleRef);
-  ids = ids.filter((x) => !isSampleRef(x));
+  const refs = ids.filter((x) => isRef(w, x));
+  ids = ids.filter((x) => !isRef(w, x));
   const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : refs.length ? [] : w.songs().map((x) => x.id);
   const soundIds = ids.filter((x) => !w.hasSong(x));
   const only = refs.length > 0 && !ids.length ? true : (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);

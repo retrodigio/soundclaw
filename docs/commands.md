@@ -1259,12 +1259,12 @@ Each is put on the tape as the `layer set` or `env` it found.
 
 ### Hearing samples
 
-`describe`, `measure`, `view` and `compare` take `sample:<name>` or `hash:<sha256 or its first 8 or more digits>` where they take a sound:
+`describe`, `measure`, `view` and `compare` take `sample:<name>`, `hash:<sha256 or its first 8 or more digits>` or **the path of an audio file** (a WAV, AIFF, FLAC, or OGG, MP3 or M4A with ffmpeg; a reference outside the project that is read for its numbers, never imported, so nothing of it is kept or licensed) where they take a sound. A path counts as a file when it exists and is no sound, song or set of the project; `generate … like=` takes one too:
 
 ```
-soundclaw describe <project> sample:<name> [--json]
-soundclaw measure <project> sample:<name>... [--json]
-soundclaw view <project> sample:<name> wave|spec|pitch|loop|slices [--out <file.png>]
+soundclaw describe <project> sample:<name>|<file> [--json]
+soundclaw measure <project> sample:<name>|<file>... [--json]
+soundclaw view <project> sample:<name>|<file> wave|spec|pitch|loop|slices [--out <file.png>]
 soundclaw view <project> sample:<name> compare <sound|song|sample:<other>|hash:<h>|file>
 soundclaw compare <project> <a> <b> [--match-level] [--json]
 soundclaw sample check <project> [<name>...]
