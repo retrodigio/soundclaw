@@ -135,7 +135,9 @@ describe('library search', () => {
     expect(byMiddle[0]).toBe('foley:bells/BellHigh.wav'); // 1.5 s: dead centre
     expect(byMiddle.slice(-2).sort()).toEqual(['foley:doors/Slam_01.wav', 'foley:doors/creak_02.wav']); // 0.6 s and 2.4 s: furthest out
     expect(find('onsets=4 attack<20ms').length).toBeLessThanOrEqual(5);
-    expect(find('pitched=yes')).toContain('foley:bells/BellHigh.wav');
+    // (the fixture bell is a struck bar with inharmonic partials: its strongest partial is not a note, so it is not pitched)
+    expect(find('pitched=yes')).not.toContain('foley:bells/BellHigh.wav');
+    expect(find('pitched=no')).toContain('foley:bells/BellHigh.wav');
     expect(find('loop=yes')).toEqual(['foley:weather/rain_loop.wav']);
     expect(find('dur<0.7')).toEqual(['foley:doors/Slam_01.wav']);
   });
@@ -158,7 +160,8 @@ describe('library search', () => {
     expect(wordScore(['hammer'], LIB, tagged[3]!.file)).toBeNull();
   });
   it('describes a file in a line of words', () => {
-    expect(fileOneLiner(FILES[3]!.file)).toMatch(/tonal.*one hit/);
+    expect(fileOneLiner(FILES[3]!.file)).toMatch(/one hit/);
+    expect(fileOneLiner(FILES[3]!.file)).not.toMatch(/tonal/); // an inharmonic bell is not called a clear tone
     expect(fileOneLiner(FILES[4]!.file)).toMatch(/noisy/);
     expect(fileOneLiner(FILES[6]!.file)).toBe('not readable: not a WAV');
   });
