@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { startWatchServer, type WatchServer } from './http.ts';
 import { createMcpServer } from './mcp.ts';
-import { acquireLock, createProject, loadProject, releaseLock, type Project } from './project.ts';
+import { acquireLock, alive, createProject, loadProject, releaseLock, type Project } from './project.ts';
 import { lastToken, removeTokenFile, writeTokenFile } from './runfile.ts';
 import { Writer } from './writer.ts';
 
@@ -85,6 +85,15 @@ export async function serve(o: ServeOptions): Promise<Served> {
   const onSignal = (): void => { void close(); };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+
+  // A server started by another program for a while (a test) can be told to stop when that program goes away, however it went
+  // (SOUNDCLAW_PARENT_PID). Without MCP nothing else would: its standard input is not the agent's.
+  const parent = Number(process.env.SOUNDCLAW_PARENT_PID);
+  if (Number.isInteger(parent) && parent > 1) {
+    const watch = setInterval(() => { if (!alive(parent)) { clearInterval(watch); log(`soundclaw: the process that started this server (pid ${parent}) is gone; stopping`); void close(); } }, 1000);
+    watch.unref();
+    void closed.then(() => clearInterval(watch));
+  }
 
   if (o.mcp ?? true) {
     mcp = serveStdio(() => createMcpServer(host, VERSION), { onerror: (e) => log(`soundclaw: mcp: ${e.message}`) });

@@ -54,7 +54,8 @@ export interface Agent {
 export async function startAgent(o: { build?: (dir: string) => void } = {}): Promise<Agent> {
   const root = mkdtempSync(join(tmpdir(), 'soundclaw-e2e-'));
   const dir = join(root, 'demo.sclaw');
-  const env = { ...process.env, SOUNDCLAW_STATE_DIR: join(root, 'state') };
+  // the server stops on its own if this worker is killed outright (no hook or teardown would run then)
+  const env = { ...process.env, SOUNDCLAW_STATE_DIR: join(root, 'state'), SOUNDCLAW_PARENT_PID: String(process.pid) };
   if (o.build) o.build(dir);
   else execFileSync(process.execPath, [BIN, 'new', dir], { env });
   const children = new Set<ChildProcess>();

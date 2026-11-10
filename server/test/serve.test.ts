@@ -84,6 +84,19 @@ describe('the server process', () => {
     expect(existsSync(tf)).toBe(false);
   });
 
+  it('stops on its own when the process named by SOUNDCLAW_PARENT_PID is gone', async () => {
+    const parent = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+    server = spawn(process.execPath, [BIN, 'serve', '--project', dir, '--port', '0', '--no-mcp'], { env: { ...env, SOUNDCLAW_PARENT_PID: String(parent.pid) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '';
+    server.stderr!.on('data', (d: Buffer) => { err += d; });
+    await until(() => /watch at/.test(err), 'the watch URL');
+    const exited = new Promise((r) => server!.once('exit', r));
+    parent.kill('SIGKILL');
+    await exited;
+    expect(err).toMatch(/the process that started this server \(pid \d+\) is gone; stopping/);
+    expect(existsSync(join(dir, LOCK_FILE))).toBe(false);
+  });
+
   it('a server started again on the same folder keeps its token, so an open dashboard reconnects', async () => {
     const first = await startServe();
     server!.kill('SIGTERM');
