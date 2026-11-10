@@ -146,6 +146,8 @@ Sampled sources: recorded, library and generated audio beside synthesis, pinned 
 - A library audition is decoded without hashing the file (a long file started seconds late).
 - The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.
 - `midi import` sent through a running server names the right project folder.
+- On Linux, a CLI command could not reach a server an MCP client had started: the token file went under `$XDG_RUNTIME_DIR`, which MCP
+  clients do not pass to the servers they start. The token file is now always in `~/.soundclaw/run` (or `SOUNDCLAW_STATE_DIR`).
 
 ## [0.1.1] - 2026-11-09
 

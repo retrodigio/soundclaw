@@ -29,6 +29,9 @@ jobs:
       - name: The tag matches the package version
         run: test "v$(node -p "require('./cli/package.json').version")" = "$GITHUB_REF_NAME"
 
+      - name: ffmpeg (the tests decode MP3 and OGG with it, as users with ffmpeg do)
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+
       - name: Install
         run: pnpm install --frozen-lockfile
 

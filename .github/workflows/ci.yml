@@ -26,6 +26,9 @@ jobs:
           node-version: '22.x'       # 22.18 or later: TypeScript runs through Node's type stripping
           cache: pnpm
 
+      - name: ffmpeg (the tests decode MP3 and OGG with it, as users with ffmpeg do)
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
