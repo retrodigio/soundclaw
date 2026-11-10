@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  decodeAudio, itemLicence, licenceState, pcmHash, pcmToSampleData, pcmToWav, resampleMethod, shipPolicyOf, DEFAULT_SHIP_POLICY, noteLabel,
+  decodeAudio, sampleKeyPart, itemLicence, licenceState, pcmHash, pcmToSampleData, pcmToWav, resampleMethod, shipPolicyOf, DEFAULT_SHIP_POLICY, noteLabel,
   SAMPLE_NAME_RE, type Library, type LicenceState, type PcmAudio, type SampleBank, type SampleData, type SampleEntry, type ShipPolicy,
 } from '@soundclaw/core';
 
@@ -30,6 +30,10 @@ export interface SampleInfo {
   source: string;
   tags: string[];
   root?: string;
+  /** Slice points and loop points in frames, loop mode, the licence's attribution is not here. */
+  slices?: number[];
+  loop?: [number, number];
+  loopMode?: string;
   /** A 0.1.x file that is not on the tape yet (`soundclaw upgrade` moves it into the store). */
   legacy?: true;
 }
@@ -115,6 +119,9 @@ export class ObjectStore {
 /** Where a name's audio is: an object of the store, or (a 0.1.x file) a WAV in the samples folder. */
 export interface Resolved {
   hash: string;
+  /** The sample's slice and loop points (frames at its own rate): a layer can play a slice or loop. */
+  slices?: number[];
+  loop?: [number, number];
   /** The file of a 0.1.x sample, when the audio is not in the store. */
   file?: string;
 }
@@ -146,11 +153,14 @@ export class MapBank implements SampleBank {
 
   get(name: string): SampleData | undefined {
     const r = this.resolver(name);
-    return r ? this.load(r) : undefined;
+    const data = r ? this.load(r) : undefined;
+    return data && (r!.slices || r!.loop) ? { ...data, ...(r!.slices ? { slices: r!.slices } : {}), ...(r!.loop ? { loop: r!.loop } : {}) } : data;
   }
 
+  /** What the render key holds for the sample: its audio's hash, with the slice and loop points when it has them. */
   hash(name: string): string | undefined {
-    return this.resolver(name)?.hash;
+    const r = this.resolver(name);
+    return r ? sampleKeyPart(r) : undefined;
   }
 }
 
@@ -223,7 +233,7 @@ export class SampleStore extends MapBank {
 
   private resolve(name: string): Resolved | undefined {
     const e = this.entries().get(name);
-    if (e) return { hash: e.hash };
+    if (e) return { hash: e.hash, ...(e.slices?.length ? { slices: e.slices } : {}), ...(e.loop ? { loop: e.loop } : {}) };
     const l = this.legacyFiles().get(name);
     return l ? { hash: l.entry.hash, file: l.file } : undefined;
   }
@@ -258,7 +268,7 @@ export class SampleStore extends MapBank {
     return {
       name: e.name, sha256: e.hash, rate: e.rate, frames: e.frames, seconds: e.frames / e.rate, channels: e.channels, bytes: x.bytes, format: e.format,
       licence: e.licence.id, licenceState: licenceState(e.licence, this.policy).state, source: e.prov.source, tags: e.tags,
-      ...(e.root !== undefined ? { root: noteLabel(e.root) } : {}), ...(x.legacy ? { legacy: true as const } : {}),
+      ...(e.root !== undefined ? { root: noteLabel(e.root) } : {}), ...(e.slices?.length ? { slices: e.slices } : {}), ...(e.loop ? { loop: e.loop } : {}), ...(e.loopMode ? { loopMode: e.loopMode } : {}), ...(x.legacy ? { legacy: true as const } : {}),
     };
   }
 
@@ -291,7 +301,7 @@ export class SampleStore extends MapBank {
   }
 
   /** What a worker thread needs to read the audio these names stand for: the name, the hash and (a 0.1.x file) where it is. */
-  refs(names: string[]): { name: string; hash: string; file?: string }[] {
+  refs(names: string[]): ({ name: string } & Resolved)[] {
     return names.flatMap((name) => { const r = this.resolve(name); return r ? [{ name, ...r }] : []; });
   }
 
@@ -307,7 +317,7 @@ export class SampleStore extends MapBank {
   bankFor(lib: Library): SampleBank {
     return new MapBank(this.store, (name) => {
       const e = lib.samples.get(name);
-      return e ? { hash: e.hash } : this.resolve(name);
+      return e ? { hash: e.hash, ...(e.slices?.length ? { slices: e.slices } : {}), ...(e.loop ? { loop: e.loop } : {}) } : this.resolve(name);
     });
   }
 

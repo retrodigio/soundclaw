@@ -44,7 +44,7 @@ describe('licence check', () => {
     const text = licenceReportText(items, licencePolicyNote(f.w));
     expect(text).toMatch(/^✓ shippable {3}sound clean {2}\(CC0-1\.0, own\)\n/);
     expect(text).toMatch(/\? unknown {5}sound murky {2}\(unknown\)\n {4}\? sample mystery [0-9a-f]{12} unknown: the licence is not known: set it with sample set <name> licence=<id>/);
-    expect(text).toMatch(/✗ blocked {5}sound noncomm.*\n {4}✗ sample pirated .* CC-BY-NC-4\.0 is blocked by the project's policy \(\*-NC\*\)/);
+    expect(text).toMatch(/✗ blocked {5}sound noncomm.*\n {4}✗ sample pirated .* CC-BY-NC-4\.0 is a non-commercial or no-derivatives licence: it ships only when the project's allow list names it/);
     expect(text).toMatch(/7 items: 4 shippable, 1 with attribution, 1 unknown, 1 blocked/);
     expect(text).toContain('Manifest exports (--all, --set, --pack) refuse these unless --allow-licence <id> is given.');
     expect(text).toContain('SoundClaw records licences; it gives no legal advice.');
@@ -63,9 +63,9 @@ describe('licence check', () => {
     const json = JSON.parse(readFileSync(join(f.dir, 'project.json'), 'utf8')) as Record<string, unknown>;
     writeFileSync(join(f.dir, 'project.json'), JSON.stringify({ ...json, licences: { block: ['unknown'] } }));
     const w = new Writer(loadProject(f.dir));
-    // the block list now names only `unknown`; the allow list is the default, whose CC-BY-* takes CC-BY-NC-4.0 in
-    expect(licenceCheck(w, ['noncomm'])[0]!.state).toBe('attribution');
-    expect(licenceCheck(w, ['noncomm'])[0]!.samples[0]!.reason).toBe('CC-BY-NC-4.0 asks for attribution');
+    // the block list now names only `unknown`; the allow list is the default, whose broad CC-BY-* never admits a non-commercial licence
+    expect(licenceCheck(w, ['noncomm'])[0]!.state).toBe('blocked');
+    expect(licenceCheck(w, ['noncomm'])[0]!.samples[0]!.reason).toMatch(/non-commercial or no-derivatives licence: it ships only when the project's allow list names it/);
     expect(licenceCheck(w, ['murky'])[0]!.state).toBe('unknown');
   });
 });

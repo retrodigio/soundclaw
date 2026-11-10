@@ -2,13 +2,13 @@
 // the samples a sound names (once; the page's token travels with each request), keeps what it has
 // rendered by the render key, and answers with the channels and the hash of their samples.
 
-import { renderParts, peaks, analyze, integratedLoudness, truePeak, fullScaleOf, joinChannels, loudnessCurve, measuredChannels, melSpectrogram, mixdown, specMax, SPEC_RANGE_DB, type PitchFrame, decodeAudio, pcmToSampleData, renderChannels, renderKey, runChecks, samplesHash, type Analysis, type CheckResult, type MelSpec, type SampleBank, type SampleData, type Sound, type Style } from '@soundclaw/core';
+import { sampleKeyPart, renderParts, peaks, analyze, integratedLoudness, truePeak, fullScaleOf, joinChannels, loudnessCurve, measuredChannels, melSpectrogram, mixdown, specMax, SPEC_RANGE_DB, type PitchFrame, decodeAudio, pcmToSampleData, renderChannels, renderKey, runChecks, samplesHash, type Analysis, type CheckResult, type MelSpec, type SampleBank, type SampleData, type Sound, type Style } from '@soundclaw/core';
 
 export interface RenderRequest {
   id: number;
   sound: Sound;
   /** The project's samples this sound names: name and the SHA-256 of the bytes (the key of what to hold). */
-  samples: { name: string; sha256: string }[];
+  samples: { name: string; sha256: string; slices?: number[]; loop?: [number, number] }[];
   token: string;
   /** `render`: the channels (to play). `measure`: the numbers, checks and spectrogram (for an editor), held to `style` (the loudness class `basis`). */
   op?: 'render' | 'measure' | 'strips' | 'lens' | 'diff' | 'cell';
@@ -18,7 +18,7 @@ export interface RenderRequest {
   cols?: number;
   /** `diff`: the sound to compare against, and the samples it names. */
   ref?: Sound;
-  refSamples?: { name: string; sha256: string }[];
+  refSamples?: { name: string; sha256: string; slices?: number[]; loop?: [number, number] }[];
 }
 
 /** What the analysis lenses draw, worked out in the worker from the same measuring code the CLI uses. */
@@ -84,9 +84,14 @@ self.onmessage = async (ev: MessageEvent<RenderRequest>) => {
   try {
     const t0 = performance.now();
     await Promise.all(q.samples.map((s) => ensure(s.name, s.sha256, q.token)));
+    const metaOf = (n: string) => q.samples.find((s) => s.name === n);
     const bank: SampleBank = {
-      get: (n) => held.get(n)?.data,
-      hash: (n) => held.get(n)?.sha ?? q.samples.find((s) => s.name === n)?.sha256,
+      get: (n) => {
+        const data = held.get(n)?.data;
+        const m = metaOf(n);
+        return data && (m?.slices || m?.loop) ? { ...data, ...(m.slices ? { slices: m.slices } : {}), ...(m.loop ? { loop: m.loop } : {}) } : data;
+      },
+      hash: (n) => { const m = metaOf(n); const sha = held.get(n)?.sha ?? m?.sha256; return sha ? sampleKeyPart({ hash: sha, ...(m?.slices ? { slices: m.slices } : {}), ...(m?.loop ? { loop: m.loop } : {}) }) : undefined; },
     };
     const key = renderKey(q.sound, (n) => bank.hash(n) ?? 'missing');
     if (q.op === 'strips') {

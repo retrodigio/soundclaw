@@ -11,6 +11,7 @@ import {
 import { attributionText, itemSamples, licenceIds, reachedSamples, Library, applyCommand, bindingRules, momentLine, momentOf, classTable, cloneSound, loudnessFor, matchGain, parse, serializeSound, ImportError, importBfxr, importJsfxr, limitChannels, looksLikeJsfxr, splitRows, type ImportedRow } from '@soundclaw/core';
 import { encodeOgg } from './ogg.ts';
 import { ProjectError } from './project.ts';
+import { isSampleRef, monoAt44, sampleDescribeText, sampleMeasureJson, sampleSide, sampleView } from './sampleview.ts';
 import { plural } from './report.ts';
 import type { Writer } from './writer.ts';
 
@@ -28,6 +29,7 @@ export function checkLine(m: Measured): string {
 
 /** `describe`: the plain-words summary, then the numbers. */
 export function describeText(w: Writer, id: string): string {
+  if (isSampleRef(id)) return sampleDescribeText(w, id);
   const m = w.measure(id);
   const moment = momentOf(w.sound(id), w.sets());
   return `${id}: ${describe(m.analysis)}\n${moment ? `${momentLine(moment)}\n` : ''}${formatNumbers(m.analysis)}\n${checkLine(m)}`;
@@ -213,6 +215,7 @@ export function normalizeCommands(w: Writer, names: string[], spec?: string): { 
 
 /** `describe --json` and `render --json`: the sound's JSON (class, numbers, description, checks); render adds the key and the samples' hash. */
 export function describeJson(w: Writer, id: string, extra: Record<string, unknown> = {}): string {
+  if (isSampleRef(id)) return JSON.stringify(sampleMeasureJson(w, id), null, 1);
   return JSON.stringify(soundJson(w, id, extra), null, 1);
 }
 
@@ -234,7 +237,8 @@ export interface ViewResult {
  * A view of a sound as a PNG (saved under <project>/.cache/views, or `out`): wave, spec or pitch;
  * compare takes a second sound and adds the difference spectrogram and distance numbers.
  */
-export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers' | 'loop' | 'set', o: { other?: string; out?: string } = {}): ViewResult {
+export function viewSound(w: Writer, id: string, kind: ViewKind | 'compare' | 'layers' | 'loop' | 'set' | 'slices', o: { other?: string; out?: string } = {}): ViewResult {
+  if (isSampleRef(id) && kind !== 'compare') return sampleView(w, id, kind, o.out);
   if (kind === 'set') return viewSet(w, id, o.out);
   if (kind === 'compare') return viewCompare(w, id, o.other, o.out);
   const m = w.measure(id);
@@ -316,6 +320,11 @@ export function readAudioFile(path: string): CompareSide {
 
 /** One side of a comparison: a sound or a song of the project, else an audio file. */
 function compareSide(w: Writer, what: string): CompareSide {
+  if (isSampleRef(what)) {
+    const side = sampleSide(w, what);
+    const mono = monoAt44(side.audio);
+    return { label: side.label, samples: mono, note: `${side.label}: ${side.audio.channels === 1 ? 'mono' : `${side.audio.channels} channels mixed to mono`}, ${side.audio.rate} Hz${side.audio.rate === 44100 ? '' : ' (resampled to 44100 Hz)'}, ${(side.audio.frames / side.audio.rate).toFixed(2)} s`, key: side.hash.slice(0, 8) };
+  }
   if (w.has(what)) return { label: what, samples: w.render(what).samples, note: null, key: w.render(what).key.slice(0, 8) };
   if (w.hasSong(what)) {
     const r = w.bench.render(w.song(what), { mode: 'full' });
@@ -324,7 +333,7 @@ function compareSide(w: Writer, what: string): CompareSide {
     return { label: what, samples: mono, note: `${what}: the song's full mix, mono`, key: r.key.slice(0, 8) };
   }
   if (existsSync(what) && statSync(what).isFile()) return readAudioFile(what);
-  throw new ProjectError(`no sound, song or audio file '${what}' (a sound or song of the project, or the path of a WAV or OGG file)`);
+  throw new ProjectError(`no sound, song or audio file '${what}' (a sound or song of the project, sample:<name>, hash:<sha256>, or the path of a WAV or OGG file)`);
 }
 
 /** `view compare`: two sounds, songs or audio files (a reference outside the project), with the same difference picture and distance numbers. */
@@ -338,6 +347,17 @@ function viewCompare(w: Writer, a: string, b: string | undefined, out?: string):
   writeFileSync(file, c.image.png);
   const notes = [A.note, B.note].filter((x): x is string => x !== null);
   return { png: c.image.png, file, text: `compare view saved to ${file}\n${formatDistance(c.distance, A.label, B.label)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}` };
+}
+
+/** `compare`: the distance numbers between two sounds, songs, samples or audio files (no picture). */
+export function compareText(w: Writer, a: string, b: string): { text: string; json: Record<string, unknown> } {
+  const A = compareSide(w, a), B = compareSide(w, b);
+  const c = compareView(A.samples, B.samples, A.label, B.label);
+  const notes = [A.note, B.note].filter((x): x is string => x !== null);
+  return {
+    text: `${formatDistance(c.distance, A.label, B.label)}\n\n${A.label}: ${describe(c.a)}\n${B.label}: ${describe(c.b)}${notes.length ? `\n${notes.join('\n')}` : ''}`,
+    json: { a: A.label, b: B.label, distance: c.distance, [A.label]: numbersJson(c.a), [B.label]: numbersJson(c.b) },
+  };
 }
 
 /** The set view: the members side by side and the distance matrix. */

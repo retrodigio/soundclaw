@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, type ViewKind } from '@soundclaw/core';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
-  EXPORT_FORMATS, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { soundclawVersion } from './version.ts';
@@ -75,6 +75,8 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         family <sound> near|far|muffled [as=<id>]           the sound heard near, far away or through a wall
         layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]
         layer set <id> <n> <param>=<value> ...   layer remove|move|mute|solo <id> <n> [to=<m> | on|off]
+        layer align <id> <n> to=<m>|start [by=onset|peak]   layer match <id> <n> to=<m> [db=<offset>]   (measured, written as layer set offset= / gain=)
+        env <id> <n>.amp follow=<layer>|sample:<name> [attack=<s>] [release=<s>]   an envelope that follows a layer's or a sample's level
         env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | bursts(times=...|count=... over=...) | clear
         fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit [<param>=<value> ...] [at=<k>]
         fx set|remove|move <id> [layer=<n>] <k> ...
@@ -106,6 +108,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw view <project> <id> loop [--out <file.png>]
   soundclaw view <project> <set> set [--out <file.png>]
   soundclaw view <project> <id|file> compare <other|file> [--out <file.png>]
+  soundclaw view <project> sample:<name>|hash:<sha256> wave|spec|pitch|loop|slices [--out <file.png>]
       The agent's ears as a PNG (saved under <project>/.cache/views, or --out) and the numbers:
       wave (waveform, envelope, clip marks), spec (mel spectrogram with Hz and note rulers),
       pitch (YIN track over a note grid), layers (a layered sound's layers stacked: waveform and
@@ -119,9 +122,15 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       differences in red), mix (each channel's energy by band over time, overlaps in amber), wave and spec
       of the mix, loop (the loop's seam). Printed with the song's numbers: length, loop length, loudness,
       true peak, per-channel loudness, tempo; and the notes that differ, with times.
-  soundclaw describe <project> <id> [--json]
-      A plain-words summary built only from the measured numbers, then the numbers (--json: as a JSON object).
-  soundclaw measure <project> [<id|set>...] [--json]
+  soundclaw describe <project> <id|sample:<name>|hash:<sha256>> [--json]
+      A plain-words summary built only from the measured numbers, then the numbers (--json: as a JSON object). A
+      sample: its numbers (rate, bit depth, channels, noise floor, pitch with confidence, onsets, silence at the ends,
+      runs at full scale), words for organic sound (tonal or noisy, steady or moving, one hit or several, dry or
+      roomy, mono or wide), where it came from, its licence and the advisory checks.
+  soundclaw compare <project> <a> <b> [--json]
+      The distance numbers between two things, each a sound, a song, sample:<name>, hash:<sha256> or an audio file
+      (view ... compare draws the picture too): a sampled version against a synth version of a sound.
+  soundclaw measure <project> [<id|set|sample:<name>>...] [--json]
       The numbers and the loudness class of many sounds in ONE process (all sounds when none are named): per
       sound its class and target, every number describe prints and every check's result. --json prints one JSON
       document for scripts ({format, pass, sounds: [{id, class, numbers, checks, binding}], sets}); exit 1 when any
@@ -146,8 +155,13 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       (exact rows are listed only for a few sounds); --quiet prints just the warnings and the summary line;
       --classic marks every imported sound classic (it stays one classic voice and exports as a synth.csv row).
   soundclaw sample import <project> <file | folder> [as=<name>] [licence=<id>] [attribution="<text>"] [terms=<url>] [tags=a,b] [source=<kind>] [origin="<where from>"] [note="<text>"] [--force]
-  soundclaw sample list <project>
+  soundclaw sample list <project> ["<numbers query>"] [--json]
   soundclaw sample show <project> <name>
+  soundclaw sample check <project> [<name>...]
+  soundclaw sample derive <project> <new> from=<name> op="<operations>" [<field>=<value>...]
+  soundclaw sample slice <project> <name> at=onsets|<t,t,...>|grid=<n> [sensitivity=<0-1>] [min-gap=<s>] [tempo=<bpm>]
+  soundclaw sample loop <project> <name> find [near=<s>-<e>] [min=<s>]   |   sample loop <project> <name> <start> <end>
+  soundclaw sample bounce <project> <new> from=<sound|song> [layer=<n>] [channel=<name>] [loop=yes]
   soundclaw sample add|set <project> <name> <field>=<value>...   |   sample rename <project> <name> <new>   |   sample remove <project> <name>
   soundclaw sample gc <project> [--apply] [--drop-history]
   soundclaw sample git-lfs
@@ -165,6 +179,16 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       the old audio back). remove is refused while a sound or instrument plays it. gc lists objects nothing
       on the tape names (--apply deletes them; --drop-history also those only undone or replaced states
       used, after listing the versions that then stop rendering). git-lfs prints .gitattributes lines.
+      Editing is a command worked out once, when it runs, and written on the tape as plain numbers (a replay
+      measures nothing). derive makes new audio from a sample by a chain separated by ;: trim <s> <e>, fade
+      in=<t> out=<t>, gain <dB>, normalize peak <dBFS> | lufs <target>, silence-trim <dBFS>, dc, reverse,
+      mono | left | right, pitch <semitones> [method=resample|stretch], stretch <ratio> | to=<s> | tempo=<a>:<b>
+      [method=wsola|pv], loop <s> <e> xfade=<t>, slice <n>, mix <sample> at=<t> gain=<dB>; it keeps the parent's
+      licence. slice stores slice points (measured onsets, given times or a grid); loop find settles loop points
+      and prints the seam numbers of the best three; bounce renders a sound, a layer of it or a song into a
+      sample. A numbers query (sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1
+      tag=wood licence=shippable) keeps the samples it fits, closest first. check is advice: clipping, DC, silence
+      at the ends, noise floor, loop seam, slice points off a transient; it never gates work done.
   soundclaw upgrade <project>
       Move a 0.1 project's samples/<name>.wav files into the store as one group by system:upgrade; renders are
       unchanged. Such files work without it.
@@ -327,7 +351,7 @@ export const WRITE_OPTS: Record<string, [string[], string[]]> = {
   midi: [['id', 'by', 'pattern', 'to', 'out'], []],
   import: [['id', 'by'], ['quiet', 'classic']],
   normalize: [['by'], []],
-  sample: [['as', 'by', 'licence', 'license', 'attribution', 'terms', 'tags', 'source', 'origin', 'note'], ['force', 'apply', 'drop-history']],
+  sample: [['as', 'by', 'licence', 'license', 'attribution', 'terms', 'tags', 'source', 'origin', 'note'], ['force', 'apply', 'drop-history', 'json']],
   upgrade: [['by'], []],
   request: [['note', 'by', 'tag', 'like', 'target', 'again'], []],
   reply: [['by'], []],
@@ -453,6 +477,12 @@ function cmdView(io: Io, p: Parsed): number {
     io.out(v.text + '\n');
     return 0;
   }
+  if (isSampleRef(id) && kind !== 'compare') {
+    if (!(SAMPLE_VIEWS as readonly string[]).includes(kind)) throw new UsageError(`view: a sample has the views ${SAMPLE_VIEWS.join(', ')}, and compare <other> (not '${kind}')`);
+    if (other !== undefined) throw new UsageError(`view ${kind}: unexpected '${other}'`);
+    io.out(sampleView(wr(io, dir), id, kind, one(p, 'out')).text + '\n');
+    return 0;
+  }
   if (!['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare'].includes(kind)) throw new UsageError(`view: no view '${kind}' (wave, spec, pitch, layers, loop, set, compare)`);
   if (kind === 'compare' ? !other || extra.length : other !== undefined) throw new UsageError(kind === 'compare' ? 'view compare: give the other sound, song or audio file' : `view ${kind}: unexpected '${other}'`);
   const v = viewSound(wr(io, dir), id, kind as ViewKind | 'compare' | 'layers' | 'loop' | 'set', { other, out: one(p, 'out') });
@@ -478,11 +508,15 @@ const wordOf = (v: string): string => (/^[^\s"\;]+$/.test(v) ? v : `"${v.replace
 function cmdSample(io: Io, p: Parsed): number {
   const [verb, dir, ...rest] = p.pos;
   if (verb === 'git-lfs') { io.out(gitLfsLines()); return 0; }
-  if (!verb || !['import', 'list', 'show', 'add', 'set', 'rename', 'remove', 'gc'].includes(verb)) throw new UsageError('sample: import | list | show | add | set | rename | remove | gc | git-lfs (sample import <project> <file or folder>)');
+  if (!verb || !['import', 'list', 'show', 'add', 'set', 'rename', 'remove', 'gc', 'derive', 'bounce', 'slice', 'loop', 'check'].includes(verb)) throw new UsageError('sample: import | list | show | check | add | set | rename | remove | derive | bounce | slice | loop | gc | git-lfs (sample import <project> <file or folder>)');
   if (!dir) throw new UsageError(`sample ${verb}: give a project folder`);
   if (verb === 'list') {
-    if (rest.length) throw new UsageError('sample list: give a project folder');
-    io.out(sampleListText(wr(io, dir)));
+    if (rest.length > 1) throw new UsageError('sample list: sample list <project> ["<numbers query>"] [--json]');
+    io.out(sampleListText(wr(io, dir), rest[0], { json: p.flags.has('json') }));
+    return 0;
+  }
+  if (verb === 'check') {
+    io.out(sampleCheckText(wr(io, dir), rest) + '\n');
     return 0;
   }
   if (verb === 'show') {
@@ -500,10 +534,10 @@ function cmdSample(io: Io, p: Parsed): number {
     return 0;
   }
   const by = author(p, 'agent:claude', (n) => `agent:${n}`);
-  if (verb === 'add' || verb === 'set' || verb === 'rename' || verb === 'remove') {
+  if (verb === 'add' || verb === 'set' || verb === 'rename' || verb === 'remove' || verb === 'derive' || verb === 'bounce' || verb === 'slice' || verb === 'loop') {
     const [name, ...more] = rest;
     if (!name) throw new UsageError(`sample ${verb}: give a sample name`);
-    const text = verb === 'rename' || verb === 'remove' ? `sample ${verb} ${[name, ...more].join(' ')}` : `sample ${verb} ${name}${Object.entries(pairsFrom(more, `sample ${verb}`)).map(([k, v]) => ` ${k}=${wordOf(v)}`).join('')}`;
+    const text = verb === 'rename' || verb === 'remove' || verb === 'loop' ? `sample ${verb} ${[name, ...more.map(wordOf)].join(' ')}` : `sample ${verb} ${name}${Object.entries(pairsFrom(more, `sample ${verb}`)).map(([k, v]) => ` ${k}=${wordOf(v)}`).join('')}`;
     assertNoServer(dir, io);
     const w = wr(io, dir);
     const r = w.run({ commands: text, by });
@@ -549,6 +583,15 @@ function cmdLicence(io: Io, p: Parsed): number {
   return 0;
 }
 
+/** `compare <project> <a> <b>`: the distance numbers between two sounds, songs, samples or audio files. */
+function cmdCompare(io: Io, p: Parsed): number {
+  const [dir, a, b, ...extra] = p.pos;
+  if (!dir || !a || !b || extra.length) throw new UsageError('compare: give a project folder and two things: a sound, song, sample:<name>, hash:<sha256> or an audio file');
+  const r = compareText(wr(io, dir), a, b);
+  io.out((p.flags.has('json') ? JSON.stringify(r.json, null, 2) : r.text) + '\n');
+  return 0;
+}
+
 function cmdDescribe(io: Io, p: Parsed): number {
   const [dir, id, ...extra] = p.pos;
   if (!dir || !id || extra.length) throw new UsageError('describe: give a project folder and a sound id');
@@ -560,23 +603,26 @@ function cmdDescribe(io: Io, p: Parsed): number {
 
 /** `measure`: numbers, class and checks of many sounds in one process. */
 function cmdMeasure(io: Io, p: Parsed): number {
-  const [dir, ...ids] = p.pos;
+  let [dir, ...ids] = p.pos;
   if (!dir) throw new UsageError('measure: give a project folder');
   const w = wr(io, dir);
-  const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
+  const refs = ids.filter(isSampleRef);
+  ids = ids.filter((x) => !isSampleRef(x));
+  const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : refs.length ? [] : w.songs().map((x) => x.id);
   const soundIds = ids.filter((x) => !w.hasSong(x));
-  const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
+  const only = refs.length > 0 && !ids.length ? true : (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
   if (p.flags.has('json')) {
     const r = only ? { json: '{}', pass: true } : measureJson(w, soundIds);
     const doc = JSON.parse(r.json) as Record<string, unknown>;
     const objs = songIds.map((x) => songJsonObject(w, x) as { pass?: boolean });
     if (songIds.length) doc.songs = objs;
+    if (refs.length) doc.samples = refs.map((x) => sampleMeasureJson(w, x));
     io.out(JSON.stringify(doc, null, 2) + '\n');
     return r.pass && objs.every((o) => o.pass !== false) ? 0 : 1;
   }
   const r = only ? { text: '', pass: true } : measureText(w, soundIds);
   const songTexts = songIds.map((x) => `${songNumbersText(w, x)}\n${songChecksText(w, x).text}`);
-  io.out([r.text, ...songTexts].filter(Boolean).join('\n\n') + '\n');
+  io.out([r.text, ...songTexts, ...refs.map((x) => sampleDescribeText(w, x))].filter(Boolean).join('\n\n') + '\n');
   return r.pass && songIds.every((x) => songChecksText(w, x).pass) ? 0 : 1;
 }
 
@@ -927,6 +973,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'view': return cmdView(io, parseArgs(rest, ['out', 'from', 'to', 'channels'], []));
       case 'midi': return cmdMidi(io, parseArgs(rest, ...WRITE_OPTS.midi!));
       case 'describe': return cmdDescribe(io, parseArgs(rest, [], ['json']));
+      case 'compare': return cmdCompare(io, parseArgs(rest, [], ['json']));
       case 'measure': return cmdMeasure(io, parseArgs(rest, [], ['json']));
       case 'normalize': return cmdNormalize(io, parseArgs(rest, ...WRITE_OPTS.normalize!));
       case 'check': return cmdCheck(io, parseArgs(rest, [], ['json']));

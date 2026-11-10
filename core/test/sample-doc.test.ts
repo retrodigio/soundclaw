@@ -143,6 +143,25 @@ describe('licences', () => {
     expect(shipPolicyOf(undefined)).toEqual(DEFAULT_SHIP_POLICY);
     expect(shipPolicyOf({ allow: 'nonsense' })).toEqual(DEFAULT_SHIP_POLICY);
   });
+  it('non-commercial and no-derivatives licences ship only when the allow list names an NC or ND pattern; a broad pattern never admits them', () => {
+    const st = (id: string, p: Parameters<typeof licenceState>[1]) => licenceState({ id }, p).state;
+    // broad patterns, even `*`, do not admit them (and a policy that drops the default blocks does not either)
+    expect(st('CC-BY-NC-4.0', shipPolicyOf({ allow: ['CC-BY-*'], block: [] }))).toBe('blocked');
+    expect(st('CC-BY-ND-4.0', shipPolicyOf({ allow: ['*'], block: [] }))).toBe('blocked');
+    expect(st('CC-BY-NC-SA-4.0', shipPolicyOf({ allow: ['CC-BY-*', 'own'] }))).toBe('blocked');
+    expect(licenceState({ id: 'CC-BY-NC-4.0' }, shipPolicyOf({ allow: ['CC-BY-*'], block: [] })).reason).toMatch(/non-commercial or no-derivatives/);
+    // an explicit NC or ND pattern admits exactly what it names, over the default block patterns
+    expect(st('CC-BY-NC-4.0', shipPolicyOf({ allow: ['own', 'CC-BY-NC-4.0'] }))).toBe('attribution');
+    expect(st('CC-BY-NC-SA-4.0', shipPolicyOf({ allow: ['own', 'CC-BY-NC-4.0'] }))).toBe('blocked');
+    expect(st('CC-BY-NC-SA-4.0', shipPolicyOf({ allow: ['CC-BY-NC-*'] }))).toBe('attribution');
+    expect(st('CC-BY-ND-4.0', shipPolicyOf({ allow: ['CC-BY-NC-*'] }))).toBe('blocked');
+    expect(st('CC-BY-ND-4.0', shipPolicyOf({ allow: ['*-ND-*'] }))).toBe('attribution');
+    // an explicit block of the same id still wins
+    expect(st('CC-BY-NC-4.0', shipPolicyOf({ allow: ['CC-BY-NC-4.0'], block: ['CC-BY-NC-4.0'] }))).toBe('blocked');
+    // the default policy blocks both
+    expect(st('CC-BY-NC-4.0', DEFAULT_SHIP_POLICY)).toBe('blocked');
+    expect(st('CC-BY-ND-4.0', DEFAULT_SHIP_POLICY)).toBe('blocked');
+  });
   const LIB = `${ADD('own_hit', H1, ' licence=own')}\n${ADD('cc0_air', H2, ' licence=CC0-1.0')}\n${ADD('by_bell', H3, ' licence=CC-BY-4.0 attribution="Bell by Ana"')}\n${ADD('mystery', 'd'.repeat(64))}`;
   it('propagate to every sound, instrument and song that reaches a sample, the worst state winning', () => {
     const lib = build(`${LIB}

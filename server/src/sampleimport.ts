@@ -12,6 +12,7 @@ import {
   type Decoded, type ItemLicence, type LicenceState, type PcmAudio, type SampleEntry, type SampleSource, type TapeEntry,
 } from '@soundclaw/core';
 import { ProjectError } from './project.ts';
+import { sampleQueryText } from './sampleview.ts';
 import type { SampleInfo } from './samples.ts';
 import type { Writer } from './writer.ts';
 
@@ -397,7 +398,8 @@ export { attributionText, reachedSamples, noteLabel };
 const STATE_WORD: Record<LicenceState, string> = { shippable: '✓ shippable', attribution: '✓ attribution', unknown: '? unknown', blocked: '✗ blocked' };
 
 /** `sample list`: one line per sample. */
-export function sampleListText(w: Writer): string {
+export function sampleListText(w: Writer, query?: string, o: { json?: boolean } = {}): string {
+  if (query || o.json) return sampleQueryText(w, query, o) + '\n';
   const all = w.samples.all();
   if (!all.length) return 'no samples (soundclaw sample import <project> <file or folder>)\n';
   return all.map((x) => {

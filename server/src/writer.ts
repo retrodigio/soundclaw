@@ -10,6 +10,7 @@ import { activeGroups, renderKey, AUTHOR_RE, builtinInstruments, lookupInstrumen
 import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
+import { expand, MEASURED_OPS, restoreDerived } from './sampleedit.ts';
 import { isSampleOp, settleSampleAdd, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
 import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSamples, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
@@ -92,6 +93,8 @@ export class Writer {
     }
     this.entries = readTape(project);
     this.library = this.replayed(this.entries);
+    // a derived sample whose audio is not in the store is made again from its parents; the hash must come out the same
+    try { restoreDerived(this, this.library); } catch (e) { throw new ProjectError((e as Error).message); }
     this.hub.attach(readRequestRecords(project));
     this.hub.onPresence = () => this.emit({ type: 'presence', presence: this.hub.presence() });
   }
@@ -514,11 +517,14 @@ export class Writer {
         return { ok: false, errors: [{ line: c.line, col: 1, message: `${c.op} ${target.group} would leave a later change without what it works on (${trial.problems[0]!.message}); ${c.op === 'undo' ? 'undo the later changes first' : 'redo the earlier undo first'}` }] };
       }
       // a sound or instrument must not be left playing a sample that this undo takes away
-      const gone: string[] = [];
+      const gone = new Map<string, string[]>();
       for (const [kind, id, snd] of [...[...trial.library].map(([k, v]) => ['sound', k, v] as const), ...[...trial.library.instruments].map(([k, v]) => ['instrument', k, v.voice] as const)]) {
-        for (const n of soundSamples(snd)) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.push(`${kind} ${id} plays sample '${n}'`);
+        for (const n of soundSamples(snd)) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.set(n, [...(gone.get(n) ?? []), `${kind} ${id}`]);
       }
-      if (gone.length) return { ok: false, errors: [{ line: c.line, col: 1, message: `${c.op} ${target.group} would take away a sample that is still played (${gone.slice(0, 3).join('; ')}${gone.length > 3 ? '; …' : ''}): change those first` }] };
+      if (gone.size) {
+        const list = [...gone].slice(0, 3).map(([n, who]) => `sample '${n}' is still played by ${who.slice(0, 6).join(', ')}${who.length > 6 ? ` and ${who.length - 6} more` : ''}`);
+        return { ok: false, errors: [{ line: c.line, col: 1, message: `${c.op} ${target.group} would take away ${gone.size === 1 ? 'a sample' : 'samples'} that ${gone.size === 1 ? 'is' : 'are'} still played: ${list.join('; ')}${gone.size > 3 ? `; and ${gone.size - 3} more` : ''}. Change those first` }] };
+      }
       next = trial.library;
     } else {
       next = copyLibrary(this.library);
@@ -544,11 +550,25 @@ export class Writer {
             warnings.push(...plan.notes);
             continue;
           }
+          if (MEASURED_OPS.has(c.op)) {
+            // worked out against the batch so far, and put on the tape as the plain commands it found
+            const made = expand({ samples: this.samples, cache: this.cache, seq, renderSong: (song, o) => this.bench.render(song, o) }, next, c);
+            for (const text of made.commands) {
+              const parsedText = parse(text).commands[0]!;
+              const fin: Parsed = isSampleOp(parsedText.op) ? ({ ...settleSampleAdd(parsedText, req.by, at), line: c.line } as Parsed) : parsedText;
+              applyCommand(next, fin);
+              added.push({ seq: ++seq, by: req.by, at, group, cmd: fin.text });
+            }
+            warnings.push(...made.notes);
+            continue;
+          }
           const before = c.op === 'set' ? next.get(c.id) : undefined;
           this.checkClassNames(c);
           const loopCmd = c.op === 'loop' && c.loop ? c : undefined;
           const loopBefore = loopCmd ? next.get(loopCmd.id) : undefined;
-          const normal = applyCommand(next, c);
+          // A new sample layer reads its sample with the windowed sinc: the writer adds it, so it is written on the tape. A line without `interp` (a document made before it
+          // existed) replays as linear, so every earlier render is unchanged.
+          const normal = applyCommand(next, c.op === 'layer-add' && c.kind === 'sample' && !c.values.some(([k]) => k === 'interp') ? { ...c, values: [...c.values, ['interp', 'sinc'] as [string, string]] } : c);
           if (loopCmd && loopBefore && loopBefore.voice === 'layered') {
             const after = next.get(loopCmd.id);
             if (after && after.voice === 'layered') {
@@ -584,6 +604,29 @@ export class Writer {
             errors.push({ line: at?.line ?? 1, col: 1, message: `${id} layer ${i + 1} ${name ? `names sample '${name}', which is not in the project` : 'has no sample'} (soundclaw sample import <project> <file> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
           }
         });
+      }
+      // A layer that plays slice n needs a sample with that many slice points.
+      for (const [id, snd] of next) {
+        if (snd.voice !== 'layered' || snd === this.library.get(id)) continue;
+        snd.layers.forEach((l, i) => {
+          const k = l.kind === 'sample' ? (l.p.slice as number) : 0;
+          if (!k) return;
+          const have = next.samples.get(String(l.p.sample))?.slices?.length ?? 0;
+          if (k > have) {
+            const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
+            errors.push({ line: at?.line ?? 1, col: 1, message: `${id} layer ${i + 1} plays slice ${k}, but sample ${String(l.p.sample)} ${have ? `has ${have} slice${have === 1 ? '' : 's'}` : 'has no slice points'} (sample slice ${String(l.p.sample)} at=onsets, or grid=<n>)` });
+          }
+        });
+      }
+      // Slice points that changed under sounds that play a slice past the new count: said, not refused (the slice plays nothing until the points are back).
+      for (const [name, e] of next.samples) {
+        const was = this.library.samples.get(name);
+        if (!was?.slices || (e.slices?.length ?? 0) >= was.slices.length) continue;
+        for (const [id, snd] of next) {
+          if (snd.voice !== 'layered') continue;
+          const past = snd.layers.findIndex((l) => l.kind === 'sample' && l.p.sample === name && (l.p.slice as number) > (e.slices?.length ?? 0));
+          if (past >= 0) warnings.push(`${id} layer ${past + 1} plays slice ${(snd.layers[past]!.p.slice as number)} of ${name}, which now has ${e.slices?.length ?? 0}: it plays nothing until the slice points are back`);
+        }
       }
       if (errors.length) return { ok: false, errors };
       // A song a batch changed must be able to play: its instruments exist and its patterns fit its channels.

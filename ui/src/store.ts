@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { sampleKeyPart, decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { BatchProgress, CardInfo, ClientMessage, Review, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
 import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
@@ -720,10 +720,11 @@ export class Store {
     get: (name) => {
       const info = this.samples.find((x) => x.name === name);
       const have = this.sampleData.get(name);
-      return info && have && have.sha === info.sha256 ? have.data : undefined;
+      if (!(info && have && have.sha === info.sha256)) return undefined;
+      return info.slices || info.loop ? { ...have.data, ...(info.slices ? { slices: info.slices } : {}), ...(info.loop ? { loop: info.loop } : {}) } : have.data;
     },
     // the server's list says what a sample is; the render key does not wait for the bytes
-    hash: (name) => this.samples.find((x) => x.name === name)?.sha256,
+    hash: (name) => { const x = this.samples.find((y) => y.name === name); return x ? sampleKeyPart({ hash: x.sha256, ...(x.slices ? { slices: x.slices } : {}), ...(x.loop ? { loop: x.loop } : {}) }) : undefined; },
   };
 
   /** Are the samples these names are here (so a render on this thread is whole)? */
@@ -1634,6 +1635,35 @@ export class Store {
   }
 
   /** Play a sound: rendered here with core, handed to Web Audio at the renderer's own rate. */
+  /** Play a sample as it is stored (its own rate and channels), a toggle like playing a sound. */
+  async playSample(name: string): Promise<void> {
+    const key = `sample:${name}`;
+    if (this.playing === key) { this.stop(); return; }
+    this.stop();
+    const token = ++this.playToken;
+    this.playing = key;
+    this.changed();
+    await this.ensureSampleNames([name]);
+    const have = this.sampleData.get(name);
+    if (!have || token !== this.playToken) { if (token === this.playToken) { this.playing = null; this.changed(); } return; }
+    const smp = have.data;
+    const chans = smp.left && smp.right ? [smp.left, smp.right] : [smp.data];
+    this.ctx ??= new AudioContext({ sampleRate: 44100 });
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    if (token !== this.playToken) return;
+    const len = chans[0]!.length;
+    const buf = this.ctx.createBuffer(chans.length, len, smp.rate);
+    chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.out());
+    src.onended = () => { if (this.source === src) { this.source = null; this.playing = null; this.changed(); this.wake(); } };
+    this.source = src;
+    this.played.push({ id: key, loop: false, hash: sha256Text(`${have.sha}|${len}`), samples: len, key, gain: 0 });
+    this.clock = { at: performance.now(), from: 0, len: len / smp.rate, loop: false };
+    src.start();
+  }
+
   async play(id: string): Promise<void> {
     const s = await this.docNow(id);
     this.markSeen(id);

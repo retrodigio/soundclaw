@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { commandHelp, main, type Io } from '../src/main.ts';
 import { aiffBytes, makeAudio, wavBytes } from '../../core/test/audio-fixtures.ts';
+import { pcmFromFloats } from '@soundclaw/core';
+import { hitsFloats, toneFloats } from '../../core/test/sample-golden-table.ts';
 
 let tmp: string;
 let proj: string;
@@ -140,5 +142,62 @@ describe('usage', () => {
     const p = join(tmp, 'x.aiff');
     writeFileSync(p, aiffBytes(makeAudio('pcm16', 2, 900)));
     expect(sc(['sample', 'import', proj, p]).out).toMatch(/^imported sample x: 0\.020 s, 44100 Hz, pcm16, stereo\n/);
+  });
+});
+
+describe('editing and hearing samples from the command line', () => {
+  const load = (): void => {
+    const hits = join(tmp, 'hits.wav');
+    writeFileSync(hits, wavBytes(pcmFromFloats([hitsFloats(22050, 2, 0.5)], 22050, 'pcm16')));
+    const tone = join(tmp, 'tone.wav');
+    writeFileSync(tone, wavBytes(pcmFromFloats([toneFloats(44100, 1)], 44100, 'pcm16')));
+    expect(sc(['sample', 'import', proj, hits, 'licence=CC-BY-4.0', 'attribution=test']).code).toBe(0);
+    expect(sc(['sample', 'import', proj, tone, 'licence=own', 'tags=tonal']).code).toBe(0);
+  };
+
+  it('has verbs for derive, slice, loop and bounce, and a numbers query on list', () => {
+    load();
+    const slice = sc(['sample', 'slice', proj, 'hits', 'at=onsets']);
+    expect(slice.code, slice.err).toBe(0);
+    expect(slice.out).toMatch(/sample set hits slices=0,/);
+    const d = sc(['sample', 'derive', proj, 'hit2', 'from=hits', 'op=slice 2; fade out=10ms; normalize peak -3', 'tags=hit']);
+    expect(d.code, d.err).toBe(0);
+    expect(d.out).toMatch(/sample add hit2 hash=[0-9a-f]{64} rate=22050 channels=1 frames=\d+ format=f32/);
+    const loop = sc(['sample', 'loop', proj, 'tone', 'find', 'min=0.2']);
+    expect(loop.code, loop.err).toBe(0);
+    expect(sc(['sample', 'loop', proj, 'tone', '0.25', '0.75']).code).toBe(0);
+    expect(sc(['run', proj, '-e', 'sound new a voice=layered seed=1\nlayer add a osc wave=sine freq=100 dur=0.2']).code).toBe(0);
+    expect(sc(['sample', 'bounce', proj, 'a_b', 'from=a']).out).toMatch(/sample add a_b hash=/);
+    expect(sc(['sample', 'list', proj, 'source=derived']).out).toMatch(/^hit2 .*derived/);
+    expect(sc(['sample', 'list', proj, 'tag=tonal licence=own', '--json']).out).toMatch(/"name": "tone"/);
+    expect(sc(['sample', 'list', proj, 'nope=1']).err).toMatch(/no key 'nope'/);
+  });
+
+  it('describe, measure, view, compare and check take sample:<name>', () => {
+    load();
+    const d = sc(['describe', proj, 'sample:tone']);
+    expect(d.code, d.err).toBe(0);
+    expect(d.out).toMatch(/^sample:tone: 1\.00 s, 44100 Hz, mono;/);
+    expect(d.out).toMatch(/pitch A3/);
+    const m = sc(['measure', proj, 'sample:hits', '--json']);
+    expect(m.code, m.err).toBe(0);
+    expect((JSON.parse(m.out) as { samples: { ref: string; measure: { onsets: { count: number } } }[] }).samples[0]!.measure.onsets.count).toBe(4);
+    expect(sc(['view', proj, 'sample:tone', 'wave']).out).toMatch(/^wave view saved to /);
+    expect(sc(['view', proj, 'sample:tone', 'slices']).out).toMatch(/onsets found; set them with sample slice tone/);
+    expect(sc(['view', proj, 'sample:tone', 'layers']).err).toMatch(/a sample has the views wave, spec, pitch, loop, slices/);
+    const c = sc(['compare', proj, 'sample:tone', 'sample:hits', '--json']);
+    expect(c.code, c.err).toBe(0);
+    expect((JSON.parse(c.out) as { a: string }).a).toBe('sample:tone');
+    expect(sc(['sample', 'check', proj]).out).toMatch(/2 samples checked/);
+    expect(sc(['describe', proj, 'sample:ghost']).err).toMatch(/no sample 'ghost'/);
+  });
+
+  it('the usage and the reference carry the new commands', () => {
+    const ref = readFileSync(join(import.meta.dirname, '..', '..', 'docs', 'commands.md'), 'utf8');
+    for (const c of ['sample derive', 'sample slice', 'sample loop', 'sample bounce', 'sample check', 'compare', 'layer align', 'layer match']) {
+      expect(ref, c).toContain(c);
+    }
+    for (const c of ['sample derive <project>', 'sample slice <project>', 'sample loop <project>', 'sample bounce <project>', 'sample check <project>']) expect(commandHelp('sample'), c).toContain(`soundclaw ${c}`);
+    expect(commandHelp('compare')).toContain('soundclaw compare <project> <a> <b>');
   });
 });

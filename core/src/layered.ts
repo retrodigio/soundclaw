@@ -42,15 +42,20 @@ export interface PSpec {
   text?: boolean;
   /** The parameter may be absent (a seed). */
   optional?: boolean;
+  /** Left out of a sound's text and render key while it has its default, so documents made before the parameter existed read and render as they did. */
+  quiet?: boolean;
 }
 
 const num = (name: string, min: number, max: number, def: number, unit: string, help: string, env = false, integer = false): PSpec => ({ name, min, max, default: def, unit, help, env, ...(integer ? { integer } : {}) });
+const quietly = (s: PSpec): PSpec => ({ ...s, quiet: true });
 const choice = (name: string, choices: readonly string[], def: string, help: string): PSpec => ({ name, min: 0, max: 0, default: def, unit: '', help, env: false, choices });
 const text = (name: string, def: string, help: string): PSpec => ({ name, min: 0, max: 0, default: def, unit: '', help, env: false, text: true });
 
 export const FILTER_TYPES = ['off', 'lp', 'hp', 'bp', 'notch'] as const;
 export const OSC_WAVES = ['sine', 'square', 'saw', 'triangle', 'pulse', 'wavetable', 'white', 'pink', 'brown', 'metal'] as const;
 export const FM_ALGOS = ['chain', 'fan', 'pairs', 'parallel'] as const;
+export const SAMPLE_INTERPS = ['linear', 'cubic', 'sinc'] as const;
+export const STRETCH_METHODS = ['wsola', 'pv'] as const;
 export const BUILTIN_TABLES = ['organ', 'bell', 'reed', 'hollow'] as const;
 
 /** What every layer has, whatever its source. */
@@ -102,6 +107,14 @@ export const SOURCE_SPECS: Record<Exclude<SourceKind, 'classic'>, readonly PSpec
     num('pitch', -48, 48, 0, 'semitones', 'transposition (the sample\'s length changes with it)', true),
     num('reverse', 0, 1, 0, '', '1 plays it backwards', false, true),
     choice('side', ['mix', 'left', 'right', 'stereo'], 'mix', 'which channel of a stereo file: mix (both averaged), left or right (a mono file is the same in each), or stereo: both channels, left to the left and right to the right, through one layer\'s filter, envelope and effects (the layer\'s pan does not apply; a mono file plays in both)'),
+    quietly(num('slice', 0, 1024, 0, '', 'play only slice n of the sample (1 = from its first slice point to the next; 0 = the whole sample): see `sample slice`', false, true)),
+    quietly(num('fade-in', 0, 10, 0, 's', 'fade the start of what plays in over this long')),
+    quietly(num('fade-out', 0, 10, 0, 's', 'fade the end of what plays out over this long')),
+    quietly(num('stretch', 0.25, 4, 1, '', 'time stretch without a change of pitch: 2 plays it twice as long (applied before `pitch`)')),
+    quietly(choice('method', STRETCH_METHODS, 'wsola', 'how `stretch` works: wsola (hits, speech, noise) or pv (a phase vocoder: tones, pads)')),
+    quietly(num('loop', 0, MAX_DURATION, 0, 's', 'repeat the sample\'s loop (its loop points, else the part that plays) until the layer is this long; 0 plays it once')),
+    quietly(num('xfade', 0, 2, 0.01, 's', 'crossfade at each seam of `loop`')),
+    quietly(choice('interp', SAMPLE_INTERPS, 'linear', 'how the sample is read between its frames: linear (what documents without this setting use), cubic, or sinc (a windowed sinc whose cut-off follows the pitch, so pitching up does not alias; new layers are made with sinc)')),
   ],
 };
 
@@ -434,7 +447,7 @@ export function serializeLayered(s: LayeredSound): string[] {
   s.layers.forEach((l, i) => {
     const specs = layerSpecs(l.kind);
     const flags = `${l.mute ? ' muted' : ''}${l.solo ? ' solo' : ''}`;
-    lines.push(`layer ${i + 1} ${l.kind}${flags} ${specs.filter((sp) => l.p[sp.name] !== undefined).map((sp) => `${sp.name}=${fmtValue(l.p[sp.name]!)}`).join(' ')}`);
+    lines.push(`layer ${i + 1} ${l.kind}${flags} ${specs.filter((sp) => l.p[sp.name] !== undefined && !(sp.quiet && l.p[sp.name] === sp.default)).map((sp) => `${sp.name}=${fmtValue(l.p[sp.name]!)}`).join(' ')}`);
     if (l.amp) lines.push(`  env ${i + 1}.amp ${q(formatEnv(l.amp))}`);
     for (const [k, e] of Object.entries(l.envs)) lines.push(`  env ${i + 1}.${k} ${q(formatEnv(e))}`);
     fxLines(l.fx, '  ', `${i + 1}.`);
@@ -452,7 +465,7 @@ export function layeredBody(s: LayeredSound, sampleHash: (name: string) => strin
   s.layers.forEach((l) => {
     if (l.mute) { parts.push(`L${l.salt}:muted`); return; }
     const specs = layerSpecs(l.kind);
-    const vals = specs.filter((sp) => l.p[sp.name] !== undefined).map((sp) => `${sp.name}=${fmtValue(l.p[sp.name]!)}`);
+    const vals = specs.filter((sp) => l.p[sp.name] !== undefined && !(sp.quiet && l.p[sp.name] === sp.default)).map((sp) => `${sp.name}=${fmtValue(l.p[sp.name]!)}`);
     const sampleName = l.kind === 'sample' ? String(l.p.sample) : '';
     parts.push(`L${l.salt}:${l.kind}${l.solo ? ':solo' : ''}(${vals.join(',')})${sampleName ? `[${sampleHash(sampleName)}]` : ''}amp=${l.amp ? formatEnv(l.amp) : '-'};${Object.keys(l.envs).sort().map((k) => `${k}=${formatEnv(l.envs[k]!)}`).join(',')};${l.fx.map(fx).join('>')}`);
   });

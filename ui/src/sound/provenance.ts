@@ -5,7 +5,7 @@
 // sound as it stood after each group that changed it: the versions a set's clip grid shows (the
 // replay only applies commands; nothing is measured in it). Pure functions, no DOM.
 
-import { CLASSIC_KEYS, Library, applyCommand, cloneSound, effectiveEntries, parse, renderKey, soundSamples, type Fx, type Layer, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { sampleKeyPart, CLASSIC_KEYS, Library, applyCommand, cloneSound, effectiveEntries, parse, renderKey, soundSamples, type Fx, type Layer, type Sound, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 
 /** The latest group to change something, and what it was before. */
 export interface Trail {
@@ -101,7 +101,7 @@ export function provenanceOf(tape: readonly TapeEntry[], id: string): Provenance
       const cmds = curEntries.map((e) => e.cmd).filter((c) => c.split(/\s+/).slice(0, 4).includes(id));
       out.groups.push({ group: cur, by, ...(first.at ? { at: first.at } : {}), seq: base.seq, cmds, kinds: [] });
       // a group that changed only words or a status (a mark, a moment, a class) leaves the version as it was
-      const key = renderKey(now, (n) => lib.samples.get(n)?.hash ?? 'none');
+      const key = renderKey(now, (n) => { const e = lib.samples.get(n); return e ? sampleKeyPart(e) : 'none'; });
       if (out.snapshots.at(-1)?.key !== key) out.snapshots.push({ seq: base.seq, group: cur, by, ...(first.at ? { at: first.at } : {}), doc: cloneSound(now), samples, key });
       else { const last = out.snapshots[out.snapshots.length - 1]!; last.doc = cloneSound(now); last.samples = samples; }
       if (before) {

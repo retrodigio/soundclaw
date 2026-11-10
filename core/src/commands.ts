@@ -161,6 +161,10 @@ export type Command =
   | { op: 'layer-move'; id: string; n: number; to: number; text: string }
   | { op: 'layer-flag'; id: string; n: number; flag: 'mute' | 'solo'; on: boolean; text: string }
   | { op: 'env'; id: string; target: string; env: Env | null; text: string }
+  // measured when the writer runs them and put on the tape as the plain `layer set` / `env` they found
+  | { op: 'layer-align'; id: string; n: number; to: number | 'start'; by: 'onset' | 'peak'; text: string }
+  | { op: 'layer-match'; id: string; n: number; to: number; db: number; text: string }
+  | { op: 'env-follow'; id: string; layer: number; source: { layer: number } | { sample: string }; attack: number | null; release: number | null; text: string }
   | { op: 'fx-add'; id: string; layer: number | null; kind: FxKind; values: Raw; at: number | null; text: string }
   | { op: 'fx-set'; id: string; layer: number | null; k: number; values: Raw; text: string }
   | { op: 'fx-remove'; id: string; layer: number | null; k: number; text: string }
@@ -258,7 +262,30 @@ function parseLayer(rest: Token[], head: Token, line: number): Command {
     const on = onOff(args[2], line, `layer ${verb.v} ${id} ${n}`, true);
     return { op: 'layer-flag', id, n, flag: verb.v, on, text: `layer ${verb.v} ${id} ${n} ${on ? 'on' : 'off'}` };
   }
-  throw new DiagError(line, verb.col, `unknown layer command '${verb.v}' (add, set, remove, move, mute, solo)`);
+  if (verb.v === 'align') {
+    // layer align <id> <n> to=<m>|start [by=onset|peak]
+    const n = countOf(args[1], line, `layer align ${id}`);
+    const { values } = pairsOf(args.slice(2), line, `layer align ${id} ${n}`);
+    for (const [k] of values) if (k !== 'to' && k !== 'by') throw new DiagError(line, verb.col, `layer align ${id} ${n}: no option '${k}' (to=<layer>|start, by=onset|peak)`);
+    const to = values.find(([k]) => k === 'to')?.[1];
+    const by = values.find(([k]) => k === 'by')?.[1] ?? 'onset';
+    if (to === undefined || (to !== 'start' && !/^[1-9]\d*$/.test(to))) throw new DiagError(line, verb.col, `layer align ${id} ${n}: to=<layer number> or to=start`);
+    if (by !== 'onset' && by !== 'peak') throw new DiagError(line, verb.col, `layer align ${id} ${n}: by=onset or by=peak`);
+    return { op: 'layer-align', id, n, to: to === 'start' ? 'start' : Number(to), by, text: `layer align ${id} ${n} to=${to} by=${by}` };
+  }
+  if (verb.v === 'match') {
+    // layer match <id> <n> to=<m> [db=<offset>]
+    const n = countOf(args[1], line, `layer match ${id}`);
+    const { values } = pairsOf(args.slice(2), line, `layer match ${id} ${n}`);
+    for (const [k] of values) if (k !== 'to' && k !== 'db') throw new DiagError(line, verb.col, `layer match ${id} ${n}: no option '${k}' (to=<layer>, db=<offset>)`);
+    const to = values.find(([k]) => k === 'to')?.[1];
+    const db = values.find(([k]) => k === 'db')?.[1];
+    if (to === undefined || !/^[1-9]\d*$/.test(to)) throw new DiagError(line, verb.col, `layer match ${id} ${n}: to=<layer number>`);
+    const off = db === undefined ? 0 : numberOf(db);
+    if (off === null) throw new DiagError(line, verb.col, `layer match ${id} ${n}: db= is a number of dB`);
+    return { op: 'layer-match', id, n, to: Number(to), db: off, text: `layer match ${id} ${n} to=${to}${off ? ` db=${off}` : ''}` };
+  }
+  throw new DiagError(line, verb.col, `unknown layer command '${verb.v}' (add, set, remove, move, mute, solo, align, match)`);
 }
 
 /** `adsr(a,d,s,r[,hold])` as breakpoints. */
@@ -282,6 +309,23 @@ function parseEnvCommand(rest: Token[], head: Token, line: number): Command {
     while (k < rest.length && !v.endsWith(')')) v += ' ' + rest[k++]!.v;
     body = { ...body, v };
     rest = [...rest.slice(0, 2), body, ...rest.slice(k)];
+  }
+  if (target && body && /^follow=/.test(body.v)) {
+    // env <id> <n>.amp follow=<layer number>|sample:<name> [attack=<s>] [release=<s>]
+    const what = `env ${id} ${target.v}`;
+    if (!/^\d+\.amp$/.test(target.v)) throw new DiagError(line, target.col, `${what}: follow= makes an amplitude envelope (target N.amp)`);
+    const m = /^follow=(?:layer:)?(\d+)$|^follow=sample:([A-Za-z0-9][A-Za-z0-9_-]{0,47})$/.exec(body.v);
+    if (!m) throw new DiagError(line, body.col, `${what}: follow=<layer number> or follow=sample:<name>`);
+    const opts: Record<string, number> = {};
+    for (const t of rest.slice(3)) {
+      const o = /^(attack|release)=(.*)$/.exec(t.v);
+      const v = o ? numberOf(o[2]!) : null;
+      if (!o || v === null || v < 0 || v > 5) throw new DiagError(line, t.col, `${what}: '${t.v}' is not attack=<s> or release=<s> (0 to 5)`);
+      opts[o[1]!] = v;
+    }
+    const source = m[1] ? { layer: Number(m[1]) } : { sample: m[2]! };
+    const layer = Number(target.v.split('.')[0]);
+    return { op: 'env-follow', id, layer, source, attack: opts.attack ?? null, release: opts.release ?? null, text: `env ${id} ${target.v} follow=${'layer' in source ? source.layer : 'sample:' + source.sample}${opts.attack !== undefined ? ` attack=${opts.attack}` : ''}${opts.release !== undefined ? ` release=${opts.release}` : ''}` };
   }
   if (!target || !body || rest.length > 3) throw new DiagError(line, (target ?? head).col, `env ${id}: env <id> <target> "<breakpoints>" (or adsr(a,d,s,r), bursts(times=...), or clear); targets like 1.freq, 2.amp, 1.fx2.mix, master.fx1.mix`);
   let env: Env | null;
@@ -990,6 +1034,8 @@ export function applyCommand(lib: Library, c: Command): string | undefined {
       throw new Error(`${c.op} is applied by the history, not to a sound`);
     case 'normalize':
       throw new Error('normalize is worked out by the writer, which puts the commands it measured on the tape');
+    case 'layer-align': case 'layer-match': case 'env-follow':
+      throw new Error(`${c.text.split(' ').slice(0, 2).join(' ')} is measured by the writer, which puts the layer set / env command it found on the tape`);
     default:
       if (isSampleOp(c.op)) return applySample(lib, c);
       if (isMusicOp(c.op)) return applyMusic(lib, c as MusicCommand);

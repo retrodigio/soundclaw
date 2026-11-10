@@ -5,10 +5,10 @@ import { parentPort, workerData } from 'node:worker_threads';
 import type { Sound, Style } from '@soundclaw/core';
 import { CardFiles, buildCard } from './card.ts';
 import { RenderCache } from './cache.ts';
-import { MapBank, ObjectStore } from './samples.ts';
+import { MapBank, ObjectStore, type Resolved } from './samples.ts';
 
 /** `samples`: the audio the sound's sample layers name, by name and hash (a 0.1.x file by its path). */
-export interface CardJob { n: number; sound: Sound; key: string; style: Style; basis: string; samples: { name: string; hash: string; file?: string }[] }
+export interface CardJob { n: number; sound: Sound; key: string; style: Style; basis: string; samples: ({ name: string } & Resolved)[] }
 
 const dir = (workerData as { dir: string }).dir;
 const objects = new ObjectStore(dir);

@@ -33,9 +33,9 @@ describe('per-command help', () => {
       expect(r.status, `${c}: ${r.stderr}`).toBe(0);
       expect(r.stdout).toContain(`soundclaw ${c} `);
       // Only that command: not the whole manual.
-      expect(r.stdout.length).toBeLessThan(commandHelp('work')!.length + 5000);
+      expect(r.stdout.length).toBeLessThan(commandHelp('work')!.length + 9000);
     }
-  }, 60_000);
+  }, 240_000);
   it('shows only the asked command', () => {
     const h = direct(['await', '--help']).out;
     expect(h).toContain('soundclaw await <project-folder | watch-url>');

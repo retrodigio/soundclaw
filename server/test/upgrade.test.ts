@@ -106,7 +106,7 @@ describe('a 0.1.x project', () => {
     const r = w.run({ commands: 'undo', by: claude });
     // sounds play these samples, so the undo is refused: a name cannot go while a sound plays it
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]!.message).toMatch(/would take away a sample that is still played \(sound \w+ plays sample '/);
+    if (!r.ok) expect(r.errors[0]!.message).toMatch(/would take away (a sample|samples) that (is|are) still played: sample '\w+' is still played by sound \w+/);
     expect(w.samples.store.list()).toHaveLength(hashes);
   });
   it('a name already on the tape is left alone: its file stays and is reported', () => {

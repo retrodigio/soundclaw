@@ -1,0 +1,211 @@
+{
+ "renders": {
+  "interp-linear-up": {
+   "hash": "ddda9847126bf26eddef01d5d4ecb85982e5cfd02884ffbbd510db4d992278ba",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "interp-cubic-up": {
+   "hash": "8162880ff03efbfe8caf93d49190de76d1d7d6dffdee92a24bf7343f7f71ec66",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "interp-sinc-up": {
+   "hash": "496bc79972107c8c879ada9dd852a8e9a1c58e529b7ca3cae3882c3828092be5",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "interp-sinc-down": {
+   "hash": "27191b9e38e0cb3dadbb3a15e60b65eafad3719bc24eff07ad1da1f4e5aec88c",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "interp-sinc-resampled-source": {
+   "hash": "2a38accdbdfdde85ee91d1ad470d1ecc4820bf06e9de3c45a227868136988e58",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "interp-sinc-pitch-envelope": {
+   "hash": "0d15e30fc8a23429863b7388fb1cdc9fc7cf4566a53305068b7eacd1ba766bb1",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-reverse-sinc": {
+   "hash": "812f923b2fe723e43f8943e1ef460aa6ade1414e5a7269e32dc31db2ee377eb1",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-slice-2": {
+   "hash": "c545bb9127f3561fda86af7f4cd4f0f598860a1689c2fb076c2c65509bb5728c",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-slice-and-trim": {
+   "hash": "54aa9aee6f98b01d6bc7352dcae473d490bab9f3ee2121d65da6c313754247b7",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-fades": {
+   "hash": "3d8f0435bbedef0d1351f9ae4a382fe211fd134f42633c6a0e549739d4acbd6e",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-fade-only-keeps-linear-read": {
+   "hash": "da9f61998f809958ac812710ee272dff191b329076d29388834d1bd6b36ca684",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-stretch-wsola-slower": {
+   "hash": "ba77f89ada46217f8176bbd2684b290337bfe77ba9824851b6b581285806317a",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-stretch-pv-faster": {
+   "hash": "bccdca76b9f10ad3bef100a93826df1c6c1c03584c43cc2d4f60e379f031a35d",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-stretch-and-pitch": {
+   "hash": "4107540edecebaedf65f47e49c702412f8f0bc59de5e9bf4804b9cc6d1e31987",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-loop-points": {
+   "hash": "59a44b82e633d1b4fa947a74ae4f43285259d1af23838298952b07863eba90fb",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-loop-whole-sample": {
+   "hash": "4c70138c1cebee90fcf29d1d73436cbdb684b7a3964f11b19a5531b6c9f3595b",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-loop-of-a-slice": {
+   "hash": "3e04eecaa9cfa35a3973a4f8e3526ebead061316863cd5e465ed9123c5751c5e",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-stereo-stretch": {
+   "hash": "fc73cb2f23919927bcbcba1d2999fae3034c3ecc407a55b83a9dd8f85755c9e1",
+   "detail": "2 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "edit-stereo-loop": {
+   "hash": "f4b09040a96c0afa2ccec4b6278731934a2fde4f7ec27e4b4c275d746872f52c",
+   "detail": "2 ch, 52920 samples",
+   "renderVersion": 4
+  }
+ },
+ "derives": {
+  "trim": {
+   "hash": "a9112d2b9b521cb55f589e2748ac949206b3378c80ac52299235b1f42bc06a7d",
+   "detail": "1 ch, 22050 frames at 44100 Hz",
+   "settled": "trim 4410f 26460f"
+  },
+  "trim-frames-and-end": {
+   "hash": "d02408e1557f0da826ba442a60f1597413b132ccd185b64bc20311bfdb2bbef8",
+   "detail": "1 ch, 44000 frames at 44100 Hz",
+   "settled": "trim 100f 44100f"
+  },
+  "fade-curves": {
+   "hash": "fecb2e8dcba871b845c0a9443303df356fe15fad061a1f114c0210e1500c4028",
+   "detail": "1 ch, 44100 frames at 44100 Hz",
+   "settled": "fade in=1323f@exp out=8820f@ease"
+  },
+  "gain": {
+   "hash": "4c87b8d2d70fc5551df25b26fb7b75b4bb621d39799cf1a5048f8d823f1ae4ec",
+   "detail": "1 ch, 44100 frames at 44100 Hz",
+   "settled": "gain -6"
+  },
+  "normalize-peak": {
+   "hash": "4e956e79467731573ea1014437584abf18d53859b36619cfeb8ccb8d1c9eef8e",
+   "detail": "1 ch, 44100 frames at 44100 Hz",
+   "settled": "gain 0.2176"
+  },
+  "normalize-lufs": {
+   "hash": "a60957c09e4c80bd5232d89ff67a15cf2dde3ac718f272b2de68e34f48f18464",
+   "detail": "1 ch, 44100 frames at 22050 Hz",
+   "settled": "gain 0.361"
+  },
+  "silence-trim": {
+   "hash": "8d4da6b0030445891920a4b1385686dc2619422459ac26746b1ec72eb746b083",
+   "detail": "1 ch, 23204 frames at 22050 Hz",
+   "settled": "trim 2205f 35280f; trim 8820f 32024f"
+  },
+  "dc": {
+   "hash": "833bd2029fe26c78e945465a9202c6a70e9d44fdb530c05222f2ac918cc66ee6",
+   "detail": "1 ch, 44100 frames at 44100 Hz",
+   "settled": "gain -12; dc"
+  },
+  "reverse": {
+   "hash": "50be75608c6a4f75dbe27f92a5301f4740dc60640a585681e08d5a4a08a704b8",
+   "detail": "1 ch, 44100 frames at 44100 Hz",
+   "settled": "reverse"
+  },
+  "mono": {
+   "hash": "f98138b35cdda2c9b3a35f61d789979146d867702845e39e3ad2f8fe93272b7c",
+   "detail": "1 ch, 35280 frames at 44100 Hz",
+   "settled": "mono"
+  },
+  "left": {
+   "hash": "df84728e67eb80412e378ce18b47e71c1bbc9f0e6d78ec1f6f59b8d600bcc716",
+   "detail": "1 ch, 35280 frames at 44100 Hz",
+   "settled": "left"
+  },
+  "right": {
+   "hash": "1d0e56135ca1e89904a8923c77ed6e13a20c3f4c0fea7d5831a2d68ba38db908",
+   "detail": "1 ch, 35280 frames at 44100 Hz",
+   "settled": "right"
+  },
+  "pitch-resample": {
+   "hash": "678a4e7f4c89992e2a1115f865bab87df23e70a92975a6deabb5fa3e4256490f",
+   "detail": "1 ch, 33038 frames at 44100 Hz",
+   "settled": "pitch 5 method=resample"
+  },
+  "pitch-stretch": {
+   "hash": "77d7d0ea243e6c9343a7f440efec7efc5cdb82dd6b200ed86f41390242c08c64",
+   "detail": "1 ch, 44100 frames at 44100 Hz",
+   "settled": "pitch -7 method=stretch"
+  },
+  "stretch-wsola": {
+   "hash": "3274eff2ca7ab3062ee912a4dd185074ca48befd12527a428558531fc435492a",
+   "detail": "1 ch, 66150 frames at 22050 Hz",
+   "settled": "stretch 1.5 method=wsola"
+  },
+  "stretch-pv": {
+   "hash": "922a09f46c502724753be94ed68c24c0888b051e60f958bf2d2e7494febe78de",
+   "detail": "1 ch, 35280 frames at 44100 Hz",
+   "settled": "stretch 0.8 method=pv"
+  },
+  "stretch-to": {
+   "hash": "bc6e106df7cb7f0e61b8852c68e7bf76207a60b8414996700b79d4059b0d6f1f",
+   "detail": "1 ch, 61740 frames at 44100 Hz",
+   "settled": "stretch 1.4 method=pv"
+  },
+  "stretch-tempo": {
+   "hash": "85828a76d5efb6ecc86e34bf788fce89c92e9d317441f7952f083f97ee6d7680",
+   "detail": "1 ch, 36750 frames at 22050 Hz",
+   "settled": "stretch 0.8333333333333334 method=wsola"
+  },
+  "loop": {
+   "hash": "e0021d7c0bbf8e8c3cdbf4bef9b2362eef99a1334044ebe54c59c8835270ba5b",
+   "detail": "1 ch, 26460 frames at 44100 Hz, loop 2205-26460",
+   "settled": "loop 8820f 35280f xfade=2205f"
+  },
+  "slice": {
+   "hash": "7b66dc3f67f52ecb22d9dc734af483196252cc167957a3444aa8cb0c500ce8c2",
+   "detail": "1 ch, 11025 frames at 22050 Hz",
+   "settled": "trim 11025f 22050f"
+  },
+  "mix-other": {
+   "hash": "4fe468dff12628a4da86cdb40f44c74d1be1d4b80dd5ba3d9d30c086eea16a47",
+   "detail": "1 ch, 99225 frames at 44100 Hz",
+   "settled": "mix hash:f1847f2112bc5268e3ac0a923fd09dfed59d83173b9f9f3156506c9456a45e52 at=11025f gain=-6"
+  },
+  "chain-everything": {
+   "hash": "823794e7c658a4fbb691fdace03a675e7a56291f09cc6270bd22a2d975a37c66",
+   "detail": "1 ch, 28665 frames at 44100 Hz",
+   "settled": "trim 2205f 30870f; fade in=441f out=2205f; mono; gain 6.4076; reverse"
+  }
+ }
+}

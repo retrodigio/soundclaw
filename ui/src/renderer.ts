@@ -47,7 +47,7 @@ export class Renderer {
     const id = ++this.n;
     return new Promise((resolve, reject) => {
       this.waiting.set(id, { resolve, reject });
-      this.start(lane).postMessage({ ...q, id, samples: samplesNamed(q.sound, samples).map((x) => ({ name: x.name, sha256: x.sha256 })), ...(q.ref ? { refSamples: samplesNamed(q.ref, samples).map((x) => ({ name: x.name, sha256: x.sha256 })) } : {}) } satisfies RenderRequest);
+      this.start(lane).postMessage({ ...q, id, samples: samplesNamed(q.sound, samples).map((x) => ({ name: x.name, sha256: x.sha256, ...(x.slices ? { slices: x.slices } : {}), ...(x.loop ? { loop: x.loop } : {}) })), ...(q.ref ? { refSamples: samplesNamed(q.ref, samples).map((x) => ({ name: x.name, sha256: x.sha256, ...(x.slices ? { slices: x.slices } : {}), ...(x.loop ? { loop: x.loop } : {}) })) } : {}) } satisfies RenderRequest);
     });
   }
 

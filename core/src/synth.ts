@@ -12,6 +12,8 @@ import {
 import { TAU, exp2, log2, sineCycles, sinRad, tanPi } from './mathx.ts';
 import { hashText } from './generators.ts';
 import { resample } from './resample.ts';
+import { readerFor, type Interp } from './interp.ts';
+import { stretchChannels } from './stretch.ts';
 import { DIED_AWAY, SAMPLE_RATE } from './sound.ts';
 
 const SR = SAMPLE_RATE;
@@ -24,6 +26,9 @@ export interface SampleData {
   /** A stereo file's channels, for `side=left` and `side=right`. */
   left?: Float32Array;
   right?: Float32Array;
+  /** Slice points (frames at the sample's own rate, ascending) and loop points, from the sample's entry: what `slice=` and `loop=` on a layer use. */
+  slices?: number[];
+  loop?: [number, number];
 }
 
 /** Where a sample layer finds its audio. The renderer never reads files. */
@@ -291,17 +296,104 @@ function renderKs(l: Layer, seed: number): Float64Array {
   return out;
 }
 
+/** Does a sample layer use any of the edits made on the layer itself (none of them is in a document written before they existed)? */
+function usesEdits(l: Layer): boolean {
+  const p = l.p;
+  return (p.slice as number) > 0 || (p['fade-in'] as number) > 0 || (p['fade-out'] as number) > 0 || (p.stretch as number) !== 1 || (p.loop as number) > 0 || (p.interp as string) !== 'linear';
+}
+
+/** The last result for a layer: a stereo layer asks for its left and right one after the other and they are stretched together. Valid for the same sample data and the same settings only. */
+const pairs = new WeakMap<Layer, { key: string; smp: SampleData; chs: Float32Array[] }>();
+
+/** The part of a sample that a layer plays, at the engine's rate: slice, trim, stretch, fades and loop applied (the layer's pitch and direction are applied when it is read). */
+function preparedSample(l: Layer, smp: SampleData, sides: ('mix' | 'left' | 'right')[]): Float32Array[] {
+  const key = `${sides.join(',')}|${JSON.stringify(l.p)}|${JSON.stringify(l.envs.pitch ?? null)}`;
+  const have = pairs.get(l);
+  if (have && have.key === key && have.smp === smp) return have.chs;
+  const pick = (side: string): Float32Array => resample(side === 'left' && smp.left ? smp.left : side === 'right' && smp.right ? smp.right : smp.data, smp.rate, SR);
+  let chs = sides.map(pick);
+  const scale = (f: number): number => Math.round((f * SR) / smp.rate);
+  let a = 0;
+  let b = chs[0]!.length;
+  const slice = l.p.slice as number;
+  if (slice > 0) {
+    const pts = smp.slices ?? [];
+    if (slice > pts.length) return sides.map(() => new Float32Array(0));
+    a = Math.min(b, scale(pts[slice - 1]!));
+    b = slice < pts.length ? Math.min(b, scale(pts[slice]!)) : b;
+  }
+  const i0 = Math.min(b, a + Math.floor((l.p.start as number) * SR));
+  const endSec = l.p.end as number;
+  const i1 = endSec > 0 ? Math.min(b, a + Math.floor(endSec * SR)) : b;
+  chs = chs.map((c) => c.slice(i0, Math.max(i0, i1)));
+  const loopPts = smp.loop && smp.loop[1] > smp.loop[0] ? ([scale(smp.loop[0]) - i0, scale(smp.loop[1]) - i0] as [number, number]) : null;
+  const ratio = l.p.stretch as number;
+  if (ratio !== 1 && chs[0]!.length >= 2) {
+    chs = stretchChannels(chs, ratio, SR, l.p.method as 'wsola' | 'pv');
+    if (loopPts) { loopPts[0] = Math.round(loopPts[0] * ratio); loopPts[1] = Math.round(loopPts[1] * ratio); }
+  }
+  // fades: straight lines over the first and last seconds that play
+  const fin = Math.round((l.p['fade-in'] as number) * SR);
+  const fout = Math.round((l.p['fade-out'] as number) * SR);
+  const loopLen = Math.min(MAX_DURATION * SR, Math.round((l.p.loop as number) * SR));
+  if (loopLen > 0) chs = chs.map((c) => loopedSample(c, loopPts, loopLen, Math.round((l.p.xfade as number) * SR)));
+  for (const c of chs) {
+    const n = c.length;
+    for (let i = 0; i < Math.min(fin, n); i++) c[i] = c[i]! * (i / fin);
+    for (let i = 0; i < Math.min(fout, n); i++) c[n - 1 - i] = c[n - 1 - i]! * (i / fout);
+  }
+  pairs.set(l, { key, smp, chs });
+  return chs;
+}
+
+/**
+ * The sample played round its loop until it is `length` frames long: the part before the loop, then the loop over and over. At each
+ * seam the last `xf` frames of the loop fade out as its first `xf` frames fade in (equal power), and play carries on from there.
+ */
+function loopedSample(x: Float32Array, loop: [number, number] | null, length: number, xfade: number): Float32Array {
+  const S = loop ? Math.max(0, Math.min(x.length - 2, loop[0])) : 0;
+  const E = loop ? Math.max(S + 2, Math.min(x.length, loop[1])) : x.length;
+  const n = E - S;
+  const xf = Math.max(0, Math.min(xfade, Math.floor(n / 2)));
+  const out = new Float32Array(length);
+  let o = 0;
+  const put = (v: number): void => { if (o < length) out[o++] = v; };
+  for (let i = 0; i < S + xf && i < x.length; i++) put(x[i]!);
+  // one cycle: from the loop's xf-th frame to its end, with the last xf frames blended into the loop's first xf
+  const m = n - xf;
+  const cycle = new Float32Array(m);
+  for (let i = 0; i < m; i++) cycle[i] = x[S + xf + i]!;
+  for (let j = 0; j < xf; j++) {
+    const t = (j + 0.5) / xf;
+    cycle[m - xf + j] = x[E - xf + j]! * Math.sqrt(1 - t) + x[S + j]! * Math.sqrt(t);
+  }
+  while (o < length && m > 0) for (let i = 0; i < m && o < length; i++) put(cycle[i]!);
+  return out;
+}
+
 function renderSample(l: Layer, bank: SampleBank | undefined, channel: 'left' | 'right' | null = null): Float64Array {
   const name = l.p.sample as string;
   const smp = name ? bank?.get(name) : undefined;
   if (!smp) return new Float64Array(Math.round(0.1 * SR)); // a missing sample is silence; the server refuses to write a batch that names one
   const side = channel ?? l.p.side;
+  const edits = usesEdits(l);
   // a file at another rate is converted to 44,100 Hz first (resample.ts), so the trim and the pitch below work on the engine's own rate
-  const sig = resample(side === 'left' && smp.left ? smp.left : side === 'right' && smp.right ? smp.right : smp.data, smp.rate, SR);
-  const len = sig.length;
-  const i0 = Math.min(len, Math.floor((l.p.start as number) * SR));
-  const endSec = l.p.end as number;
-  const i1 = endSec > 0 ? Math.min(len, Math.floor(endSec * SR)) : len;
+  let sig: Float32Array;
+  let i0: number;
+  let i1: number;
+  if (edits) {
+    const sides = l.p.side === 'stereo' ? (['left', 'right'] as const) : ([l.p.side as 'mix' | 'left' | 'right'] as const);
+    const chs = preparedSample(l, smp, [...sides]);
+    sig = chs[l.p.side === 'stereo' && channel === 'right' ? 1 : 0]!;
+    i0 = 0;
+    i1 = sig.length;
+  } else {
+    sig = resample(side === 'left' && smp.left ? smp.left : side === 'right' && smp.right ? smp.right : smp.data, smp.rate, SR);
+    const len = sig.length;
+    i0 = Math.min(len, Math.floor((l.p.start as number) * SR));
+    const endSec = l.p.end as number;
+    i1 = endSec > 0 ? Math.min(len, Math.floor(endSec * SR)) : len;
+  }
   if (i1 - i0 < 2) return new Float64Array(Math.round(0.01 * SR));
   const reverse = l.p.reverse === 1;
   const pitch = param(l.p, l.envs, 'pitch');
@@ -310,6 +402,16 @@ function renderSample(l: Layer, bank: SampleBank | undefined, channel: 'left' | 
   let pos = 0;
   const span = i1 - i0 - 1;
   let n = 0;
+  if (edits) {
+    const src = reverse ? sig.slice().reverse() : sig;
+    const read = readerFor(l.p.interp as Interp, src);
+    while (pos <= span && n < out.length) {
+      const ratio = exp2(pitch(n + 1) / 12);
+      out[n++] = read(pos, ratio);
+      pos += ratio;
+    }
+    return out.slice(0, n);
+  }
   while (pos <= span && n < out.length) {
     const j = Math.floor(pos);
     const fr = pos - j;

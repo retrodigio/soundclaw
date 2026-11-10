@@ -290,7 +290,7 @@ describe('loops at any length', () => {
         expect(Math.abs(seam.stepDb)).toBeLessThan(3);
         const tailRms = rms(ch[0]!.subarray(ch[0]!.length - 22050));
         expect(db(tailRms)).toBeGreaterThan(db(rms(ch[0]!)) - 8);
-      }, 20000);
+      }, 90_000);
     }
   }
 

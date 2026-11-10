@@ -91,6 +91,15 @@ export const cloneSample = (e: SampleEntry): SampleEntry => ({
 
 export const seconds = (e: Pick<SampleEntry, 'frames' | 'rate'>): number => e.frames / e.rate;
 
+/**
+ * What a render key holds for a sample: its audio's hash and, when it has them, its slice and loop points (a layer's `slice=` and `loop=` read
+ * them, and they change without the audio changing). A sample with neither is just its hash, so keys made before slices existed are unchanged.
+ */
+export function sampleKeyPart(e: { hash: string; slices?: readonly number[]; loop?: readonly number[] }): string {
+  const meta = `${e.slices?.length ? 's' + e.slices.join(',') : ''}${e.loop ? 'l' + e.loop.join('-') : ''}`;
+  return meta ? `${e.hash}~${meta}` : e.hash;
+}
+
 // ---- fields ----------------------------------------------------------------------------------------------------------
 
 /** The keys of `sample add` and `sample set`, in the order they are written. */
@@ -187,9 +196,22 @@ export type SampleCommand =
   | { op: 'sample-add'; name: string; fields: Partial<Record<Field, string>>; text: string }
   | { op: 'sample-set'; name: string; fields: Partial<Record<Field, string>>; clear: Field[]; text: string }
   | { op: 'sample-rename'; name: string; to: string; text: string }
-  | { op: 'sample-remove'; name: string; text: string };
+  | { op: 'sample-remove'; name: string; text: string }
+  // measured or computed when the writer runs them, and put on the tape as the plain commands they found (`sample add`, `sample set`)
+  | { op: 'sample-derive'; name: string; from: string; chain: string; fields: Partial<Record<Field, string>>; text: string }
+  | { op: 'sample-bounce'; name: string; from: string; layer: number | null; channel: string | null; loop: boolean; fields: Partial<Record<Field, string>>; text: string }
+  | { op: 'sample-slice'; name: string; how: SliceHow; text: string }
+  | { op: 'sample-loop'; name: string; how: LoopHow; text: string };
 
-const isSampleOpName = (op: string): op is SampleCommand['op'] => op === 'sample-add' || op === 'sample-set' || op === 'sample-rename' || op === 'sample-remove';
+export type SliceHow =
+  | { kind: 'onsets'; sensitivity: number | null; minGap: number | null }
+  | { kind: 'at'; times: string[] }
+  | { kind: 'grid'; n: number; tempo: number | null };
+export type LoopHow =
+  | { kind: 'find'; near: [string, string] | null; min: string | null }
+  | { kind: 'set'; start: string; end: string };
+
+const isSampleOpName = (op: string): op is SampleCommand['op'] => op.startsWith('sample-');
 export const isSampleOp = isSampleOpName;
 
 const fieldsText = (f: Partial<Record<Field, string>>, clear: readonly Field[] = []): string =>
@@ -271,7 +293,116 @@ export function parseSample(head: Token, rest: Token[], line: number): Command {
     if (args.length > 1) throw new DiagError(line, args[1]!.col, `sample remove: unexpected '${args[1]!.v}'`);
     return { op: 'sample-remove', name, text: `sample remove ${name}` } as unknown as Command;
   }
-  throw new DiagError(line, verb.col, `unknown sample command '${verb.v}' (add, set, rename, remove; \`soundclaw sample import\` brings a file in)`);
+  if (verb.v === 'derive' || verb.v === 'bounce') return parseDerive(verb, args, line);
+  if (verb.v === 'slice') return parseSlice(verb, args, line);
+  if (verb.v === 'loop') return parseLoop(verb, args, line);
+  throw new DiagError(line, verb.col, `unknown sample command '${verb.v}' (add, set, rename, remove, derive, bounce, slice, loop; \`soundclaw sample import\` brings a file in)`);
+}
+
+// ---- derive, bounce, slice, loop (parsed here, worked out by the writer) ------------------------------------------------
+
+/** The fields a derived or bounced sample may be given (the audio's facts and its provenance are worked out). */
+const MADE_FIELDS = ['root', 'tune', 'tags', 'gain', 'note', 'licence', 'attribution', 'terms'] as const;
+
+/** `k=v` words: the named options come back apart, the rest must be fields a made sample may be given. */
+function madeWords(args: Token[], line: number, what: string, options: readonly string[]): { opts: Map<string, string>; fields: Partial<Record<Field, string>> } {
+  const opts = new Map<string, string>();
+  const fields: Partial<Record<Field, string>> = {};
+  for (const t of args) {
+    const m = /^([A-Za-z][A-Za-z-]*)=(.*)$/s.exec(t.v);
+    if (!m) throw new DiagError(line, t.col, `${what}: '${t.v}' is not <name>=<value>`);
+    let k = m[1]!;
+    if (k === 'license') k = 'licence';
+    let v = m[2]!;
+    if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+    if (options.includes(k)) { if (opts.has(k)) throw new DiagError(line, t.col, `${what}: ${k} is given twice`); opts.set(k, v); continue; }
+    if (!(MADE_FIELDS as readonly string[]).includes(k)) throw new DiagError(line, t.col, `${what}: no option '${k}' (${[...options, ...MADE_FIELDS].join(', ')})`);
+    if ((fields as Record<string, string>)[k] !== undefined) throw new DiagError(line, t.col, `${what}: ${k} is given twice`);
+    try { (fields as Record<string, string>)[k] = normField(k as Field, v); } catch (e) { throw new DiagError(line, t.col, `${what}: ${(e as Error).message}`); }
+  }
+  return { opts, fields };
+}
+
+function parseDerive(verb: Token, args: Token[], line: number): Command {
+  const bounce = verb.v === 'bounce';
+  const name = checkName(args[0], line, `sample ${verb.v}`);
+  const { opts, fields } = madeWords(args.slice(1), line, `sample ${verb.v} ${name}`, bounce ? ['from', 'layer', 'channel', 'loop'] : ['from', 'op']);
+  const from = opts.get('from');
+  if (!from) throw new DiagError(line, verb.col, `sample ${verb.v} ${name}: from=<${bounce ? 'sound or song' : 'sample'}> is needed`);
+  const tail = fieldsText(fields);
+  if (bounce) {
+    const layer = opts.has('layer') ? Number(opts.get('layer')) : null;
+    if (layer !== null && !(Number.isInteger(layer) && layer >= 1)) throw new DiagError(line, verb.col, `sample bounce ${name}: layer= is a layer number from 1`);
+    const loop = opts.get('loop');
+    if (loop !== undefined && !['yes', 'no'].includes(loop)) throw new DiagError(line, verb.col, `sample bounce ${name}: loop= is yes or no`);
+    const channel = opts.get('channel') ?? null;
+    return { op: 'sample-bounce', name, from, layer, channel, loop: loop === 'yes', fields, text: `sample bounce ${name} from=${from}${layer !== null ? ` layer=${layer}` : ''}${channel ? ` channel=${channel}` : ''}${loop === 'yes' ? ' loop=yes' : ''}${tail}` } as unknown as Command;
+  }
+  const chain = opts.get('op');
+  if (!chain || !chain.trim()) throw new DiagError(line, verb.col, `sample derive ${name}: op="<operations>" is needed, like op="silence-trim -50; fade out=80ms"`);
+  return { op: 'sample-derive', name, from, chain, fields, text: `sample derive ${name} from=${from} op=${quote(chain)}${tail}` } as unknown as Command;
+}
+
+function parseSlice(verb: Token, args: Token[], line: number): Command {
+  const name = checkName(args[0], line, 'sample slice');
+  const kv = new Map<string, string>();
+  for (const t of args.slice(1)) {
+    const m = /^([a-z-]+)=(.*)$/.exec(t.v);
+    if (!m || !['at', 'sensitivity', 'min-gap', 'grid', 'tempo'].includes(m[1]!)) throw new DiagError(line, t.col, `sample slice ${name}: '${t.v}' is not at=, sensitivity=, min-gap=, grid= or tempo=`);
+    kv.set(m[1]!, m[2]!);
+  }
+  const numOpt = (k: string): number | null => {
+    if (!kv.has(k)) return null;
+    const n = num(kv.get(k)!);
+    if (n === null || n <= 0) throw new DiagError(line, verb.col, `sample slice ${name}: ${k}= is a number above 0`);
+    return n;
+  };
+  const at = kv.get('at');
+  if (at === 'onsets') {
+    const sensitivity = numOpt('sensitivity');
+    if (sensitivity !== null && sensitivity > 1) throw new DiagError(line, verb.col, `sample slice ${name}: sensitivity= is 0 to 1`);
+    const minGap = numOpt('min-gap');
+    return { op: 'sample-slice', name, how: { kind: 'onsets', sensitivity, minGap }, text: `sample slice ${name} at=onsets${sensitivity !== null ? ` sensitivity=${sensitivity}` : ''}${minGap !== null ? ` min-gap=${minGap}` : ''}` } as unknown as Command;
+  }
+  if (at !== undefined) {
+    const times = at.split(',');
+    if (times.some((x) => !/^(\d+f|\d*\.?\d+(ms|s)?)$/.test(x)) || times.length > 1024) throw new DiagError(line, verb.col, `sample slice ${name}: at= is onsets or times like 0,0.25,0.5 (seconds, 250ms or 1234f)`);
+    return { op: 'sample-slice', name, how: { kind: 'at', times }, text: `sample slice ${name} at=${times.join(',')}` } as unknown as Command;
+  }
+  if (kv.has('grid')) {
+    const n = numOpt('grid');
+    if (n === null || !Number.isInteger(n) || n < 2 || n > 1024) throw new DiagError(line, verb.col, `sample slice ${name}: grid= is a whole number of slices, 2 to 1024`);
+    const tempo = numOpt('tempo');
+    return { op: 'sample-slice', name, how: { kind: 'grid', n, tempo }, text: `sample slice ${name} grid=${n}${tempo !== null ? ` tempo=${tempo}` : ''}` } as unknown as Command;
+  }
+  throw new DiagError(line, verb.col, `sample slice ${name}: say how: at=onsets [sensitivity=] [min-gap=], at=<t,t,...>, or grid=<n> [tempo=<bpm>]`);
+}
+
+function parseLoop(verb: Token, args: Token[], line: number): Command {
+  const name = checkName(args[0], line, 'sample loop');
+  const rest = args.slice(1);
+  const timeRe = /^(\d+f|\d*\.?\d+(ms|s)?)$/;
+  if (rest[0]?.v === 'find') {
+    let near: [string, string] | null = null;
+    let min: string | null = null;
+    for (const t of rest.slice(1)) {
+      const m = /^(near|min)=(.*)$/.exec(t.v);
+      if (!m) throw new DiagError(line, t.col, `sample loop ${name} find: '${t.v}' is not near=<s>-<e> or min=<s>`);
+      if (m[1] === 'near') {
+        const r = /^(.+)-(.+)$/.exec(m[2]!);
+        if (!r || !timeRe.test(r[1]!) || !timeRe.test(r[2]!)) throw new DiagError(line, t.col, `sample loop ${name} find: near= is <start>-<end> in seconds (or 1234f frames)`);
+        near = [r[1]!, r[2]!];
+      } else {
+        if (!timeRe.test(m[2]!)) throw new DiagError(line, t.col, `sample loop ${name} find: min= is a length in seconds`);
+        min = m[2]!;
+      }
+    }
+    return { op: 'sample-loop', name, how: { kind: 'find', near, min }, text: `sample loop ${name} find${near ? ` near=${near[0]}-${near[1]}` : ''}${min ? ` min=${min}` : ''}` } as unknown as Command;
+  }
+  const [a, b, ...extra] = rest;
+  if (!a || !b || !timeRe.test(a.v) || !timeRe.test(b.v)) throw new DiagError(line, verb.col, `sample loop ${name}: \`find [near=<s>-<e>] [min=<s>]\`, or <start> <end> (seconds, or 1234f frames)`);
+  if (extra.length) throw new DiagError(line, extra[0]!.col, `sample loop ${name}: a crossfaded loop is made with sample derive (op="loop <start> <end> xfade=<t>"); sample loop only sets the loop points`);
+  return { op: 'sample-loop', name, how: { kind: 'set', start: a.v, end: b.v }, text: `sample loop ${name} ${a.v} ${b.v}` } as unknown as Command;
 }
 
 // ---- applying ----------------------------------------------------------------------------------------------------------
@@ -385,6 +516,8 @@ export function applySample(lib: Library, cmd: Command): string | undefined {
       samples.delete(c.name);
       return undefined;
     }
+    default:
+      throw new Error(`${c.text.split(' ').slice(0, 2).join(' ')} is worked out when it runs (the writer puts the result on the tape as sample add / sample set); it cannot be applied on its own`);
   }
 }
 
@@ -433,6 +566,11 @@ export function shipPolicyOf(json: unknown): ShipPolicy {
   return { allow: list(o.allow, DEFAULT_SHIP_POLICY.allow), block: list(o.block, DEFAULT_SHIP_POLICY.block) };
 }
 
+/** An id with a non-commercial or no-derivatives term (`CC-BY-NC-4.0`, `CC-BY-ND-4.0`, `CC-BY-NC-SA-4.0`). */
+const RESTRICTED_RE = /(^|-)N[CD](-|$)/;
+/** A policy pattern that names such a term itself. */
+const RESTRICTED_PATTERN_RE = /(^|[-*])N[CD]([-*]|$)/;
+
 const SEVERITY: Record<LicenceState, number> = { shippable: 0, attribution: 1, unknown: 2, blocked: 3 };
 export const worstState = (a: LicenceState, b: LicenceState): LicenceState => (SEVERITY[b] > SEVERITY[a] ? b : a);
 
@@ -440,9 +578,14 @@ export const worstState = (a: LicenceState, b: LicenceState): LicenceState => (S
 export function licenceState(l: SampleLicence, policy: ShipPolicy = DEFAULT_SHIP_POLICY, allowed: readonly string[] = []): { state: LicenceState; reason: string } {
   if (allowed.includes(l.id)) return { state: l.attribution || /^CC-BY/.test(l.id) ? 'attribution' : 'shippable', reason: `${l.id} is let through for this export` };
   if (l.id === 'unknown') return { state: 'unknown', reason: 'the licence is not known: set it with sample set <name> licence=<id>' };
-  const hit = policy.block.find((p) => globRe(p).test(l.id));
+  // Non-commercial and no-derivatives licences ship only when the allow list names one explicitly (`CC-BY-NC-4.0`, `*-NC-*`): a broad pattern such as `CC-BY-*` never admits them.
+  const restricted = RESTRICTED_RE.test(l.id);
+  const namesRestricted = (p: string): boolean => RESTRICTED_PATTERN_RE.test(p);
+  if (restricted && !policy.allow.some((p) => namesRestricted(p) && globRe(p).test(l.id))) return { state: 'blocked', reason: `${l.id} is a non-commercial or no-derivatives licence: it ships only when the project's allow list names it (an NC or ND pattern such as ${l.id})` };
+  // an explicit NC or ND allow pattern overrides the default NC / ND block patterns, and nothing else
+  const hit = policy.block.find((p) => globRe(p).test(l.id) && !(restricted && DEFAULT_SHIP_POLICY.block.includes(p) && namesRestricted(p)));
   if (hit) return { state: 'blocked', reason: `${l.id} is blocked by the project's policy (${hit})` };
-  if (!policy.allow.some((p) => globRe(p).test(l.id))) return { state: 'blocked', reason: `${l.id} is not on the project's list of licences that may ship` };
+  if (!policy.allow.some((p) => globRe(p).test(l.id) && (!restricted || namesRestricted(p)))) return { state: 'blocked', reason: `${l.id} is not on the project's list of licences that may ship` };
   return /^CC-BY/.test(l.id) || (l.attribution && l.id !== 'own' && l.id !== 'CC0-1.0') ? { state: 'attribution', reason: `${l.id} asks for attribution` } : { state: 'shippable', reason: `${l.id} may ship` };
 }
 

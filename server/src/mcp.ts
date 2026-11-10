@@ -11,6 +11,7 @@ import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
 import { gcApply, gcPlan, gcReport, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject } from './sampleimport.ts';
+import { sampleCheckText, sampleDescribeText, sampleMeasureJson, isSampleRef } from './sampleview.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
 import { normalizePlan } from './normalize.ts';
 import { ProjectError } from './project.ts';
@@ -40,7 +41,7 @@ Make sounds with \`run\` (one batch = one undo group; any error applies nothing)
   sound mark <id> approved|rejected|draft ["note"]   a status mark (people use the buttons; the note says why)
 Layered sounds (several voices summed; use them when one sfxr voice is not enough: impacts, doors, magic, footsteps, anything with a body and a top):
   sound new <id> voice=layered [preset=footstep|ui-click|door|magic|<classic category>] [seed=<n>]   up to 8 layers; sound set <id> duration=<s|auto> gain=<g> seed=<n>
-  layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]   osc: wave sine|square|saw|triangle|pulse|wavetable|white|pink|brown|metal, freq, duty, dur; fm: ops 2-4, algo, ratio1-4, index2-4; ks (pluck): freq, decay, bright; sample: sample=<name>, start, end, pitch, reverse; every layer: offset, gain, pan, filter=off|lp|hp|bp|notch, cutoff, q
+  layer add <id> classic|osc|fm|ks|sample [<param>=<value> ...] [at=<n>]   osc: wave sine|square|saw|triangle|pulse|wavetable|white|pink|brown|metal, freq, duty, dur; fm: ops 2-4, algo, ratio1-4, index2-4; ks (pluck): freq, decay, bright; sample: sample=<name>, start, end, pitch, reverse, side, slice, fade-in, fade-out, stretch, method, loop, xfade, interp; every layer: offset, gain, pan, filter=off|lp|hp|bp|notch, cutoff, q
   layer set <id> <n> <param>=<value> ...  |  layer remove|move|mute|solo <id> <n> [to=<m> | on|off]   (layers count from 1; source=<kind> changes a layer's source)
   env <id> <target> "<time>:<value>[@lin|exp|hold|ease] ..." | adsr(a,d,s,r[,hold]) | clear   an envelope replaces a fixed value; targets 1.freq 1.amp 1.cutoff 2.pan 1.fx1.mix master.fx1.mix
   fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit [<param>=<value> ...] [at=<k>]  |  fx set|remove|move <id> [layer=<n>] <k> ...   (no layer= : the master chain)
@@ -65,6 +66,8 @@ Music (instruments, patterns, songs; build a song in passes and run \`check\` af
   Songs have the views notes (written notes against what the render plays, per channel) and mix (energy by band over time, masking in amber); the checks key, range, render-match, loop-music, masking and voice-leading (advisory), style (music-style.md and the song's bible entry), layers (each game layer alone and with the base) and clip, loudness, dc on the mix. \`normalize\` writes the song's gain; \`export\` writes wav/ogg, --loop (seamless), --stems (one per game layer), midi.
 
 Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-sting\` (or loudness=<LUFS>); the loudness check holds each sound to its class (standard: -16 LUFS ±1) and says which applied. \`normalize\` writes the gain that brings sounds to their class; \`measure\` returns the numbers and checks of many sounds as JSON in one call. Dynamics: \`fx add <id> compress|limit\` (a limiter on the master chain lets a spiky sound be loud without clipping). Many hits in one layer: \`env <id> 1.amp bursts(times=0.1,0.3 ...)\`. \`sound copy|rename|remove <id> ...\` manage sounds.
+
+Samples as material: \`sample derive <new> from=<name> op="trim 0.1 0.9; fade out=50ms; normalize peak -3"\` makes new audio (ops: trim, fade, gain, normalize peak|lufs, silence-trim <dB>, dc, reverse, mono|left|right, pitch <semitones> [method=resample|stretch], stretch <ratio>|to=<s>|tempo=<a>:<b> [method=wsola|pv], loop <s> <e> xfade=<t>, slice <n>, mix <sample> at=<t> gain=<dB>; measured values are written into the history as numbers). \`sample slice <name> at=onsets|<t,t,..>|grid=<n>\`, \`sample loop <name> find|<start> <end>\`, \`sample bounce <new> from=<sound|song> [layer=<n>] [loop=yes]\` freezes a render. \`layer align <id> <n> to=<m>|start by=onset|peak\`, \`layer match <id> <n> to=<m> db=<offset>\`, \`env <id> <n>.amp follow=<layer>|sample:<name>\`. Hear samples with describe, measure and view (sample:<name> or hash:<sha256>: wave, spec, pitch, loop, slices, compare), sample check (advice only), and search with a numbers query: sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1.
 
 Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
 
@@ -201,8 +204,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     annotations: { readOnlyHint: true },
     inputSchema: z.object({
       sound: z.string(),
-      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare', 'notes', 'mix']).optional().describe('Default spec (a song: notes, mix, wave, spec, loop; default notes)'),
-      other: z.string().optional().describe('compare: the second sound, song, or the path of a WAV or OGG file (a reference outside the project; `sound` may be a file too)'),
+      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare', 'notes', 'mix', 'slices']).optional().describe('Default spec (a song: notes, mix, wave, spec, loop; default notes; a sample: wave, spec, pitch, loop, slices)'),
+      other: z.string().optional().describe('compare: the second sound, song, sample:<name>, hash:<sha256>, or the path of a WAV or OGG file (a reference outside the project; `sound` may be a file too). A sample is `sample:<name>` in `sound`'),
       from: z.number().optional().describe('A song: draw from this second'),
       to: z.number().optional().describe('A song: draw to this second'),
       channels: z.array(z.string()).optional().describe('A song: only these channels'),
@@ -224,10 +227,10 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
   }));
 
   server.registerTool('describe', {
-    title: 'Describe a sound',
+    title: 'Describe a sound or sample',
     description: 'A plain-words summary built only from the measured numbers (length, tonal or noisy, brightness, pitch motion, attack, tail, peak, loudness, onsets), then the numbers and the check summary.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sound: z.string(), json: z.boolean().optional().describe('The result as one JSON object') }),
+    inputSchema: z.object({ sound: z.string().describe('A sound, a song, `sample:<name>` or `hash:<sha256>` (a sample: the same numbers and words, its provenance and licence, its advisory checks)'), json: z.boolean().optional().describe('The result as one JSON object') }),
   }, (a) => w.enqueue(() => {
     try {
       if (w.hasSong(a.sound)) return { content: [text(a.json ? JSON.stringify(songJsonObject(w, a.sound), null, 2) : songNumbersText(w, a.sound))] };
@@ -292,16 +295,18 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     description: 'The numbers and the loudness class of many sounds in one call (all sounds when none are named): per sound its class and target, every number describe gives and every check result. ' +
       'json (default true) returns one JSON document for scripts: {format, pass, sounds: [{id, class: {name, target, tolerance, basis}, numbers, checks, binding}], sets}. A sound\'s class: `sound set <id> class=<name>` or loudness=<LUFS>.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names (default all)'), json: z.boolean().optional().describe('Default true; false gives text') }),
+    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names (default all); `sample:<name>` or `hash:<sha256>` measures a sample'), json: z.boolean().optional().describe('Default true; false gives text') }),
   }, (a) => w.enqueue(() => {
     try {
-      const ids = a.sounds ?? [];
-      const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
+      const refs = (a.sounds ?? []).filter(isSampleRef);
+      const ids = (a.sounds ?? []).filter((x) => !isSampleRef(x));
+      const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : refs.length ? [] : w.songs().map((x) => x.id);
       const soundIds = ids.filter((x) => !w.hasSong(x));
-      const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
-      if (a.json === false) return { content: [text([only ? '' : measureText(w, soundIds).text, ...songIds.map((x) => `${songNumbersText(w, x)}\n${songChecksText(w, x).text}`)].filter(Boolean).join('\n\n'))] };
+      const only = (refs.length > 0 && !ids.length) || (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
+      if (a.json === false) return { content: [text([only ? '' : measureText(w, soundIds).text, ...songIds.map((x) => `${songNumbersText(w, x)}\n${songChecksText(w, x).text}`), ...refs.map((x) => sampleDescribeText(w, x))].filter(Boolean).join('\n\n'))] };
       const doc = JSON.parse(only ? '{}' : measureJson(w, soundIds).json) as Record<string, unknown>;
       if (songIds.length) doc.songs = songIds.map((x) => songJsonObject(w, x));
+      if (refs.length) doc.samples = refs.map((x) => sampleMeasureJson(w, x));
       return { content: [text(JSON.stringify(doc, null, 2))] };
     } catch (e) {
       return errorResult(e);
@@ -351,9 +356,12 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     title: 'Sample',
     description: 'Samples: audio kept once by content in the project (samples/objects) and named on the history tape, with where it came from and its licence. import: a WAV, AIFF or FLAC file (OGG, MP3 and M4A through ffmpeg when it is installed), or every audio file in a folder (one undo group), under a name (default: the file name); channels are kept; licence defaults to unknown (set it: licence=CC0-1.0, CC-BY-4.0, own, ...); then `layer add <id> sample sample=<name> ...` plays it (side=stereo for both channels). list / show: the samples and everything about one (metadata, provenance, licence, who uses it). Change a sample with `run`: `sample set <name> licence=CC0-1.0 root=C4 tags=wood,door`, `sample rename <old> <new>`, `sample remove <name>` (the tape commands). gc: objects nothing references (a dry run unless apply; drop_history also drops those only undone or replaced states used, and lists the versions that stop rendering). upgrade: move a 0.1 project\'s samples/*.wav into the store.',
     inputSchema: z.object({
-      action: z.enum(['import', 'list', 'show', 'gc', 'upgrade']),
+      action: z.enum(['import', 'list', 'show', 'check', 'gc', 'upgrade']),
       file: z.string().optional().describe('import: path of the audio file or folder'),
-      name: z.string().optional().describe('show: the sample'),
+      name: z.string().optional().describe('show, check: the sample'),
+      names: z.array(z.string()).optional().describe('check: samples (all when none)'),
+      query: z.string().optional().describe('list: a numbers query that keeps the samples it fits, closest first, like "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1 tag=wood source=file licence=shippable'),
+      json: z.boolean().optional().describe('list: JSON'),
       as: z.string().optional().describe('import: the sample\'s name (letters, digits, _ and -; the case is kept)'),
       licence: z.string().optional().describe('import: CC0-1.0, CC-BY-4.0, own, unknown (default), generated:<provider>:<plan>, proprietary:<note>'),
       attribution: z.string().optional().describe('import: the attribution text a licence asks for'),
@@ -369,7 +377,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     }),
   }, (a) => w.enqueue(() => {
     try {
-      if (a.action === 'list') return { content: [text(sampleListText(w))] };
+      if (a.action === 'list') return { content: [text(sampleListText(w, a.query, { json: !!a.json }))] };
+      if (a.action === 'check') return { content: [text(sampleCheckText(w, a.names ?? (a.name ? [a.name] : [])))] };
       if (a.action === 'show') return a.name ? { content: [text(sampleShowText(w, a.name))] } : fail('show needs name');
       if (a.action === 'gc') {
         const plan = gcPlan(w, !!a.drop_history);
