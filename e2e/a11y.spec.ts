@@ -11,7 +11,8 @@ import { startAgent, type Agent } from './helpers.ts';
 
 let agent: Agent;
 test.describe.configure({ mode: 'default' });
-test.beforeAll(async () => { agent = await startAgent(); await makeExample(agent); });
+// the example project is a few hundred commands, samples, a library and generated takes: more than a test's 60 s on a busy machine
+test.beforeAll(async () => { test.setTimeout(240_000); agent = await startAgent(); await makeExample(agent); });
 test.afterAll(async () => { await agent?.close(); });
 
 type Theme = 'dark' | 'light';
