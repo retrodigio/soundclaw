@@ -21,6 +21,7 @@ import type { NoteFx } from './pattern.ts';
 import { sha256Text } from './sha256.ts';
 import { RENDER_VERSION, SAMPLE_RATE } from './sound.ts';
 import { envAt, fxTail, renderLayered, type SampleBank } from './synth.ts';
+import { chooseZones, chosenKey, zoneCandidates, cloneZone, makeZoneLayers, withExtra, zoneSeconds, zonesKey, zonesLength, zoneWords, type Chosen, type Zone } from './zones.ts';
 
 export const INSTRUMENT_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 
@@ -54,6 +55,15 @@ export interface Instrument {
    * only: it changes no sample. Left out when not set.
    */
   legato?: true;
+  /**
+   * Sampled zones (see zones.ts): the samples the instrument plays by key and velocity, beside any synth layers of the template. Left out
+   * when there are none, so an instrument made before zones existed reads, renders and is keyed as it was.
+   */
+  zones?: Zone[];
+  /** Velocity steps over which neighbouring velocity layers of the zones crossfade (equal power); left out when 0. */
+  velxfade?: number;
+  /** How round-robin zones choose: `cycle` (the default; left out) takes turns, `hash` picks from the channel, the note's time and its pitch. */
+  rr?: 'hash';
   /** Set on the built-in instruments: the name they are listed under. */
   builtin?: true;
 }
@@ -90,7 +100,7 @@ export function newInstrument(id: string, seed: number): Instrument {
 }
 
 export function cloneInstrument(i: Instrument): Instrument {
-  return { ...i, voice: cloneLayered(i.voice), range: i.range ? [...i.range] : null, pitchEnv: i.pitchEnv ? i.pitchEnv.map((p) => ({ ...p })) : null };
+  return { ...i, voice: cloneLayered(i.voice), range: i.range ? [...i.range] : null, pitchEnv: i.pitchEnv ? i.pitchEnv.map((p) => ({ ...p })) : null, ...(i.zones ? { zones: i.zones.map(cloneZone) } : {}) };
 }
 
 /** The instrument's file (instruments/<id>.inst). */
@@ -100,13 +110,17 @@ export function serializeInstrument(i: Instrument): string {
     `range ${i.range ? `${noteLabel(i.range[0])}-${noteLabel(i.range[1])}` : 'none'}`, `pitch-envelope ${i.pitchEnv ? formatEnv(i.pitchEnv) : 'none'}`];
   if (pitchCheckOf(i) !== 'full') lines.push(`pitch-check ${pitchCheckOf(i)}`);
   if (i.legato) lines.push('legato yes');
+  if (i.velxfade) lines.push(`velxfade ${fmtNum(i.velxfade)}`);
+  if (i.rr) lines.push(`rr ${i.rr}`);
+  (i.zones ?? []).forEach((z, k) => lines.push(`zone ${k + 1} ${zoneWords(z, noteLabel).join(' ')}`));
   lines.push(...serializeLayered(i.voice));
   return lines.join('\n') + '\n';
 }
 
 /** The key a note's render is cached under: everything that changes the samples. */
 export function instrumentKey(i: Instrument, sampleHash: (name: string) => string = () => 'none'): string {
-  return sha256Text(`${RENDER_VERSION}|inst|${i.root}|${i.pitched}|${i.attack}|${i.decay}|${i.sustain}|${i.release}|${i.pitchEnv ? formatEnv(i.pitchEnv) : '-'}|${layeredBody(i.voice, sampleHash)}`);
+  const zones = i.zones?.length ? `|zones:${i.velxfade ?? 0}:${i.rr ?? 'cycle'}|${zonesKey(i.zones, sampleHash)}` : '';
+  return sha256Text(`${RENDER_VERSION}|inst|${i.root}|${i.pitched}|${i.attack}|${i.decay}|${i.sustain}|${i.release}|${i.pitchEnv ? formatEnv(i.pitchEnv) : '-'}|${layeredBody(i.voice, sampleHash)}${zones}`);
 }
 
 // ---- the note envelope --------------------------------------------------------------------------------------
@@ -140,6 +154,12 @@ export interface NoteSpec {
   fx?: NoteFx;
   /** With ~slide: the pitch (MIDI) the glide starts from. */
   slideFrom?: number | null;
+  /** The note's velocity (1..127): zones pick their velocity layer by it. Only zones read it; the level is scaled outside (velocityGain). */
+  vel?: number;
+  /** A drum hit (a kit's zones are keyed by hit name). */
+  hit?: string | null;
+  /** Round-robin counter or hash (see zones.ts). */
+  rr?: number;
 }
 
 /** The pitch offset (semitones) a note has at time t beyond its steady pitch. */
@@ -164,19 +184,49 @@ function multiply(a: Env, b: Env, end: number): Env {
   return out;
 }
 
-/** How long the rendered note is: the key held, the release and the effects' tails. */
-export function noteLength(i: Instrument, gate: number): number {
+/** How long the rendered note is: the key held, the release and the effects' tails (and, for zones, what a one-shot or a release sample plays on for). */
+export function noteLength(i: Instrument, gate: number, extra = 0): number {
   const tail = i.voice.master.reduce((a, f) => a + fxTail(f), 0);
-  return Math.min(MAX_NOTE_SECONDS, Math.max(0.02, gate + i.release + tail));
+  return Math.min(MAX_NOTE_SECONDS, Math.max(0.02, gate + i.release + tail, extra));
+}
+
+/** The zones a note plays. */
+export function zonesOf(i: Instrument, n: NoteSpec): Chosen[] {
+  return i.zones?.length ? chooseZones(i.zones, { midi: n.midi, vel: n.vel ?? 100, hit: n.hit ?? null, rr: n.rr ?? 0 }, i.velxfade ?? 0) : [];
+}
+
+/** A text that is the same for notes whose zones (and so whose sound) are the same; empty for an instrument without zones. */
+export const zoneChoiceKey = (i: Instrument, n: NoteSpec): string => (i.zones?.length ? chosenKey(zonesOf(i, n)) : '');
+
+/** How long a note would be at the longest, before its pitch and its round-robin take are known (every zone that could play counts): for sizing a song's tail. */
+export function noteLengthAtMost(i: Instrument, n: NoteSpec, bank: SampleBank | undefined): number {
+  let extra = 0;
+  if (i.zones?.length) {
+    for (const { zone: z } of zoneCandidates(i.zones, { midi: n.midi, vel: n.vel ?? 100, hit: n.hit ?? null }, i.velxfade ?? 0)) {
+      const smp = bank?.get(z.sample);
+      if (!smp) continue;
+      const secs = zoneSeconds(z, smp);
+      if (z.trigger === 'release') extra = Math.max(extra, n.gate + secs);
+      else if (z.loopmode === 'oneshot') extra = Math.max(extra, secs);
+    }
+  }
+  return noteLength(i, n.gate, extra);
 }
 
 /** The sound that plays one note: the template with its pitch, envelope and length set. */
 export function noteSound(i: Instrument, n: NoteSpec): LayeredSound {
+  return noteSoundWith(i, n).sound;
+}
+
+/** The note's sound with its zones made into layers, and the bank that also holds the looped windows they play (give it to the renderer). */
+export function noteSoundWith(i: Instrument, n: NoteSpec, bank?: SampleBank): { sound: LayeredSound; bank: SampleBank | undefined } {
   const s = cloneLayered(i.voice);
   delete s.loop;
   delete s.family;
   const st0 = i.pitched ? n.midi - i.root : 0;
-  const total = noteLength(i, n.gate);
+  const chosen = zonesOf(i, n);
+  const zoneSemis = (z: Zone): number => (z.hit !== null ? 0 : i.pitched ? n.midi - z.root : 0) + z.tune / 100;
+  const total = noteLength(i, n.gate, chosen.length ? zonesLength(chosen, bank, zoneSemis, n.gate) : 0);
   s.duration = total;
   const P = pitchOffset(i, n);
   const env = noteEnvelope(i, n.gate);
@@ -218,12 +268,25 @@ export function noteSound(i: Instrument, n: NoteSpec): LayeredSound {
     }
     return out;
   });
-  return s;
+  if (!chosen.length) return { sound: s, bank };
+  // The zones: sample layers of their own, after the template's layers, each at its own pitch (note - root + tune).
+  const clampSt = (v: number): number => Math.max(-48, Math.min(48, v));
+  let maxP = 0;
+  if (P) for (let k = 0; k * CTRL <= total; k++) maxP = Math.max(maxP, P(k * CTRL));
+  const made = makeZoneLayers(chosen, bank, { semis: zoneSemis, speed: (z) => exp2((zoneSemis(z) + maxP) / 12), gate: n.gate, total, env: noteEnvelope(i, n.gate), attack: i.attack });
+  for (const { layer, zone } of made.layers) {
+    const st = clampSt(zoneSemis(zone));
+    layer.p.pitch = st;
+    if (P && zone.trigger === 'attack' && zone.loopmode !== 'oneshot') layer.envs.pitch = sampled((t) => clampSt(zoneSemis(zone) + P(t)), total);
+    s.layers.push(layer);
+  }
+  return { sound: s, bank: withExtra(bank, made.extra) };
 }
 
 /** One note, unscaled by velocity: the instrument's channels (1, or 2 when a layer is panned). */
 export function renderNote(i: Instrument, n: NoteSpec, bank?: SampleBank): Float32Array[] {
-  return renderLayered(noteSound(i, n), bank);
+  const made = noteSoundWith(i, n, bank);
+  return renderLayered(made.sound, made.bank);
 }
 
 /** The level a velocity plays at (1 at velocity 127). */

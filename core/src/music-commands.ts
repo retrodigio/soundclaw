@@ -36,6 +36,9 @@ import { bibleCommands, projectKey } from './musicstyle.ts';
 import { STINGER_TEMPLATES, stingerCommands } from './stingers.ts';
 import { SEND_KINDS, SONG_KINDS, TAG_RE, type SendKind, type SongKind } from './song.ts';
 import { idClash } from './sound.ts';
+import { KIT_ALL, kitText } from './song.ts';
+import { SAMPLE_NAME_RE } from './samples.ts';
+import { MAX_ZONES, ZONE_KEYS, cloneZone, newZone, setZoneValue, zoneWords, type Zone } from './zones.ts';
 import { FX_SPECS, defaultsOf, newLayeredSound, type Fx, type LayeredSound } from './layered.ts';
 
 export type InstValue = number | boolean | string | [number, number] | Env | null;
@@ -45,6 +48,9 @@ export type MusicCommand =
   | { op: 'inst-from-sound'; id: string; sound: string; root: number | null; text: string }
   | { op: 'inst-set'; id: string; values: [string, InstValue][]; text: string }
   | { op: 'inst-edit'; id: string; inner: Command; text: string }
+  | { op: 'inst-zone'; id: string; verb: 'add' | 'set' | 'remove' | 'clear'; n: number; values: [string, string][]; text: string }
+  | { op: 'inst-zones'; id: string; how: 'from-samples' | 'from-slices'; names: string[]; root: 'detect' | null; vel: [number, number] | null; start: number | null; text: string }
+  | { op: 'inst-from-sample'; id: string; sample: string; loop: 'find' | null; text: string }
   | { op: 'inst-copy' | 'inst-rename'; id: string; to: string; text: string }
   | { op: 'inst-remove'; id: string; text: string }
   | { op: 'pattern-set'; song: string; name: string; pattern: Pattern; text: string }
@@ -121,6 +127,11 @@ export function parseInstValue(key: string, v: string): [string, InstValue][] {
       if (!(PITCH_CHECKS as readonly string[]).includes(v)) throw new Error(`pitch-check is full (the note, octave included), class (the pitch class, octave ignored: bells and other inharmonic voices) or onset (timing only), got '${v}'`);
       return [['pitch-check', v]];
     }
+    case 'velxfade': return [['velxfade', numIn('velxfade', v, 0, 64, 'velocity steps')]];
+    case 'rr': {
+      if (v !== 'cycle' && v !== 'hash') throw new Error(`rr is cycle (round-robin zones take turns) or hash (picked from the channel, the note's time and its pitch), got '${v}'`);
+      return [['rr', v]];
+    }
     case 'legato': { const b = yesNo(v); if (b === null) throw new Error(`legato is yes or no (got '${v}')`); return [['legato', b]]; }
     case 'range': {
       if (v === 'none') return [['range', null]];
@@ -134,7 +145,7 @@ export function parseInstValue(key: string, v: string): [string, InstValue][] {
       for (const p of e) if (p.v < -60 || p.v > 60) throw new Error(`pitchenv values are semitones from -60 to 60 (got ${p.v})`);
       return [['pitchenv', e]];
     }
-    default: throw new Error(`no instrument setting '${key}' (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, legato, gain, seed; layers have: instrument layer set <id> <n> <param>=<value>)`);
+    default: throw new Error(`no instrument setting '${key}' (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, legato, velxfade, rr, gain, seed; layers have: instrument layer set <id> <n> <param>=<value>)`);
   }
 }
 
@@ -151,14 +162,15 @@ export function parseMusic(head: Token, rest: Token[], line: number, parseSub: P
 
 function parseInstrument(head: Token, rest: Token[], line: number, parseSub: ParseLine): MusicCommand {
   const [verb, ...args] = rest;
-  if (!verb) throw new DiagError(line, head.col, 'instrument: new, from-sound, set, layer, fx, env, copy, rename or remove');
+  if (!verb) throw new DiagError(line, head.col, 'instrument: new, from-sound, from-sample, set, layer, fx, env, zone, zones, copy, rename or remove');
   if (verb.v === 'new') {
     const id = checkIn(args[0], line, 'instrument new', INSTRUMENT_ID_RE, 'instrument id');
-    let from: string | null = null, kind: SourceKind | null = null, seed: number | null = null;
+    let from: string | null = null, kind: SourceKind | null = null, seed: number | null = null, zonesOnly = false;
     for (const p of pairs(args.slice(1), line, 'instrument new')) {
       if (p.key === 'from') from = p.value;
       else if (p.key === 'kind') {
-        if (!(SOURCE_KINDS as readonly string[]).includes(p.value)) throw new DiagError(line, p.t.col, `kind is one of ${SOURCE_KINDS.join(', ')}`);
+        if (p.value === 'zones') { zonesOnly = true; continue; }
+        if (!(SOURCE_KINDS as readonly string[]).includes(p.value)) throw new DiagError(line, p.t.col, `kind is one of ${SOURCE_KINDS.join(', ')}, zones`);
         kind = p.value as SourceKind;
       } else if (p.key === 'seed') {
         const n = numberOf(p.value);
@@ -166,10 +178,11 @@ function parseInstrument(head: Token, rest: Token[], line: number, parseSub: Par
         seed = n;
       } else throw new DiagError(line, p.t.col, `instrument new: unexpected '${p.key}' (from=<instrument or built-in>, kind=<${SOURCE_KINDS.join('|')}>, seed=<n>)`);
     }
-    if (from && kind) throw new DiagError(line, verb.col, 'instrument new: give from= or kind=, not both');
-    if (!from && !kind) kind = 'osc';
+    if (from && (kind || zonesOnly)) throw new DiagError(line, verb.col, 'instrument new: give from= or kind=, not both');
+    if (kind && zonesOnly) throw new DiagError(line, verb.col, 'instrument new: give one kind=');
+    if (!from && !kind && !zonesOnly) kind = 'osc';
     seed ??= 1;
-    return { op: 'inst-new', id, from, kind, seed, text: `instrument new ${id}${from ? ` from=${from}` : ` kind=${kind}`} seed=${seed}` };
+    return { op: 'inst-new', id, from, kind, seed, text: `instrument new ${id}${from ? ` from=${from}` : zonesOnly ? ' kind=zones' : ` kind=${kind}`} seed=${seed}` };
   }
   if (verb.v === 'from-sound') {
     const id = checkIn(args[0], line, 'instrument from-sound', INSTRUMENT_ID_RE, 'instrument id');
@@ -185,7 +198,7 @@ function parseInstrument(head: Token, rest: Token[], line: number, parseSub: Par
   if (verb.v === 'set') {
     const id = checkIn(args[0], line, 'instrument set', INSTRUMENT_ID_RE, 'instrument id');
     const ps = pairs(args.slice(1), line, `instrument set ${id}`);
-    if (!ps.length) throw new DiagError(line, verb.col, `instrument set ${id}: give at least one <key>=<value> (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, legato, gain, seed)`);
+    if (!ps.length) throw new DiagError(line, verb.col, `instrument set ${id}: give at least one <key>=<value> (root, pitched, attack, decay, sustain, release, adsr, velocity, range, pitchenv, pitch-check, legato, velxfade, rr, gain, seed)`);
     const values: [string, InstValue][] = [];
     for (const p of ps) {
       try { values.push(...parseInstValue(p.key, p.value)); } catch (e) { throw new DiagError(line, p.t.col, `${id}: ${(e as Error).message}`); }
@@ -201,6 +214,19 @@ function parseInstrument(head: Token, rest: Token[], line: number, parseSub: Par
     if (!INSTRUMENT_ID_RE.test(id)) throw new DiagError(line, args[0]?.col ?? verb.col, `'${id}' is not an instrument id`);
     return { op: 'inst-edit', id, inner, text: `instrument ${(inner as { text: string }).text}` };
   }
+  if (verb.v === 'zone') return parseZone(verb, args, line);
+  if (verb.v === 'zones') return parseZones(verb, args, line);
+  if (verb.v === 'from-sample') {
+    const id = checkIn(args[0], line, 'instrument from-sample', INSTRUMENT_ID_RE, 'instrument id');
+    const sample = args[1];
+    if (!sample || !SAMPLE_NAME_RE.test(sample.v)) throw new DiagError(line, (sample ?? verb).col, `instrument from-sample ${id}: give the sample to make it from`);
+    let loop: 'find' | null = null;
+    for (const p of pairs(args.slice(2), line, 'instrument from-sample')) {
+      if (p.key !== 'loop' || p.value !== 'find') throw new DiagError(line, p.t.col, `instrument from-sample: unexpected '${p.t.v}' (loop=find)`);
+      loop = 'find';
+    }
+    return { op: 'inst-from-sample', id, sample: sample.v, loop, text: `instrument from-sample ${id} ${sample.v}${loop ? ' loop=find' : ''}` };
+  }
   if (verb.v === 'copy' || verb.v === 'rename') {
     const id = checkIn(args[0], line, `instrument ${verb.v}`, INSTRUMENT_ID_RE, 'instrument id');
     const to = checkIn(args[1], line, `instrument ${verb.v} ${id}`, INSTRUMENT_ID_RE, 'new instrument id');
@@ -210,7 +236,90 @@ function parseInstrument(head: Token, rest: Token[], line: number, parseSub: Par
     const id = checkIn(args[0], line, 'instrument remove', INSTRUMENT_ID_RE, 'instrument id');
     return { op: 'inst-remove', id, text: `instrument remove ${id}` };
   }
-  throw new DiagError(line, verb.col, `unknown instrument command '${verb.v}' (new, from-sound, set, layer, fx, env, copy, rename, remove)`);
+  throw new DiagError(line, verb.col, `unknown instrument command '${verb.v}' (new, from-sound, from-sample, set, layer, fx, env, zone, zones, copy, rename, remove)`);
+}
+
+const noteOrNumber = (s: string): number | null => parseNote(s) ?? (/^\d{1,3}$/.test(s) && Number(s) <= 127 ? Number(s) : null);
+/** `C3-C6`, `0-127`, `0-D#3` (notes or MIDI numbers), or one note. */
+const rangeOrNote = (s: string): [number, number] | null => {
+  const m = /^(\d{1,3}|[A-G][#b]?-?\d)-(\d{1,3}|[A-G][#b]?-?\d)$/.exec(s);
+  if (m) {
+    const a = noteOrNumber(m[1]!), b = noteOrNumber(m[2]!);
+    return a === null || b === null || a > b ? null : [a, b];
+  }
+  const one = noteOrNumber(s);
+  return one !== null ? [one, one] : null;
+};
+
+/** Check the settings of a zone command on a scratch zone, so a bad one is reported at its place. */
+function zoneValues(ps: { key: string; value: string; t: Token }[], line: number, scratch: Zone): [string, string][] {
+  const out: [string, string][] = [];
+  for (const p of ps) {
+    try { setZoneValue(scratch, p.key, p.value, noteOrNumber, rangeOrNote); } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
+    out.push([p.key, p.value]);
+  }
+  return out;
+}
+
+function parseZone(verb: Token, args: Token[], line: number): MusicCommand {
+  const [sub, ...a] = args;
+  if (!sub || !['add', 'set', 'remove', 'clear'].includes(sub.v)) throw new DiagError(line, (sub ?? verb).col, 'instrument zone: add, set, remove or clear');
+  const id = checkIn(a[0], line, `instrument zone ${sub.v}`, INSTRUMENT_ID_RE, 'instrument id');
+  if (sub.v === 'clear') {
+    if (a.length > 1) throw new DiagError(line, a[1]!.col, 'instrument zone clear: nothing follows the instrument');
+    return { op: 'inst-zone', id, verb: 'clear', n: 0, values: [], text: `instrument zone clear ${id}` };
+  }
+  let n = 0;
+  let rest = a.slice(1);
+  if (sub.v !== 'add') {
+    const t = rest[0];
+    n = t && /^\d+$/.test(t.v) ? Number(t.v) : 0;
+    if (n < 1) throw new DiagError(line, (t ?? sub).col, `instrument zone ${sub.v} ${id}: give the zone's number (from 1; instrument zones shows them)`);
+    rest = rest.slice(1);
+  }
+  if (sub.v === 'remove') {
+    if (rest.length) throw new DiagError(line, rest[0]!.col, 'instrument zone remove: nothing follows the number');
+    return { op: 'inst-zone', id, verb: 'remove', n, values: [], text: `instrument zone remove ${id} ${n}` };
+  }
+  const ps = pairs(rest, line, `instrument zone ${sub.v} ${id}`);
+  if (!ps.length) throw new DiagError(line, sub.col, `instrument zone ${sub.v} ${id}: give ${sub.v === 'add' ? 'sample=<name> and root=<note>' : 'at least one <key>=<value>'} (${ZONE_KEYS.join(', ')})`);
+  const values = zoneValues(ps, line, newZone('x', 60));
+  if (sub.v === 'add' && !values.some(([k]) => k === 'sample')) throw new DiagError(line, sub.col, `instrument zone add ${id}: sample=<name> is needed`);
+  const words = values.map(([k, v]) => `${k}=${/^[^\s"]+$/.test(v) ? v : quote(v)}`).join(' ');
+  return { op: 'inst-zone', id, verb: sub.v as 'add' | 'set', n, values, text: `instrument zone ${sub.v} ${id}${sub.v === 'set' ? ' ' + n : ''} ${words}` };
+}
+
+function parseZones(verb: Token, args: Token[], line: number): MusicCommand {
+  const id = checkIn(args[0], line, 'instrument zones', INSTRUMENT_ID_RE, 'instrument id');
+  const how = args[1];
+  if (!how || (how.v !== 'from-samples' && how.v !== 'from-slices')) throw new DiagError(line, (how ?? verb).col, `instrument zones ${id}: from-samples <name>… [root=detect] [vel=<lo>-<hi>], or from-slices <sample> [start=C1]`);
+  const names: string[] = [];
+  let root: 'detect' | null = null, vel: [number, number] | null = null, start: number | null = null;
+  for (const t of args.slice(2)) {
+    const m = /^([a-z]+)=(.*)$/.exec(t.v);
+    if (!m) {
+      if (!SAMPLE_NAME_RE.test(t.v)) throw new DiagError(line, t.col, `'${t.v}' is not a sample name`);
+      names.push(t.v);
+      continue;
+    }
+    if (m[1] === 'root' && how.v === 'from-samples') {
+      if (m[2] !== 'detect') throw new DiagError(line, t.col, 'root=detect measures each sample\'s pitch (without it, the samples\' own roots are used)');
+      root = 'detect';
+    } else if (m[1] === 'vel' && how.v === 'from-samples') {
+      const z = newZone('x', 60);
+      try { setZoneValue(z, 'vel', m[2]!, noteOrNumber, rangeOrNote); } catch (e) { throw new DiagError(line, t.col, (e as Error).message); }
+      vel = z.vel;
+    } else if (m[1] === 'start' && how.v === 'from-slices') {
+      const n = noteOrNumber(m[2]!);
+      if (n === null) throw new DiagError(line, t.col, `start is a note like C1 (got '${m[2]}')`);
+      start = n;
+    } else throw new DiagError(line, t.col, `instrument zones ${how.v}: unexpected '${t.v}'${how.v === 'from-samples' ? ' (root=detect, vel=<lo>-<hi>)' : ' (start=<note>)'}`);
+  }
+  if (!names.length) throw new DiagError(line, how.col, `instrument zones ${id} ${how.v}: name ${how.v === 'from-samples' ? 'the samples' : 'the sample'}`);
+  if (how.v === 'from-slices' && names.length !== 1) throw new DiagError(line, how.col, 'instrument zones from-slices: name one sample');
+  if (names.length > 64) throw new DiagError(line, how.col, 'instrument zones: at most 64 samples at once');
+  const text = `instrument zones ${id} ${how.v} ${names.join(' ')}${root ? ' root=detect' : ''}${vel ? ` vel=${vel[0]}-${vel[1]}` : ''}${start !== null ? ` start=${noteLabel(start)}` : ''}`;
+  return { op: 'inst-zones', id, how: how.v, names, root, vel, start, text };
 }
 
 const PAT_REF = /^([A-Za-z][A-Za-z0-9_-]{0,47})\.([A-Za-z][A-Za-z0-9_-]{0,47})$/;
@@ -347,7 +456,11 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
         if (p.key === 'inst') { if (!INSTRUMENT_ID_RE.test(p.value)) throw new Error(`'${p.value}' is not an instrument id`); inst = p.value; }
         else if (p.key === 'kit') {
           kit = {};
-          if (p.value !== 'default') for (const w of p.value.split(',')) {
+          if (p.value !== 'default' && !p.value.includes(':') && !p.value.includes(',')) {
+            // one instrument for every hit: its zones are keyed by hit name
+            if (!INSTRUMENT_ID_RE.test(p.value)) throw new Error(`kit is default, one instrument, or <hit>:<instrument> pairs like k:kick,s:snare (got '${p.value}')`);
+            kit[KIT_ALL] = p.value;
+          } else if (p.value !== 'default') for (const w of p.value.split(',')) {
             const m = /^([a-z][a-z0-9_]{0,11}):([A-Za-z][A-Za-z0-9_-]{0,47})$/.exec(w);
             if (!m) throw new Error(`kit is default or <hit>:<instrument> pairs like k:kick,s:snare (got '${w}')`);
             kit[m[1]!] = m[2]!;
@@ -363,7 +476,7 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
     }
     if (inst && kit) throw new DiagError(line, name.col, 'song channel: give inst= (a pitched channel) or kit= (a drum channel), not both');
     if (sub.v === 'add' && !inst && !kit) throw new DiagError(line, name.col, `song channel add ${id} ${name.v}: give inst=<instrument> (or kit=default for drums)`);
-    const words = [inst ? `inst=${inst}` : kit ? `kit=${Object.entries(kit).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : '', reverb !== null ? `reverb=${reverb}` : '', delay !== null ? `delay=${delay}` : ''].filter(Boolean);
+    const words = [inst ? `inst=${inst}` : kit ? `kit=${kitText(kit)}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : '', reverb !== null ? `reverb=${reverb}` : '', delay !== null ? `delay=${delay}` : ''].filter(Boolean);
     if (sub.v === 'set' && !words.length) throw new DiagError(line, name.col, `song channel set ${id} ${name.v}: give what changes (inst=, kit=, gain=, pan=, layer=, harmony=, reverb=, delay=)`);
     return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, inst, kit, gain, pan, layer, harmony, reverb, delay, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
   }
@@ -490,6 +603,57 @@ function rootFromSound(lib: Library, name: string): number | null {
   return s && s.voice === 'layered' ? guessRoot(s) : null;
 }
 
+const zoneWordsOf = (z: Zone): string => zoneWords(z, noteLabel).join(' ');
+
+/** A placeholder sample layer (a sample instrument made before zones existed, with no sample named) goes when the first zone arrives. */
+function dropPlaceholder(i: Instrument): void {
+  if (i.zones?.length === 1 && i.voice.layers.length === 1 && i.voice.layers[0]!.kind === 'sample' && !i.voice.layers[0]!.p.sample) i.voice.layers = [];
+}
+
+function applyZone(lib: Library, c: Extract<MusicCommand, { op: 'inst-zone' }>): string | undefined {
+  const i = inst(lib, c.id);
+  const zones = (i.zones ??= []).map(cloneZone);
+  i.zones = zones;
+  const entryRoot = (sample: string): { root: number; tune: number } | null => {
+    const e = lib.samples.get(sample);
+    return e?.root !== undefined ? { root: e.root, tune: -(e.tune ?? 0) } : null;
+  };
+  let normal: string | undefined;
+  if (c.verb === 'clear') zones.length = 0;
+  else if (c.verb === 'remove') {
+    if (c.n > zones.length) throw new Error(`instrument ${c.id} has ${zones.length} zone${zones.length === 1 ? '' : 's'}, no zone ${c.n}`);
+    zones.splice(c.n - 1, 1);
+  } else if (c.verb === 'set') {
+    const z = zones[c.n - 1];
+    if (!z) throw new Error(`instrument ${c.id} has ${zones.length} zone${zones.length === 1 ? '' : 's'}, no zone ${c.n}`);
+    for (const [k, v] of c.values) setZoneValue(z, k, v, noteOrNumber, rangeOrNote);
+    checkZone(z, c.id);
+  } else {
+    if (zones.length >= MAX_ZONES) throw new Error(`an instrument has at most ${MAX_ZONES} zones`);
+    const sample = c.values.find(([k]) => k === 'sample')![1];
+    const have = c.values.some(([k]) => k === 'root');
+    const fromEntry = entryRoot(sample);
+    if (!have && !fromEntry) throw new Error(`instrument zone add ${c.id}: root=<note> is needed (sample ${sample} has no root note of its own)`);
+    const z = newZone(sample, fromEntry?.root ?? 60);
+    if (!have && fromEntry) z.tune = fromEntry.tune;
+    for (const [k, v] of c.values) setZoneValue(z, k, v, noteOrNumber, rangeOrNote);
+    checkZone(z, c.id);
+    zones.push(z);
+    normal = `instrument zone add ${c.id} ${zoneWordsOf(z)}`;
+  }
+  i.zones = zones;
+  dropPlaceholder(i);
+  lib.instruments.set(c.id, i);
+  return normal;
+}
+
+function checkZone(z: Zone, id: string): void {
+  if (z.keys[0] > z.keys[1]) throw new Error(`instrument ${id}: keys ${noteLabel(z.keys[0])}-${noteLabel(z.keys[1])} run backwards (low note first)`);
+  if (z.rr && z.rr[0] > z.rr[1]) throw new Error(`instrument ${id}: rr=${z.rr[0]}/${z.rr[1]}: the take is past the number of takes`);
+  if (z.end > 0 && z.end <= z.start) throw new Error(`instrument ${id}: end (${z.end} s) must be after start (${z.start} s)`);
+  if (z.trigger === 'release' && z.loopmode === 'continuous') throw new Error(`instrument ${id}: a release zone does not loop on (loopmode=none, sustain or oneshot)`);
+}
+
 export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
   switch (c.op) {
     case 'inst-new': {
@@ -502,6 +666,18 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         copy.voice.id = c.id;
         delete copy.builtin;
         lib.instruments.set(c.id, copy);
+      } else if (c.kind === null) {
+        // an instrument of samples: no synth layer, zones come with `instrument zone add`
+        const i = newInstrument(c.id, c.seed);
+        i.voice.layers = [];
+        i.voice.nextSalt = 1;
+        i.zones = [];
+        i.pitched = true;
+        i.attack = 0.002;
+        i.decay = 0;
+        i.sustain = 1;
+        i.release = 0.15;
+        lib.instruments.set(c.id, i);
       } else {
         const i = newInstrument(c.id, c.seed);
         i.voice.layers = [newLayer(c.kind!, 1)];
@@ -538,11 +714,17 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         else if (k === 'range') i.range = v as [number, number] | null;
         else if (k === 'pitchenv') i.pitchEnv = v as Env | null;
         else if (k === 'legato') { if (v) i.legato = true; else delete i.legato; }
+        else if (k === 'velxfade') { if (v) i.velxfade = v as number; else delete i.velxfade; }
+        else if (k === 'rr') { if (v === 'hash') i.rr = 'hash'; else delete i.rr; }
         else if (k === 'pitch-check') { if (v === 'full') delete i.pitchCheck; else i.pitchCheck = v as PitchCheck; }
       }
       lib.instruments.set(c.id, i);
       return undefined;
     }
+    case 'inst-zone': return applyZone(lib, c);
+    case 'inst-zones':
+    case 'inst-from-sample':
+      throw new Error(`${c.text.split(' ').slice(0, 3).join(' ')} is worked out when it runs (the writer puts the zones it found on the tape as instrument zone add); it cannot be applied on its own`);
     case 'inst-edit': {
       const i = inst(lib, c.id);
       const scratch = new Map<string, LayeredSound>([[c.id, i.voice]]);

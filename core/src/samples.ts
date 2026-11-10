@@ -459,12 +459,17 @@ export function soundSamples(s: Sound): string[] {
   return [...new Set(s.layers.flatMap((l) => (l.kind === 'sample' && l.p.sample ? [String(l.p.sample)] : [])))];
 }
 
+/** The names of the samples an instrument plays: its template's sample layers and its zones. */
+export function instrumentSamples(i: { voice: LayeredSound; zones?: readonly { sample: string }[] }): string[] {
+  return [...new Set([...soundSamples(i.voice), ...(i.zones ?? []).map((z) => z.sample)])];
+}
+
 /** Who uses each sample: `sound x`, `instrument y`. */
 export function sampleUsers(lib: Library): Map<string, string[]> {
   const out = new Map<string, string[]>();
   const add = (n: string, who: string) => out.set(n, [...(out.get(n) ?? []), who]);
   for (const s of lib.values()) for (const n of soundSamples(s)) add(n, `sound ${s.id}`);
-  for (const i of lib.instruments.values()) for (const n of soundSamples(i.voice)) add(n, `instrument ${i.id}`);
+  for (const i of lib.instruments.values()) for (const n of instrumentSamples(i)) add(n, `instrument ${i.id}`);
   return out;
 }
 
@@ -506,7 +511,7 @@ export function applySample(lib: Library, cmd: Command): string | undefined {
       samples.clear();
       for (const [k, v] of entries) samples.set(k, v);
       for (const [id, s] of lib) if (s.voice === 'layered' && soundSamples(s).includes(c.name)) lib.set(id, renameInLayers(s, c.name, c.to));
-      for (const [id, i] of lib.instruments) if (soundSamples(i.voice).includes(c.name)) lib.instruments.set(id, { ...i, voice: renameInLayers(i.voice, c.name, c.to) });
+      for (const [id, i] of lib.instruments) if (instrumentSamples(i).includes(c.name)) lib.instruments.set(id, { ...i, voice: renameInLayers(i.voice, c.name, c.to), ...(i.zones ? { zones: i.zones.map((z) => (z.sample === c.name ? { ...z, sample: c.to } : z)) } : {}) });
       return undefined;
     }
     case 'sample-remove': {
@@ -624,7 +629,7 @@ export function songSamples(lib: Library, songId: string): string[] {
     if (c.inst) insts.add(c.inst);
     for (const i of Object.values(c.kit ?? {})) insts.add(i);
   }
-  return [...new Set([...insts].flatMap((i) => (lib.instruments.get(i) ? soundSamples(lib.instruments.get(i)!.voice) : [])))];
+  return [...new Set([...insts].flatMap((i) => (lib.instruments.get(i) ? instrumentSamples(lib.instruments.get(i)!) : [])))];
 }
 
 export type ItemKind = 'sound' | 'instrument' | 'song' | 'sample';
@@ -632,7 +637,7 @@ export type ItemKind = 'sound' | 'instrument' | 'song' | 'sample';
 /** The sample names an item (a sound, instrument, song or sample) plays directly. */
 export function itemSamples(lib: Library, kind: ItemKind, id: string): string[] {
   if (kind === 'sound') { const s = lib.get(id); return s ? soundSamples(s) : []; }
-  if (kind === 'instrument') { const i = lib.instruments.get(id); return i ? soundSamples(i.voice) : []; }
+  if (kind === 'instrument') { const i = lib.instruments.get(id); return i ? instrumentSamples(i) : []; }
   if (kind === 'song') return songSamples(lib, id);
   return lib.samples.has(id) ? [id] : [];
 }

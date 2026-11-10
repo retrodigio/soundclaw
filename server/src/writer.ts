@@ -11,7 +11,7 @@ import { Hub } from './await.ts';
 import { RenderCache, type Rendered } from './cache.ts';
 import { SampleStore } from './samples.ts';
 import { expand, MEASURED_OPS, restoreDerived } from './sampleedit.ts';
-import { isSampleOp, settleSampleAdd, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
+import { instrumentSamples, isSampleOp, settleSampleAdd, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
 import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSamples, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
 import { normalizePlan } from './normalize.ts';
@@ -518,8 +518,8 @@ export class Writer {
       }
       // a sound or instrument must not be left playing a sample that this undo takes away
       const gone = new Map<string, string[]>();
-      for (const [kind, id, snd] of [...[...trial.library].map(([k, v]) => ['sound', k, v] as const), ...[...trial.library.instruments].map(([k, v]) => ['instrument', k, v.voice] as const)]) {
-        for (const n of soundSamples(snd)) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.set(n, [...(gone.get(n) ?? []), `${kind} ${id}`]);
+      for (const [kind, id, snd] of [...[...trial.library].map(([k, v]) => ['sound', k, v] as const), ...[...trial.library.instruments].map(([k, v]) => ['instrument', k, v] as const)]) {
+        for (const n of (kind === 'instrument' ? instrumentSamples(snd as never) : soundSamples(snd as never))) if (!trial.library.samples.has(n) && (this.library.samples.has(n) || this.samples.info(n))) gone.set(n, [...(gone.get(n) ?? []), `${kind} ${id}`]);
       }
       if (gone.size) {
         const list = [...gone].slice(0, 3).map(([n, who]) => `sample '${n}' is still played by ${who.slice(0, 6).join(', ')}${who.length > 6 ? ` and ${who.length - 6} more` : ''}`);
@@ -616,6 +616,20 @@ export class Writer {
             const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
             errors.push({ line: at?.line ?? 1, col: 1, message: `${id} layer ${i + 1} plays slice ${k}, but sample ${String(l.p.sample)} ${have ? `has ${have} slice${have === 1 ? '' : 's'}` : 'has no slice points'} (sample slice ${String(l.p.sample)} at=onsets, or grid=<n>)` });
           }
+        });
+      }
+      // A zone must name a sample that is in the project, with the slice it plays.
+      for (const [id, ins] of next.instruments) {
+        if (ins === this.library.instruments.get(id)) continue;
+        const at = parsed.commands.filter((c) => 'id' in c && c.id === id).at(-1);
+        (ins.zones ?? []).forEach((z, k) => {
+          const e = next.samples.get(z.sample);
+          if (!e && !this.samples.info(z.sample)) {
+            errors.push({ line: at?.line ?? 1, col: 1, message: `instrument ${id} zone ${k + 1} names sample '${z.sample}', which is not in the project (soundclaw sample import <project> <file> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
+            return;
+          }
+          const have = (e ?? this.samples.entry(z.sample))?.slices?.length ?? 0;
+          if (z.slice > have) errors.push({ line: at?.line ?? 1, col: 1, message: `instrument ${id} zone ${k + 1} plays slice ${z.slice}, but sample ${z.sample} ${have ? `has ${have} slice${have === 1 ? '' : 's'}` : 'has no slice points'} (sample slice ${z.sample} at=onsets, or grid=<n>)` });
         });
       }
       // Slice points that changed under sounds that play a slice past the new count: said, not refused (the slice plays nothing until the points are back).

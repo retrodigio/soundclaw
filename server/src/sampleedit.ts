@@ -4,7 +4,7 @@
 // replay applies numbers and measures nothing. New audio goes into the store first; the tape names it.
 
 import {
-  decodeAudio, deriveAudio, findLoops, findOnsets, measureLayerCommand, pcmChannels, pcmFromFloats, pcmHash, quote, renderKey,
+  decodeAudio, deriveAudio, findLoops, findOnsets, measureLayerCommand, measureSample, noteLabel, pcmChannels, pcmFromFloats, pcmHash, quote, renderKey,
   type Command, type Library, type LicenceState, type PcmAudio, type SampleCommand, type SampleEntry, type Sound, type SongDoc, type SongRender,
 } from '@soundclaw/core';
 import type { RenderCache } from './cache.ts';
@@ -24,7 +24,7 @@ export interface Expanded {
   notes: string[];
 }
 
-export const MEASURED_OPS = new Set(['sample-derive', 'sample-bounce', 'sample-slice', 'sample-loop', 'layer-align', 'layer-match', 'env-follow']);
+export const MEASURED_OPS = new Set(['sample-derive', 'sample-bounce', 'sample-slice', 'sample-loop', 'layer-align', 'layer-match', 'env-follow', 'inst-zones', 'inst-from-sample']);
 
 const word = (v: string): string => (/^[^\s"\\;]+$/.test(v) ? v : quote(v));
 
@@ -75,7 +75,77 @@ function userFields(given: SampleCommandFields, inherited: Record<string, string
 }
 type SampleCommandFields = Partial<Record<string, string>>;
 
+/** The note a sample sounds at, found once and settled as a root note and a tuning in cents (zone `tune` is the cents to add to play it in tune). */
+function soundsAt(host: EditHost, e: SampleEntry, measure: boolean): { root: number; tune: number; how: string } {
+  if (!measure && e.root !== undefined) return { root: e.root, tune: -Math.round(e.tune ?? 0), how: 'its root note' };
+  const a = audioOf(host, e.hash);
+  if (!a) throw new Error(`the audio of sample ${e.name} is not in the store`);
+  const m = measureSample(pcmChannels(a, 8), a.rate, { maxSeconds: 8 });
+  if (!m.pitch || m.pitch.confidence < 0.5) throw new Error(`I cannot hear a steady pitch in sample ${e.name}${m.pitch ? ` (confidence ${m.pitch.confidence.toFixed(2)})` : ''}: set its root note with sample set ${e.name} root=<note>, or give each zone a root`);
+  return { root: m.pitch.midi, tune: -Math.round(m.pitch.cents), how: `measured ${m.pitch.hz.toFixed(1)} Hz, confidence ${m.pitch.confidence.toFixed(2)}` };
+}
+
+function buildZones(host: EditHost, next: Library, c: Extract<MusicCommandLike, { op: 'inst-zones' | 'inst-from-sample' }>): Expanded {
+  const inst = next.instruments.get(c.id);
+  const notes: string[] = [];
+  const commands: string[] = [];
+  if (c.op === 'inst-from-sample') {
+    if (inst) throw new Error(`instrument '${c.id}' exists already: instrument zones ${c.id} from-samples ${c.sample} adds it as a zone`);
+    const e = entryOf(host, next, c.sample);
+    const at = soundsAt(host, e, e.root === undefined);
+    commands.push(`instrument new ${c.id} kind=zones seed=1`);
+    let loop = '';
+    if (c.loop === 'find' && !e.loop) {
+      const au = audioOf(host, e.hash);
+      if (!au) throw new Error(`the audio of sample ${c.sample} is not in the store`);
+      const found = findLoops(mono(pcmChannels(au)), au.rate, { top: 3 });
+      if (!found.length) throw new Error(`instrument from-sample: no loop found in ${c.sample}: set one by hand with sample loop ${c.sample} <start> <end>, or leave loop=find out`);
+      commands.push(`sample set ${c.sample} loop=${found[0]!.start}-${found[0]!.end} loopmode=sustain`);
+      loop = `; loop ${found[0]!.start}-${found[0]!.end} frames (click ${found[0]!.seam.clickDb.toFixed(1)} dB)`;
+    }
+    commands.push(`instrument zone add ${c.id} sample=${c.sample} root=${noteLabel(at.root)}${at.tune ? ` tune=${at.tune}` : ''} keys=${noteLabel(0)}-${noteLabel(127)}`);
+    notes.push(`instrument ${c.id}: one zone, sample ${c.sample} at ${noteLabel(at.root)}${at.tune ? ` ${at.tune > 0 ? '+' : ''}${at.tune} cents` : ''} (${at.how})${loop}`);
+    return { commands, notes };
+  }
+  if (!inst) throw new Error(`no instrument '${c.id}' (instrument new ${c.id} kind=zones)`);
+  if (c.how === 'from-slices') {
+    const e = entryOf(host, next, c.names[0]!);
+    const n = e.slices?.length ?? 0;
+    if (!n) throw new Error(`sample ${e.name} has no slice points (sample slice ${e.name} at=onsets, or grid=<n>)`);
+    const start = c.start ?? 36;
+    const count = Math.min(n, 128 - start);
+    if (count < n) notes.push(`only ${count} of ${n} slices fit from ${noteLabel(start)} to the top of the keyboard`);
+    for (let k = 1; k <= count; k++) commands.push(`instrument zone add ${c.id} sample=${e.name} slice=${k} root=${noteLabel(start + k - 1)} keys=${noteLabel(start + k - 1)}-${noteLabel(start + k - 1)}${c.vel ? ` vel=${c.vel[0]}-${c.vel[1]}` : ''} loop=none loopmode=oneshot`);
+    notes.push(`instrument ${c.id}: ${count} slice zones of ${e.name} on ${noteLabel(start)}-${noteLabel(start + count - 1)}, played whole (loopmode=oneshot)`);
+    return { commands, notes };
+  }
+  const found = c.names.map((name) => {
+    const e = entryOf(host, next, name);
+    const at = soundsAt(host, e, c.root === 'detect');
+    return { name, ...at };
+  });
+  const order = found.map((f, i) => ({ ...f, i })).sort((a, b) => a.root - b.root || a.i - b.i);
+  const roots = [...new Set(order.map((f) => f.root))];
+  const rangeOf = (root: number): [number, number] => {
+    const k = roots.indexOf(root);
+    const lo = k === 0 ? 0 : Math.floor((roots[k - 1]! + root) / 2) + 1;
+    const hi = k === roots.length - 1 ? 127 : Math.floor((root + roots[k + 1]!) / 2);
+    return [lo, hi];
+  };
+  for (const f of order) {
+    const [lo, hi] = rangeOf(f.root);
+    commands.push(`instrument zone add ${c.id} sample=${f.name} root=${noteLabel(f.root)}${f.tune ? ` tune=${f.tune}` : ''} keys=${noteLabel(lo)}-${noteLabel(hi)}${c.vel ? ` vel=${c.vel[0]}-${c.vel[1]}` : ''}`);
+    notes.push(`  ${f.name}: root ${noteLabel(f.root)}${f.tune ? ` ${f.tune > 0 ? '+' : ''}${f.tune} cents` : ''} (${f.how}), keys ${noteLabel(lo)}-${noteLabel(hi)}`);
+  }
+  notes.unshift(`instrument ${c.id}: ${order.length} zone${order.length === 1 ? '' : 's'} added`);
+  return { commands, notes };
+}
+
+type MusicCommandLike = { op: 'inst-zones'; id: string; how: 'from-samples' | 'from-slices'; names: string[]; root: 'detect' | null; vel: [number, number] | null; start: number | null; text: string }
+  | { op: 'inst-from-sample'; id: string; sample: string; loop: 'find' | null; text: string };
+
 export function expand(host: EditHost, next: Library, c: Command): Expanded {
+  if (c.op === 'inst-zones' || c.op === 'inst-from-sample') return buildZones(host, next, c as unknown as MusicCommandLike);
   if (c.op === 'layer-align' || c.op === 'layer-match' || c.op === 'env-follow') return measureLayerCommand(next, c, host.samples.bankFor(next));
   const sc = c as unknown as SampleCommand;
   switch (sc.op) {

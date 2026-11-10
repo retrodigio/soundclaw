@@ -108,3 +108,53 @@ export const DERIVE_TABLE: Record<string, { from: 'tone' | 'hits' | 'wide'; chai
   'mix-other': { from: 'tone', chain: 'mix hits at=0.25 gain=-6' },
   'chain-everything': { from: 'wide', chain: 'trim 0.05 0.7; fade in=10ms out=50ms; mono; normalize peak -1; reverse' },
 };
+
+/** Sampled instruments: the script makes instrument `i` over the samples tone (loop points), hits (slices, loop) and wide (stereo); `note` is what is played. */
+export const ZONE_TABLE: Record<string, { script: string; note: { midi: number; gate: number; vel?: number; hit?: string; rr?: number; fx?: { vib?: { rate: number; depth: number } } } }> = {
+  'zone-root-and-transposed': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 keys=C2-C6', note: { midi: 64, gate: 0.5 } },
+  'zone-tune-cents': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 tune=37 keys=C2-C6', note: { midi: 57, gate: 0.5 } },
+  'zone-velocity-layer-soft': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 keys=A3-A3 vel=1-63 gain=-9\ninstrument zone add i sample=hits root=A3 keys=A3-A3 vel=64-127', note: { midi: 57, gate: 0.4, vel: 30 } },
+  'zone-velocity-layer-loud': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 keys=A3-A3 vel=1-63 gain=-9\ninstrument zone add i sample=hits root=A3 keys=A3-A3 vel=64-127', note: { midi: 57, gate: 0.4, vel: 100 } },
+  'zone-velocity-crossfade': { script: 'instrument new i kind=zones\ninstrument set i velxfade=16\ninstrument zone add i sample=tone root=A3 keys=A3-A3 vel=1-63\ninstrument zone add i sample=hits root=A3 keys=A3-A3 vel=64-127', note: { midi: 57, gate: 0.4, vel: 60 } },
+  'zone-sustain-loop-held': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 keys=A3-A3 loopmode=sustain xfade=0.02', note: { midi: 57, gate: 1.6 } },
+  'zone-sustain-loop-short': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 keys=A3-A3 loopmode=sustain xfade=0.02', note: { midi: 57, gate: 0.2 } },
+  'zone-continuous-loop': { script: 'instrument new i kind=zones\ninstrument set i adsr=0.01,0,1,0.8\ninstrument zone add i sample=tone root=A3 keys=A3-A3 loopmode=continuous loop=0.3-0.8 xfade=0.05', note: { midi: 60, gate: 0.5 } },
+  'zone-oneshot': { script: 'instrument new i kind=zones\ninstrument zone add i sample=hits root=C3 keys=C3-C3 loopmode=oneshot loop=none', note: { midi: 48, gate: 0.05 } },
+  'zone-release-sample': { script: 'instrument new i kind=zones\ninstrument set i adsr=0.01,0,1,0.1\ninstrument zone add i sample=tone root=A3 keys=A3-A3 loopmode=none\ninstrument zone add i sample=hits slice=2 root=A3 keys=A3-A3 trigger=release release-decay=6 loopmode=oneshot loop=none', note: { midi: 57, gate: 0.7 } },
+  'zone-round-robin-take-2': { script: 'instrument new i kind=zones\ninstrument zone add i sample=hits slice=1 root=C3 keys=C3-C3 rr=1/3 loopmode=oneshot loop=none\ninstrument zone add i sample=hits slice=2 root=C3 keys=C3-C3 rr=2/3 loopmode=oneshot loop=none\ninstrument zone add i sample=hits slice=3 root=C3 keys=C3-C3 rr=3/3 loopmode=oneshot loop=none', note: { midi: 48, gate: 0.05, rr: 1 } },
+  'zone-slice-and-trim': { script: 'instrument new i kind=zones\ninstrument zone add i sample=hits slice=3 start=0.05 end=0.3 root=C3 keys=C3-C3 loopmode=none', note: { midi: 48, gate: 0.4 } },
+  'zone-stereo-sample': { script: 'instrument new i kind=zones\ninstrument zone add i sample=wide root=A3 keys=A3-A3 loopmode=none', note: { midi: 57, gate: 0.4 } },
+  'zone-stereo-loop': { script: 'instrument new i kind=zones\ninstrument zone add i sample=wide root=A3 keys=A3-A3 loopmode=sustain loop=0.1-0.5', note: { midi: 57, gate: 1.2 } },
+  'zone-kit-hit': { script: 'instrument new i kind=zones\ninstrument set i pitched=no\ninstrument zone add i sample=hits slice=2 root=C3 hit=snare loopmode=oneshot loop=none\ninstrument zone add i sample=tone root=C3 hit=kick loopmode=oneshot loop=none gain=-6', note: { midi: 60, gate: 0.05, hit: 'snare' } },
+  'zone-beside-synth-layers': { script: 'instrument new i from=square_lead\ninstrument zone add i sample=tone root=A3 keys=A3-A3 gain=-12 loopmode=none', note: { midi: 57, gate: 0.4 } },
+  'zone-with-vibrato': { script: 'instrument new i kind=zones\ninstrument zone add i sample=tone root=A3 keys=A3-A3 loopmode=sustain xfade=0.02', note: { midi: 57, gate: 0.9, fx: { vib: { rate: 5, depth: 0.5 } } } },
+  'zone-mono-pan': { script: 'instrument new i kind=zones\ninstrument zone add i sample=hits root=C3 keys=C3-C3 pan=-0.6 loopmode=oneshot loop=none', note: { midi: 48, gate: 0.05 } },
+};
+
+/** A song whose bytes are the golden: round robins by cycle and by hash, a choke group, a release sample and a velocity crossfade. */
+export const ZONE_SONG = `instrument new keys kind=zones
+instrument set keys adsr=0.01,0.1,0.8,0.2 velxfade=12
+instrument zone add keys sample=tone root=A3 keys=A2-D4 vel=1-70 gain=-6
+instrument zone add keys sample=tone root=A3 keys=A2-D4 vel=71-127 loopmode=sustain
+instrument zone add keys sample=hits slice=2 root=A3 keys=A2-D4 trigger=release release-decay=4 gain=-14 loopmode=oneshot loop=none
+instrument new perc kind=zones
+instrument zone add perc sample=hits slice=1 root=C3 keys=C3-C3 rr=1/2 loopmode=oneshot loop=none
+instrument zone add perc sample=hits slice=3 root=C3 keys=C3-C3 rr=2/2 loopmode=oneshot loop=none
+instrument new perc2 from=perc
+instrument set perc2 rr=hash
+instrument new kit kind=zones
+instrument set kit pitched=no
+instrument zone add kit sample=hits slice=2 root=C3 hit=hc choke=1 loopmode=oneshot loop=none
+instrument zone add kit sample=tone root=C3 hit=ho choke=1 loopmode=oneshot loop=none gain=-9
+song new z tempo=240 key=A:minor
+song channel add z lead inst=keys
+song channel add z a inst=perc
+song channel add z b inst=perc2
+song channel add z hat kit=kit
+pattern z.p steps=8 tpb=2
+  lead: A3v40 . C4v100 . | D4v66 - A3v90 .
+  a: C3 C3 . C3 | C3 . C3 C3
+  b: C3 . C3 C3 | . C3 C3 .
+  hat: ho . . hc | . ho hc .
+song section add z A p
+`;

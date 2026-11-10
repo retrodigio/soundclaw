@@ -602,11 +602,13 @@ A song is built from **instruments** (a voice played at a pitch), **patterns** (
 An instrument is any voice of the layered sound (classic, osc, fm, ks, sample, several layers, effects) written as it sounds at its `root` note, plus a note envelope. Playing note N moves every pitched layer by N - root semitones: `freq` of osc, fm and ks layers is multiplied, a classic layer's `freq` and `minFreq` are moved by the same ratio, a sample layer's `pitch` is added to. The note envelope (attack, decay to sustain, hold while the note is held, release after it ends) multiplies each layer's amplitude before the layer's effects, so a delay's echoes ring on after the note. A built-in instrument can be played by name in any channel; `instrument new <id> from=<built-in>` makes one to change.
 
 ```
-instrument new <id> [from=<instrument or built-in>] [kind=osc|fm|ks|classic|sample] [seed=<n>]
+instrument new <id> [from=<instrument or built-in>] [kind=osc|fm|ks|classic|sample|zones] [seed=<n>]
 instrument from-sound <id> <sound> [root=<note>]       the sound's layers; root: the note it sounds at (found from an osc, fm or ks layer's freq when left out, else A4)
-instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none pitch-check=full|class|onset legato=yes|no gain=<g> seed=<n>
+instrument set <id> root=<note> pitched=yes|no adsr=<a>,<d>,<s>,<r> velocity=<0..1> range=<C3-C6>|none pitchenv="<t>:<semitones> ..."|none pitch-check=full|class|onset legato=yes|no velxfade=<velocity steps> rr=cycle|hash gain=<g> seed=<n>
                   (also attack= decay= sustain= release=)
 instrument layer|fx|env <the sound commands, with the instrument's id>      instrument layer add bell osc wave=sine freq=880
+instrument zone add|set|remove|clear <id> …              the samples an instrument plays ("Sampled instruments" below)
+instrument zones <id> from-samples|from-slices …         instrument from-sample <id> <sample> [loop=find]
 instrument copy|rename <id> <new>       instrument remove <id>     (refused while a channel plays it)
 ```
 
@@ -623,6 +625,8 @@ instrument copy|rename <id> <new>       instrument remove <id>     (refused whil
 | `pitchenv` | semitones over time | a pitch envelope on every note (a kick's drop: `0:30 0.07:0@exp`) |
 | `pitch-check` | `full`, `class`, `onset` | how `render-match` hears the instrument's pitch: the note itself (default), its pitch class with the octave ignored (a bell, whose inharmonic partials make a pitch tracker hear an octave off; `fm_bell` uses it), or timing only |
 | `legato` | yes / no | a legato voice (a recorder, a bowed string, a held drone): `render-match` finds the onset of a note that touches the one before it in the change of pitch, not in a rise of level, and a note of the same pitch as the one before has no onset to find. Checking only: it changes no sample |
+| `velxfade` | 0 to 64 velocity steps | zones: neighbouring velocity layers crossfade over this many steps, at equal power (0: they switch at their boundary) |
+| `rr` | `cycle`, `hash` | zones: how round-robin takes are chosen (below) |
 | `gain`, `seed` | | the instrument's level and noise seed |
 
 Pitch effects (a pitch envelope, `~slide`, `~vib`, `~arp`) move osc, fm and sample layers continuously. A pluck (ks) and a classic layer are tuned at the note's start and keep their pitch. A pulse wave off 50 % duty has a DC offset: give it a high-pass filter (`filter=hp cutoff=35`), as `pulse_lead` has.
@@ -646,6 +650,71 @@ The built-in instruments (generated from the data; a test keeps this table equal
 <!-- builtins:end -->
 
 The drum kit a drum channel uses by default maps the hit names `k`/`kick` to `kick`, `s`/`snare` to `snare`, `h`/`hat` to `hat` and `oh`/`hat_open` to `hat_open`.
+
+#### Sampled instruments
+
+An instrument can play recordings: a table of **zones**, each a sample (or one slice of it) for the keys and velocities it covers. A zone is played at
+`note - root + tune` semitones, so one sample stretches over a few keys and a set of them covers the keyboard. A recorder from three notes, a harp, a
+set of drums: the sound is the recording, and the instrument makes it playable. Zones sit beside any synth layers of the instrument (a sampled attack
+over a synth pad), under the same note envelope, effects, `range`, `pitch-check` and `legato`, and under the same song rules: a song of sampled
+instruments renders to the same bytes in Node and in the browser, a channel is rendered and cached on its own, and a partial re-render equals a full one.
+
+```
+instrument new recorder kind=zones                      an instrument of samples (no synth layer); kind=sample makes one with an empty sample layer, which the first zone replaces
+instrument zones recorder from-samples rec_c4 rec_g4 rec_d5 root=detect
+instrument set recorder legato=yes range=C4-G6 adsr=0.02,0.1,0.9,0.15
+instrument zone add <id> sample=<name> root=<note> keys=<lo>-<hi> [vel=<lo>-<hi>] [tune=<cents>] [gain=<dB>] [pan=<-1..1>] [slice=<n>]
+                    [start=<s>] [end=<s>] [loop=<s>-<e>|sample|none] [loopmode=none|sustain|continuous|oneshot] [xfade=<s>]
+                    [trigger=attack|release] [release-decay=<dB per second>] [rr=<i>/<n>] [choke=<group>] [hit=<name>] [interp=sinc|cubic|linear]
+instrument zone set <id> <n> <key>=<value> ...      instrument zone remove <id> <n>      instrument zone clear <id>
+instrument zones <id> from-samples <sample>... [root=detect] [vel=<lo>-<hi>]
+instrument zones <id> from-slices <sample> [start=C1]
+instrument from-sample <id> <sample> [loop=find]
+```
+
+| Zone setting | Meaning |
+|---|---|
+| `sample`, `slice` | the sample (a name in the project) and, with `slice=<n>`, one of its slices (`sample slice`) |
+| `root`, `tune` | the note the sample sounds at, and cents added to the pitch it is played at (`tune=-12` for a sample recorded 12 cents sharp). A zone not given a root takes the sample's own root note and tuning |
+| `keys`, `vel` | the notes (`C3-C5`, `0-127`, or one note) and velocities (`1-127`) the zone plays for |
+| `gain`, `pan` | dB (-60 to 24) and position (-1 to 1; a stereo sample keeps its two channels, pan does not move them) |
+| `start`, `end` | seconds into what plays (the slice, else the sample) to start and stop at; `end=0` is the end |
+| `loop`, `loopmode`, `xfade` | `loop=sample` (the default) uses the sample's own loop points (`sample loop`) when it has any; `loop=<s>-<e>` sets them in seconds from the start of what plays; `none` never loops. `loopmode`: `sustain` (the default) loops while the key is held, then plays on from the loop to the end of the sample; `continuous` loops through the release too; `oneshot` plays the whole sample whatever the key does (drums, hits); `none` plays it once. `xfade` is the equal-power crossfade at each seam (default 0.01 s) |
+| `trigger`, `release-decay` | `release` starts the zone when the key is let go (a damper, a key-up thump), lowered by `release-decay` dB for every second the key was held |
+| `rr=<i>/<n>` | take *i* of *n* round robins: zones that share keys, velocities and trigger take turns |
+| `choke` | a choke group: a note of the group stops the earlier sounding notes of the group on its channel, with a 5 ms fade (a closed hat cutting an open one) |
+| `hit` | a drum hit name: the zone is played by the hit, not by key (below) |
+| `interp` | how the sample is read between frames (default `sinc`; see the layer table) |
+
+A note plays every zone whose keys and velocities hold it, or none (silence; `check` finds the holes). Velocity picks the layer; the level follows the
+instrument's `velocity` sensitivity as it does for any instrument. With `velxfade=12`, neighbouring velocity layers (`1-70` and `71-127`) fade into each
+other across 12 velocity steps at equal power, so a rising velocity does not jump. `rr=cycle` (the default) counts the earlier notes of that zone group
+in the same pattern placement (a counter that starts again with each pattern placed in the song), so the first note of a placement is take 1;
+`rr=hash` picks from the channel, the note's time and its pitch. Either way a note's take depends only on its own channel and placement, so one channel
+re-renders alone to the same bytes as in a full render.
+
+**Building.** `from-samples` makes a zone for each sample, at its root: `root=detect` measures each sample's pitch once, settled as a note and cents
+(`root=G3 tune=-10`), otherwise the samples' own roots are used. Key ranges split halfway between neighbouring roots. `vel=` puts all of them in one
+velocity layer (run it again with another `vel=` for the next layer). `from-slices` puts the slices of a sliced loop or kit on keys from `start=`
+upward, one slice to a key, each played whole. `from-sample` makes the instrument itself, with one zone over the whole keyboard; `loop=find` looks for
+loop points when the sample has none. What was measured goes on the tape as plain `instrument zone add` commands; a replay measures nothing.
+
+**Kits.** A drum channel may name one kit instrument: `song channel add <song> drums kit=<instrument>` sends every hit to it, and its zones are
+chosen by hit name (`hit=kick`, `hit=snare`; put `pitched=no` on the instrument). The built-in hit names and `kit=default` and `kit=<hit>:<instrument>`
+work as before.
+
+**Checking.** `soundclaw check <project> <instrument>` plays each zone alone and reports, as faults (it fails): keys inside the declared `range`
+(or velocities) with no zone; a zone more than 10 cents off its root when the root is played (with `pitch-check=class` by pitch class; `onset` skips
+it); more than 3 LU between neighbouring zones, or neighbouring velocity layers, played alone at the same velocity; a looped zone whose seam clicks, steps
+or jumps in spectrum. And as warnings: a note played more than 7 semitones from its zone's root; round-robin takes less than 1 dB or more than 20 dB
+apart (the set-spread rules); a release zone louder than the zone it follows. `soundclaw view <project> <instrument> keymap` draws keys across and
+velocity up, each zone a box with its sample, root, measured error and level, coloured by its checks; take stacks the round robins, and hits are listed
+below. `soundclaw instrument zones <project> <id>` lists the zones. `render-match` hears a sampled instrument's notes as it does any other.
+
+**SFZ export.** `soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]` writes `<id>.sfz` and its samples as WAV files (and
+`ATTRIBUTION.txt` when a licence asks for it) so the instrument can go to a DAW or another sampler. The note envelope becomes the amplitude envelope, and
+what SFZ cannot say (synth layers, effects, the pitch envelope, the velocity crossfade width) is named in the report and a comment in the file. A
+licence that is unknown or blocked is warned about. The licence of every sample a zone plays reaches the instrument, and the songs that play it.
 
 #### The pattern text
 
@@ -695,7 +764,7 @@ pattern note add explore.verse drums 3 oh
 song new <id> [tempo=120] [swing=0] [time=4/4] [key=A:minor] [class=music|stinger] [tags=a,b] [kind=song|stinger]
 song new <id> from-bible=<entry> [<any of the above>]      song new <id> kind=stinger template=victory|game-over|level-up|item-get [key=] [tempo=]
 song set <id> tempo= swing= time= key=<tonic:mode>|none class=<name>|none loudness=<LUFS>|auto gain=<g> tags=a,b|none kind=song|stinger
-song channel add|set <song> <name> inst=<instrument> | kit=default|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>] [harmony=yes|no] [reverb=<0..1>] [delay=<0..1>]
+song channel add|set <song> <name> inst=<instrument> | kit=default|<kit instrument>|<hit>:<instrument>,... [gain=] [pan=] [layer=<game layer>] [harmony=yes|no] [reverb=<0..1>] [delay=<0..1>]
 song channel remove <song> <name>
 song section add|set <song> <name> <pattern>... [x<n>]       song section remove <song> <name>       song order <song> <section>...
 song intro <song> <section>|none      song ending <song> <section>|none      song loop <song> <from>[..<to>]|auto|off
@@ -1362,10 +1431,11 @@ soundclaw render <project> <id>
 soundclaw view <project> <id> wave|spec|pitch [--out <file.png>]
 soundclaw view <project> <id> layers [--out <file.png>]
 soundclaw view <project> <id> compare <other> [--out <file.png>]
+soundclaw view <project> <instrument> keymap [--out <file.png>]
 soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
 soundclaw view <project> <song> notes|mix|wave|spec|loop [--from <s>] [--to <s>] [--channels a,b] [--out <file.png>]
 soundclaw describe <project> <id>
-soundclaw check <project> [<id>...]
+soundclaw check <project> [<id>...]          (sounds, sets, songs and sampled instruments)
 soundclaw import <project> sfxr <file.csv | patch-file | "patch text"> [--id <id>] [--by <author>]
 soundclaw sample import <project> <file | folder> [as=<name>] [licence=<id>] [attribution="<text>"] [terms=<url>] [tags=a,b] [source=<kind>] [origin="<where from>"] [note="<text>"] [--force]
 soundclaw sample list <project>
@@ -1379,6 +1449,9 @@ soundclaw upgrade <project>
 soundclaw generate <project> sfx|music "<prompt>" [duration=<s>] [takes=<n>] [as=<name>] [want="<query>"] [like=<ref>] [provider=<id>] [--estimate] [--json]
 soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>]
 soundclaw generate --ledger [<project>]    soundclaw generate config [<key>=<value>...]
+soundclaw generate cap <project> <credits>
+soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]
+soundclaw instrument zones <project> <id>
 soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
 soundclaw export <project> [<id>...] [--format wav|patch|csv] [--out <dir>]
 soundclaw export <project> <song>... [--format wav|ogg|midi] [--loop] [--stems [--stems-through-master]] [--loops <n>] [--pattern <name>] [--to <dir>] [--quality <q>]
@@ -1438,6 +1511,7 @@ MCP `view` tool returns the image itself.
 | `layers` | for a layered sound: each sounding layer's waveform and spectrogram, stacked on one time axis (the layer as it enters the sum: filter, envelope, effects, gain and pan applied), its start offset marked, with its label, gain and pan |
 | `loop` | for a looping sound: the last 50 ms joined to the first (the seam marked), the two drawn over each other, the joined spectrogram, and the level across four repeats |
 | `set` | (`view <project> <set> set`) a set's members side by side on one time scale: waveform, spectrogram and a loudness bar each (the target marked), then the pairwise distance matrix in dB with the pairs outside the limits outlined |
+| `keymap` | (`view <project> <instrument> keymap`) a sampled instrument: keys across, velocity up, each zone a box labelled with its sample, root, measured pitch error and level and coloured by its checks; round robins stacked, release zones dashed, a kit's hits listed |
 | `compare` | two spectrograms stacked and, under them, their difference (red: the second is louder; blue: the first), plus distance numbers: spectral distance (dB), loudness, duration, brightness, pitch start and end (semitones), envelope correlation. Either side may be a sound, a song (its full mix) or the path of a WAV or OGG file outside the project, a reference to hold the work against: `view <project> theme.wav compare ~/refs/target.ogg`. A WAV is read at any rate and bit depth (resampled to 44,100 Hz, mixed to mono); OGG and other formats are decoded by `ffmpeg` when it is installed (else the error says to convert to WAV). The numbers are the same as for two sounds. Audio is limited to 120 s |
 
 The `compare` header says `A = <first>, B = <second>` (the order of the arguments); the differences are B compared with A: positive means B is more.
@@ -1449,9 +1523,6 @@ It says which loudness class held each sound, and when two failing checks pull a
 
 **Numbers for scripts, and many sounds in one process.** Starting a process costs about half a second, so a script that measures 100 sounds one at a time
 spends a minute starting. `measure <project> [<id|set>...] [--json]` measures many sounds in one process (all of them when none is named): per sound its
-soundclaw generate cap <project> <credits>
-soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]
-soundclaw instrument zones <project> <id>
 class and target, every number `describe` prints and every check's result. `--json` prints one document:
 
 ```

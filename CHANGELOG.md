@@ -57,9 +57,19 @@ All notable changes to SoundClaw are listed here. The format follows
   tool has list, search, similar, use, add and index, and `GET /api/library/<id>/audio` lets a page audition a file without copying it, with byte ranges for seeking. The index lives in
   the system's cache folder (`~/Library/Caches/soundclaw` on macOS, `~/.cache/soundclaw` on Linux, `%LOCALAPPDATA%\soundclaw\cache` on Windows).
 
+- **Sampled instruments.** An instrument can play recordings: a table of zones, each a sample (or one slice) for the keys and velocities it covers, played at `note - root + tune`
+  semitones, beside any synth layers and under the same note envelope and effects. Zones loop (`sustain` while the key is held, `continuous`, `oneshot` for hits, with an equal-power
+  crossfade), play release samples (`trigger=release`, lowered by `release-decay` for how long the key was held), take turns as round robins (`rr=1/3`, by `cycle` or `hash`; one channel
+  re-renders alone to the same bytes), crossfade velocity layers (`velxfade`), and choke one another (`choke=1`). `instrument zones <id> from-samples … root=detect`, `from-slices` and
+  `instrument from-sample … loop=find` build them (what is measured is written as plain `instrument zone add` lines); a drum channel may name one kit instrument whose zones are keyed by
+  hit name (`kit=<instrument>`). `check <project> <instrument>` finds holes in the key-map, zones out of tune at their root, level steps, a looped zone's seam, a note far from its root,
+  round robins too alike or too different and a release louder than its attack; `view <project> <instrument> keymap` draws it; `soundclaw instrument export … --format sfz` writes an SFZ with
+  its samples. A song of sampled instruments renders to the same bytes in Node and in the browser, and a project from before has the renders it had.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.
+- The fake generation provider is free and never counts against a cap (it works at a project cap of 0), and has no rates to set.
+- A project's generation cap is set by a person: `soundclaw generate cap <project> <credits>`, or `POST /api/generation/cap` from the page (which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap.
 
 ### Fixed
 - The browser tests no longer leave a server running when a spec times out while its server is starting or a worker is stopped.
@@ -68,8 +78,6 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ### Changed
 - Releases are published from GitHub Actions by npm trusted publishing, with a provenance statement on the package.
-- The fake generation provider is free and never counts against a cap (it works at a project cap of 0), and has no rates to set.
-- A project's generation cap is set by a person: `soundclaw generate cap <project> <credits>`, or `POST /api/generation/cap` from the page (which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap.
 - A browser test of the command palette expects the platform's modifier key (⌘ on a Mac, Ctrl elsewhere).
 
 ## [0.1.0] - 2026-11-09

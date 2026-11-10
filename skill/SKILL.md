@@ -147,6 +147,15 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   xfade=0.02`, `sample bounce <new> from=<sound> [layer=<n>]` to freeze a synth render into a sample. A new sample layer is made with `interp=sinc` (no folding when pitched up);
   `stretch=` keeps pitch (`method=wsola` for hits and noise, `pv` for tones), `fade-in`/`fade-out` shape the ends. Layer a synth body with a recording: `layer align <id> 2 to=1
   by=onset`, `layer match <id> 2 to=1 db=-6`, `env <id> 2.amp follow=1`. Listen after each step and judge by ear, not only by the numbers.
+- Sampled instruments. A recorded note or two becomes a playable instrument: `instrument new recorder kind=zones`, `instrument zones recorder from-samples rec_c4 rec_g4
+  rec_d5 root=detect` (each root measured once and written as `root=G3 tune=-10`; key ranges split halfway between roots), `instrument set recorder legato=yes range=C4-G6
+  adsr=0.02,0.1,0.9,0.15`. A sample with loop points (`sample loop <name> find`) sustains while the key is held (`loopmode=sustain`, the default), `continuous` goes on through
+  the release, `oneshot` plays the whole sample whatever the key does (drums). Velocity layers are zones with `vel=1-70` and `vel=71-127` (`instrument set <id> velxfade=12` crossfades them);
+  round robins are zones sharing keys with `rr=1/3`, `2/3`, `3/3`; a release sample is `trigger=release release-decay=<dB per second held>`; a closed hat cuts an open one with the same `choke=<n>`;
+  a kit is an instrument whose zones are `hit=kick`, `hit=snare` (`pitched=no`), a drum channel `kit=<instrument>`. Then `check <project> <instrument>` (holes in the key-map, a zone more than
+  10 cents off its root, a level step over 3 LU between neighbours, a looped zone's seam, round robins too alike) and `view <project> <instrument> keymap` (zones as boxes coloured by their checks):
+  fix what it says (`instrument zone set <id> <n> tune=… gain=…`) before you write the song, then judge it in the song by ear and with `render-match`. `from-sample <id> <sample> loop=find` makes
+  a one-sample instrument. `soundclaw instrument export <project> <id> --format sfz` takes it to a DAW. The samples' licences reach the instrument and every song that plays it.
 - `view <sound> layers` shows each layer's waveform and spectrogram with offsets: use it to see which layer makes a
   problem (a late click, a layer that is too long); `layer mute`/`solo` then `check` finds out. The `harsh` check flags
   sustained 2–5 kHz energy (default above −20 dBFS for 80 ms; `harshLimitDb`/`harshMinMs` in the project style): lower

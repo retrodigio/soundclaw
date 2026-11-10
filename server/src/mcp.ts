@@ -19,6 +19,7 @@ import { ProjectError } from './project.ts';
 import { formatErrors, plural, tapeEntryLines } from './report.ts';
 import { MCP_STEPS, agentName, agentWork, awaitRequests, listenerNote, markSeen, personRequest, readRequests, requestBrief, requestLine, toPersonRequest } from './requests.ts';
 import { historyText, soundSummary } from './summary.ts';
+import { exportInstrument, formatInstrumentExport, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap } from './instruments.ts';
 import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from './songs.ts';
 import { readFileSync } from 'node:fs';
 import { configText, generateFromBody, ledgerText, ledgerTotals, readGenerationConfig } from './generate.ts';
@@ -60,7 +61,8 @@ Sets, families and loops (game sounds that repeat, or come in several distances,
 \`history\` reads the tape: every command with its number, author (agent:<name> or human:<name>) and undo group, undone groups marked. People edit in the dashboard too, as human:<name>; call \`history\` (by=… to pick one person) at the start of each turn while someone is watching, and carry on from what they did; never silently redo it. \`render\` gives a sound's numbers, description and checks; \`export\` writes wav (16-bit, 44,100 Hz, mono), patch (sfxr text) or csv (synth.csv) files; \`import\` makes classic sounds from an sfxr csv or patch.
 
 Music (instruments, patterns, songs; build a song in passes and run \`check\` after each: structure, harmony, bass, melody, drums, mix):
-  instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= pitched= adsr=a,d,s,r velocity= range=C3-C6 pitchenv= gain=   instrument layer|fx|env …   (built-ins: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open: use them by name)
+  instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample|zones]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= pitched= adsr=a,d,s,r velocity= range=C3-C6 pitchenv= gain=   instrument layer|fx|env …   (built-ins: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open: use them by name)
+  Sampled instruments (the samples of the project played by key and velocity): instrument zone add <id> sample=<name> root=<note> keys=<lo>-<hi> [vel=<lo>-<hi>] [tune=<cents>] [gain=<dB>] [loopmode=none|sustain|continuous|oneshot] [trigger=attack|release] [release-decay=<dB/s>] [rr=<i>/<n>] [choke=<group>] [hit=<name>]   instrument zone set|remove|clear <id> [<n>] ...   instrument zones <id> from-samples <sample>... [root=detect] | from-slices <sample> [start=C1]   instrument from-sample <id> <sample> [loop=find]   instrument set <id> velxfade=<steps> rr=cycle|hash; a drum channel takes kit=<kit instrument> (zones keyed by hit=<name>). \`check\` an instrument for holes in its key-map, zones out of tune, level steps and loop seams; \`view\` it with kind keymap; \`export\` it as sfz.
   song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song channel add <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=base|tension|combat]   song section add <song> <name> <pattern>… [x2]   song loop <song> <from>..<to>|off   song intro|ending <song> <section>   song fx add <song> compress|limit …
   pattern <song>.<name> steps=16 tpb=4 bar=8, then indented rows: \`lead: C5 . E5 - | G5v80 . E5~slide .\` (. rest, - hold, | bars, v velocity, ! outside the key on purpose, ~slide ~vib ~arp(0,4,7), chords C4+E4+G4, lower-case words are drum hits)
   One note at a time: \`pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> …\` (add E5 len=2; move step=6 note=G5; set vel=80 fx=~slide). A person's edits in the music editor are these commands: call \`changes\` before editing a song a person touched.
@@ -210,7 +212,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     annotations: { readOnlyHint: true },
     inputSchema: z.object({
       sound: z.string(),
-      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare', 'notes', 'mix', 'slices']).optional().describe('Default spec (a song: notes, mix, wave, spec, loop; default notes; a sample: wave, spec, pitch, loop, slices)'),
+      kind: z.enum(['wave', 'spec', 'pitch', 'layers', 'loop', 'set', 'compare', 'notes', 'mix', 'slices', 'keymap']).optional().describe('Default spec (a song: notes, mix, wave, spec, loop; default notes; a sample: wave, spec, pitch, loop, slices; a sampled instrument: keymap, keys across and velocity up, zones as boxes coloured by their checks)'),
       other: z.string().optional().describe('compare: the second sound, song, sample:<name>, hash:<sha256>, or the path of a WAV or OGG file (a reference outside the project; `sound` may be a file too). A sample is `sample:<name>` in `sound`'),
       from: z.number().optional().describe('A song: draw from this second'),
       to: z.number().optional().describe('A song: draw to this second'),
@@ -224,6 +226,12 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
         const sv = viewSong(w, a.sound, kind as SongViewKind, { from: a.from, to: a.to, channels: a.channels });
         return { content: [{ type: 'image' as const, data: Buffer.from(sv.png).toString('base64'), mimeType: 'image/png' }, text(sv.text)] };
       }
+      if (isProjectInstrument(w, a.sound) && a.kind !== 'compare') {
+        if (a.kind !== undefined && a.kind !== 'keymap') return fail(`error: an instrument has the view keymap (not '${a.kind}')`);
+        const kv = viewKeymap(w, a.sound);
+        return { content: [{ type: 'image' as const, data: Buffer.from(kv.png).toString('base64'), mimeType: 'image/png' }, text(`${instrumentZonesText(w, a.sound)}\n${kv.text}`)] };
+      }
+      if (a.kind === 'keymap') return fail(`error: keymap is a view of a sampled instrument (${a.sound} is not one)`);
       if (a.kind === 'notes' || a.kind === 'mix') return fail(`error: ${a.kind} is a view of a song (${a.sound} is a sound)`);
       const v = viewSound(w, a.sound, a.kind ?? 'spec', { other: a.other });
       return { content: [{ type: 'image' as const, data: Buffer.from(v.png).toString('base64'), mimeType: 'image/png' }, text(v.text)] };
@@ -250,19 +258,22 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     title: 'Check sounds',
     description: 'Run the checks (clip, loudness, dc, click, tail, harsh) on sounds, and set-spread on sets (members not too alike, not too different, loudness within ±1 LU); all sounds and sets when none are named: pass or fail with a score, the threshold from the project style, and the exact time ranges flagged. A looping sound\'s click check looks at its seam. `work` done is refused while a sound fails.',
     annotations: { readOnlyHint: true },
-    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids and set names'), json: z.boolean().optional().describe('One JSON document with every number and every check (as measure)') }),
+    inputSchema: z.object({ sounds: z.array(z.string()).optional().describe('Sound ids, set names, song ids and sampled instruments (zones: coverage, pitch at the root, level steps, loop seams, distance from the root, round robins, release level)'), json: z.boolean().optional().describe('One JSON document with every number and every check (as measure)') }),
   }, (a) => w.enqueue(() => {
     try {
       const ids = a.sounds ?? [];
       const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
-      const soundIds = ids.filter((x) => !w.hasSong(x));
+      const instIds = ids.filter((x) => isProjectInstrument(w, x));
+      const soundIds = ids.filter((x) => !w.hasSong(x) && !instIds.includes(x));
       const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
+      const insts = instIds.length ? instrumentChecksText(w, instIds) : null;
       if (a.json) {
         const doc = JSON.parse(only ? '{}' : measureJson(w, soundIds).json) as Record<string, unknown>;
         if (songIds.length) doc.songs = songIds.map((x) => songJsonObject(w, x));
+        if (insts) doc.instruments = insts.json;
         return { content: [text(JSON.stringify(doc, null, 2))] };
       }
-      return { content: [text([only ? '' : checkText(w, soundIds).text, ...songIds.map((x) => songChecksText(w, x).text)].filter(Boolean).join('\n\n'))] };
+      return { content: [text([only ? '' : checkText(w, soundIds).text, ...songIds.map((x) => songChecksText(w, x).text), insts?.text].filter(Boolean).join('\n\n'))] };
     } catch (e) {
       return errorResult(e);
     }
@@ -533,7 +544,7 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
       sounds: z.array(z.string()).optional().describe('The sounds to export (default all)'),
       set: z.string().optional().describe('Export the members of this set'),
       all: z.boolean().optional().describe('Every sound, with a manifest'),
-      format: z.enum(['wav', 'ogg', 'patch', 'csv', 'midi']).optional().describe('Default wav (a song: wav, ogg or midi)'),
+      format: z.enum(['wav', 'ogg', 'patch', 'csv', 'midi', 'sfz']).optional().describe('Default wav (a song: wav, ogg or midi; a sampled instrument: sfz, with its samples as WAV files and ATTRIBUTION.txt when a licence asks for it)'),
       loop: z.boolean().optional().describe('A song: its loop region (seamless)'),
       stems: z.boolean().optional().describe('A song: one aligned file per game layer'),
       loops: z.number().int().min(1).max(16).optional().describe('A song: the loop region repeated this many times (in a full export, a loop export or the stems)'),
@@ -547,6 +558,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
   }, (a) => w.enqueue(() => {
     try {
       const names = a.sounds ?? [];
+      if (names.length && names.every((x) => isProjectInstrument(w, x))) return { content: [text(names.map((id) => formatInstrumentExport(exportInstrument(w, id, { format: a.format ?? 'sfz', out: a.out }))).join('\n'))] };
+      if (a.format === 'sfz') return fail('error: sfz is for sampled instruments (name an instrument)');
       if (names.length && names.every((x) => w.hasSong(x))) {
         const f = a.format ?? 'wav';
         if (f !== 'wav' && f !== 'ogg' && f !== 'midi') return fail('error: a song exports as wav, ogg or midi');

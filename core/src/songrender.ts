@@ -11,8 +11,10 @@
 // region repeats, so the seam has no click and no dip. The master chain then runs over the region twice
 // and the second pass is kept, so a compressor or limiter starts the loop in the state it ends it in.
 
+import type { NoteSpec } from './instrument.ts';
 import { drumInstrument, channelNotes, DEFAULT_LAYER, SEND_KINDS, type Arrangement, type Channel, type Instance, type NoteEv, type SongDoc, arrange } from './song.ts';
-import { instrumentKey, noteLength, renderNote, velocityGain, type Instrument } from './instrument.ts';
+import { instrumentKey, noteLengthAtMost, renderNote, velocityGain, zoneChoiceKey, zonesOf, type Instrument } from './instrument.ts';
+import { CHOKE_FADE, rrGroupOf, rrHash } from './zones.ts';
 import { sha256Text } from './sha256.ts';
 import { RENDER_VERSION, SAMPLE_RATE } from './sound.ts';
 import { applyFxChain, fxTail, panGains, type LimiterMemo, type SampleBank } from './synth.ts';
@@ -111,31 +113,58 @@ function renderChannelAudio(song: SongDoc, ch: Channel, ev: readonly NoteEv[], N
   if (hit && hit.length === 2 * N) { cache.hit = true; return [hit.subarray(0, N), hit.subarray(N)]; }
 
   const notes = o.notes ?? new Map<string, Float32Array[]>();
-  const placed: { at: number; buf: Float32Array[]; g: number }[] = [];
+  const placed: { at: number; buf: Float32Array[]; g: number; choke: number[]; cut: number }[] = [];
+  const rrCount = new Map<string, number>();
   let size = N;
   for (const e of ev) {
     const inst = instOf(e);
     const midi = e.midi ?? inst.root;
     const gate = Math.max(0.005, Math.round(e.len * SR) / SR);
-    const nk = `${instrumentKey(inst, hash)}|${midi}|${gate}|${e.slideFrom ?? ''}|${e.fx.slide ? 's' : ''}${e.fx.vib ? `v${e.fx.vib.rate},${e.fx.vib.depth}` : ''}${e.fx.arp ? `a${e.fx.arp.join(',')}` : ''}`;
+    // zones: the velocity, the drum hit and the note's turn among round-robin takes decide which zones sound
+    const spec: NoteSpec = { midi, gate, fx: e.fx, slideFrom: e.slideFrom };
+    let choke: number[] = [];
+    let zk = '';
+    if (inst.zones?.length) {
+      spec.vel = e.vel;
+      spec.hit = e.drum;
+      const group = inst.zones.some((z) => z.rr) ? rrGroupOf(inst.zones, { midi, vel: e.vel, hit: e.drum }, inst.velxfade ?? 0) : '';
+      if (group) {
+        if (inst.rr === 'hash') spec.rr = rrHash(ch.name, Math.round(e.grid * SR), midi, e.drum);
+        else { const k = `${inst.id}|${e.at.instance}|${group}`; spec.rr = rrCount.get(k) ?? 0; rrCount.set(k, spec.rr + 1); }
+      }
+      zk = `|z${zoneChoiceKey(inst, spec)}`;
+      choke = [...new Set(zonesOf(inst, spec).filter((c) => c.zone.choke > 0 && c.zone.trigger === 'attack').map((c) => c.zone.choke))];
+    }
+    const nk = `${instrumentKey(inst, hash)}|${midi}|${gate}|${e.slideFrom ?? ''}|${e.fx.slide ? 's' : ''}${e.fx.vib ? `v${e.fx.vib.rate},${e.fx.vib.depth}` : ''}${e.fx.arp ? `a${e.fx.arp.join(',')}` : ''}${zk}`;
     let buf = notes.get(nk);
     if (!buf) {
-      buf = renderNote(inst, { midi, gate, fx: e.fx, slideFrom: e.slideFrom }, o.bank);
+      buf = renderNote(inst, spec, o.bank);
       notes.set(nk, buf);
     }
     // a note nudged before the start: in a loop it sounds at the end of the region (it wraps), else at 0
     const raw = Math.round(e.t * SR);
     const at = raw >= 0 ? raw : wrap ? raw + N : 0;
-    placed.push({ at, buf, g: velocityGain(inst, e.vel) });
+    placed.push({ at, buf, g: velocityGain(inst, e.vel), choke, cut: Infinity });
     size = Math.max(size, Math.min(at + buf[0]!.length, at + MAX_TAIL * SR + Math.round(e.len * SR)));
   }
+  // choke groups: a note of a group stops the earlier sounding notes of the group on this channel
+  for (const p of placed) {
+    if (!p.choke.length) continue;
+    for (const q of placed) if (q !== p && q.at < p.at && q.choke.some((g) => p.choke.includes(g))) q.cut = Math.min(q.cut, p.at - q.at);
+  }
+  const chokeFade = Math.max(1, Math.round(CHOKE_FADE * SR));
   const L = new Float64Array(size), R = new Float64Array(size);
   const [pl, pr] = panGains(ch.pan);
   for (const p of placed) {
     const a = p.buf[0]!, b = p.buf[1] ?? p.buf[0]!;
     const gl = p.g * ch.gain * pl, gr = p.g * ch.gain * pr;
-    const n = Math.min(a.length, size - p.at);
-    for (let i = 0; i < n; i++) { L[p.at + i] = L[p.at + i]! + a[i]! * gl; R[p.at + i] = R[p.at + i]! + b[i]! * gr; }
+    const n = Math.min(a.length, size - p.at, p.cut);
+    const fadeFrom = p.cut === Infinity ? Infinity : p.cut - chokeFade;
+    for (let i = 0; i < n; i++) {
+      const f = i < fadeFrom ? 1 : (p.cut - i) / chokeFade;
+      L[p.at + i] = L[p.at + i]! + a[i]! * gl * f;
+      R[p.at + i] = R[p.at + i]! + b[i]! * gr * f;
+    }
   }
   const out: [Float32Array, Float32Array] = [new Float32Array(N), new Float32Array(N)];
   const src = [L, R];
@@ -194,7 +223,7 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
       const id = e.drum !== null ? drumInstrument(ch, e.drum) : ch.inst;
       const inst = id ? o.instruments(id) : undefined;
       if (!inst) continue;
-      extra = Math.max(extra, Math.min(MAX_TAIL, e.t + noteLength(inst, e.len) - N / SR));
+      extra = Math.max(extra, Math.min(MAX_TAIL, e.t + noteLengthAtMost(inst, { midi: e.midi ?? inst.root, gate: e.len, vel: e.vel, hit: e.drum }, o.bank) - N / SR));
     }
     // the send buses ring on after the last note too
     for (const { ch } of rendered) for (const k of SEND_KINDS) if (ch[k] && song[k]) extra = Math.max(extra, Math.min(MAX_TAIL, fxTail(wet(song[k]!))));

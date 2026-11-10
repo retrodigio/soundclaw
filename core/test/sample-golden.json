@@ -207,5 +207,102 @@
    "detail": "1 ch, 28665 frames at 44100 Hz",
    "settled": "trim 2205f 30870f; fade in=441f out=2205f; mono; gain 6.4076; reverse"
   }
+ },
+ "zones": {
+  "zone-root-and-transposed": {
+   "hash": "c0cf2611ed18365bde8522c31d6f32ca53920876966eeacf50c036f1eb733a4b",
+   "detail": "1 ch, 28665 samples",
+   "renderVersion": 4
+  },
+  "zone-tune-cents": {
+   "hash": "adedb947ce258e21ca8a96d96b99d118d27349c75ab44a570dfd3f9a2f2d7df0",
+   "detail": "1 ch, 28665 samples",
+   "renderVersion": 4
+  },
+  "zone-velocity-layer-soft": {
+   "hash": "bae4c94a092a86033ff73e9721fb4c23a61c72037311e0918ad19f9b784cdbf5",
+   "detail": "1 ch, 24255 samples",
+   "renderVersion": 4
+  },
+  "zone-velocity-layer-loud": {
+   "hash": "7e256e0a3e5a43a09f1d740d05b2bc16abb8c67c2d6fe24be4829023486d3f95",
+   "detail": "1 ch, 24255 samples",
+   "renderVersion": 4
+  },
+  "zone-velocity-crossfade": {
+   "hash": "0969969867dfb342f770d4ebcc2f66b8d9d6965e6bb35a78a5a4bdcddb43163c",
+   "detail": "1 ch, 24255 samples",
+   "renderVersion": 4
+  },
+  "zone-sustain-loop-held": {
+   "hash": "b33f67da8265f250f0ff95e18d0279246ecec9a4349d0295c2cf15c8979f0bee",
+   "detail": "1 ch, 77175 samples",
+   "renderVersion": 4
+  },
+  "zone-sustain-loop-short": {
+   "hash": "57ad25be426987a504a786c904acf06a55073b3ff4fa91a788124cbfba432018",
+   "detail": "1 ch, 15435 samples",
+   "renderVersion": 4
+  },
+  "zone-continuous-loop": {
+   "hash": "e142492f5be9aa5fd509f2adabe605474aec9e0b2673f2b98d82dbf72b73ca7e",
+   "detail": "1 ch, 57330 samples",
+   "renderVersion": 4
+  },
+  "zone-oneshot": {
+   "hash": "40427890690296ac14807e8d58ef789cb41e271ff5275f07a644492c286c5595",
+   "detail": "1 ch, 88200 samples",
+   "renderVersion": 4
+  },
+  "zone-release-sample": {
+   "hash": "ec1bd991d33c5ce365290b092b02e173e946185039bf4fac42af59b58b3967d5",
+   "detail": "1 ch, 52920 samples",
+   "renderVersion": 4
+  },
+  "zone-round-robin-take-2": {
+   "hash": "b505a4a229dff759085fad48e89a5af6525baa959ffb81588bb3137aea87bb1d",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "zone-slice-and-trim": {
+   "hash": "af2324c6a7b2780fb64f4e81df7f697f4931980434ee58eab70f62f187f785ad",
+   "detail": "1 ch, 24255 samples",
+   "renderVersion": 4
+  },
+  "zone-stereo-sample": {
+   "hash": "f83706cf2c643bce614a401dad17f28d4c21f97cf050825fdcc66230de3d274e",
+   "detail": "2 ch, 24255 samples",
+   "renderVersion": 4
+  },
+  "zone-stereo-loop": {
+   "hash": "fdee832a5e27b7b5f20cce095b845ae53a33ad3a867c97aafe82e1640337b5c5",
+   "detail": "2 ch, 59535 samples",
+   "renderVersion": 4
+  },
+  "zone-kit-hit": {
+   "hash": "b505a4a229dff759085fad48e89a5af6525baa959ffb81588bb3137aea87bb1d",
+   "detail": "1 ch, 22050 samples",
+   "renderVersion": 4
+  },
+  "zone-beside-synth-layers": {
+   "hash": "c3e8b922f2a7134cb502d95c01d2d8eaedee7e9f5fe33e791cee1712dd3b29c2",
+   "detail": "1 ch, 20286 samples",
+   "renderVersion": 4
+  },
+  "zone-with-vibrato": {
+   "hash": "65c2c589095df4773f5413f8539abd8e861c7d3487aac4201e23426e8fc5ae19",
+   "detail": "1 ch, 46305 samples",
+   "renderVersion": 4
+  },
+  "zone-mono-pan": {
+   "hash": "633f38ea27ceaab22521eee3231d8269052851fbb264ce764ad0fbe6ecd03202",
+   "detail": "2 ch, 88200 samples",
+   "renderVersion": 4
+  },
+  "song-with-zones": {
+   "hash": "592131871b2dd94ec451b2e184030425d5184e0df80768eea097e4e35832fafc",
+   "detail": "2 ch, 71663 samples",
+   "renderVersion": 4
+  }
  }
 }

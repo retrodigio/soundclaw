@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, shipPolicyOf, type ViewKind } from '@soundclaw/core';
-import { SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
+import { exportInstrument, formatInstrumentExport, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap, SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
   EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
@@ -82,9 +82,12 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         fx add <id> [layer=<n>] filter|distort|bitcrush|chorus|delay|reverb|compress|limit [<param>=<value> ...] [at=<k>]
         fx set|remove|move <id> [layer=<n>] <k> ...
         undo [group=<g>] [by=<author>]    redo [group=<undo group>] [by=<author>]   (each alone in its batch)
-        instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= adsr=a,d,s,r range= ...
+        instrument new <id> [from=<built-in>|kind=osc|fm|ks|classic|sample|zones]   instrument from-sound <id> <sound> [root=<note>]   instrument set <id> root= adsr=a,d,s,r range= ...
+        instrument zone add <id> sample=<name> root=<note> keys=<lo>-<hi> [vel=<lo>-<hi>] [tune=<cents>] [gain=<dB>] [pan=] [slice=<n>] [start=] [end=] [loop=<s>-<e>|sample|none] [loopmode=none|sustain|continuous|oneshot] [xfade=] [trigger=attack|release] [release-decay=<dB/s>] [rr=<i>/<n>] [choke=<group>] [hit=<name>]
+        instrument zone set <id> <n> <key>=<value> ...   instrument zone remove <id> <n>   instrument zone clear <id>   instrument set <id> velxfade=<velocity steps> rr=cycle|hash
+        instrument zones <id> from-samples <sample>... [root=detect] [vel=<lo>-<hi>]   instrument zones <id> from-slices <sample> [start=C1]   instrument from-sample <id> <sample> [loop=find]   (measured, written as instrument zone add)
         instrument layer|fx|env <as the sound commands> ...   (built-ins to play as they are: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open)
-        song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song set <id> ...   song channel add|set <song> <name> inst=<instrument>|kit=default [gain=] [pan=] [layer=]
+        song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song set <id> ...   song channel add|set <song> <name> inst=<instrument>|kit=default|kit=<kit instrument>|kit=<hit>:<instrument>,... [gain=] [pan=] [layer=]
         pattern <song>.<name> steps=16 tpb=4 [bar=8], then indented rows:  lead: C5 . E5 - | G5v80 . E5~slide .      pattern set|remove|copy|rename <song>.<name> ...
         pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> ...   (one note at a time: add C5 len=2, move step= note=, set vel= fx=)
         song section add|set|remove <song> <name> <pattern>... [x<n>]   song order|intro|ending|loop|fx|copy|rename|remove|mark <song> ...   (music: docs/commands.md)
@@ -223,10 +226,10 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw generate <project> --again <sample> [takes=<n>] [as=<name>] [--estimate]
   soundclaw generate --ledger [<project>] [--json]
   soundclaw generate config [<key>=<value>...]
+  soundclaw generate cap <project> <credits>
       Audio from a prompt by an AI provider (ElevenLabs sound effects and music; fake makes test audio for free, with no
       network, and never counts against a cap). Each take is one call and is stored as a sample <as>_t1, <as>_t2, ... (numbered after those there) with
       its provenance (provider, endpoint, model, prompt, parameters, take n/m, request id, credits) and the licence
-  soundclaw generate cap <project> <credits>
       the provider's plan gives (generated:elevenlabs:<plan>), as one undo group; replay and undo never call. Before
       the first call every cap is checked and any excess refuses the whole command: one take at most max-per-call
       (300 credits), the command within what is left of the project's cap (project.json "generation":
@@ -269,6 +272,13 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       --pattern one pattern). Combinations that mean nothing (--loops with no loop region, --pattern with audio,
       --quality with wav, --loop or --stems with midi, song flags on a sound) are refused. A <song>-manifest.json
       says the loop points.
+  soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]
+  soundclaw instrument zones <project> <id>
+      A sampled instrument (zones: the samples it plays by key and velocity; docs/commands.md). export writes an SFZ file
+      and the samples it plays as WAV files into <project>/exports/<id>/ (or --to), with ATTRIBUTION.txt when a
+      licence asks for it, and says what SFZ cannot carry (synth layers, effects, the velocity crossfade); a licence that is
+      unknown or blocked is warned about. zones lists the zones, one to a line. The key-map picture is
+      soundclaw view <project> <id> keymap; the instrument's checks are soundclaw check <project> <id>.
   soundclaw midi import <project> <file.mid> [--id <song>] [--by <author>]
   soundclaw midi export <project> <song> [--pattern <name>] [--to <dir>]
       Import a Standard MIDI file (type 0 or 1) as a song: one pattern per two bars, a channel per track and MIDI channel,
@@ -526,6 +536,12 @@ function cmdView(io: Io, p: Parsed): number {
     const num = (k: string): number | undefined => { const v = one(p, k); if (v === undefined) return undefined; const n = Number(v); if (!(n >= 0)) throw new UsageError(`--${k} is a time in seconds`); return n; };
     const v = viewSong(wr(io, dir), id, kind as SongViewKind, { from: num('from'), to: num('to'), channels: one(p, 'channels')?.split(',').filter(Boolean), out: one(p, 'out') });
     io.out(v.text + '\n');
+    return 0;
+  }
+  if (isProjectInstrument(wr(io, dir), id) && kind !== 'compare') {
+    if (kind !== 'keymap') throw new UsageError(`view: an instrument has the view keymap (not '${kind}')`);
+    if (other !== undefined || extra.length) throw new UsageError(`view keymap: unexpected '${other}'`);
+    io.out(viewKeymap(wr(io, dir), id, one(p, 'out')).text + '\n');
     return 0;
   }
   if (isSampleRef(id) && kind !== 'compare') {
@@ -796,20 +812,36 @@ function cmdCheck(io: Io, p: Parsed): number {
   if (!dir) throw new UsageError('check: give a project folder');
   const w = wr(io, dir);
   const songIds = ids.length ? ids.filter((x) => w.hasSong(x)) : w.songs().map((x) => x.id);
-  const soundIds = ids.filter((x) => !w.hasSong(x));
+  const instIds = ids.filter((x) => isProjectInstrument(w, x));
+  const soundIds = ids.filter((x) => !w.hasSong(x) && !instIds.includes(x));
   const only = (ids.length > 0 && !soundIds.length) || (ids.length === 0 && !w.sounds().length && !w.sets().length && songIds.length > 0);
+  const insts = instIds.length ? instrumentChecksText(w, instIds) : null;
   if (p.flags.has('json')) {
     const j = only ? { json: '{}', pass: true } : measureJson(w, soundIds);
     const doc = JSON.parse(j.json) as Record<string, unknown>;
     const objs = songIds.map((x) => songJsonObject(w, x) as { pass?: boolean });
     if (songIds.length) doc.songs = objs;
+    if (insts) doc.instruments = insts.json;
     io.out(JSON.stringify(doc, null, 2) + '\n');
-    return j.pass && objs.every((o) => o.pass !== false) ? 0 : 1;
+    return j.pass && objs.every((o) => o.pass !== false) && (insts?.pass ?? true) ? 0 : 1;
   }
   const r = only ? { text: '', pass: true } : checkText(w, soundIds);
   const results = songIds.map((x) => songChecksText(w, x));
-  io.out([r.text, ...results.map((x) => x.text)].filter(Boolean).join('\n\n') + '\n');
-  return r.pass && results.every((x) => x.pass) ? 0 : 1;
+  io.out([r.text, ...results.map((x) => x.text), insts?.text].filter(Boolean).join('\n\n') + '\n');
+  return r.pass && results.every((x) => x.pass) && (insts?.pass ?? true) ? 0 : 1;
+}
+
+/** `instrument export <project> <id> --format sfz [--to <dir>]` and `instrument zones <project> <id>`. */
+function cmdInstrument(io: Io, p: Parsed): number {
+  const [verb, dir, id, ...extra] = p.pos;
+  if (!verb || !['export', 'zones'].includes(verb)) throw new UsageError('instrument: export <project> <id> [--format sfz] [--to <dir>], or zones <project> <id>');
+  if (!dir || !id) throw new UsageError(`instrument ${verb}: give a project folder and an instrument id`);
+  if (extra.length) throw new UsageError(`instrument ${verb}: unexpected '${extra[0]}'`);
+  const w = wr(io, dir);
+  if (verb === 'zones') { io.out(instrumentZonesText(w, id) + '\n'); return 0; }
+  if (one(p, 'to') && one(p, 'out')) throw new UsageError('instrument export: give --to or --out, not both');
+  io.out(formatInstrumentExport(exportInstrument(w, id, { format: one(p, 'format'), out: one(p, 'to') ?? one(p, 'out') })) + '\n');
+  return 0;
 }
 
 function cmdScale(io: Io, p: Parsed): number {
@@ -1132,6 +1164,7 @@ export function main(argv: string[], io: Io = nodeIo): number {
       case 'reply': case 'cancel': return cmdAnswer(io, cmd, parseArgs(rest, ...WRITE_OPTS.reply!));
       case 'work': return cmdWork(io, parseArgs(rest, ...WRITE_OPTS.work!));
       case 'skill': return cmdSkill(io, parseArgs(rest, ['dest', 'project'], []));
+      case 'instrument': return cmdInstrument(io, parseArgs(rest, ['to', 'out', 'format'], []));
       case 'scale': return cmdScale(io, parseArgs(rest, [], []));
       case 'style': return cmdStyle(io, parseArgs(rest, [], ['init']));
       case undefined: case 'help': case '-h': case '--help':

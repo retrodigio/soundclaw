@@ -90,6 +90,16 @@ render and golden is the same; only a layer added now is written with `interp=si
 the windowed-sinc reader are written in `core` with the renderer's rules (no platform maths). What measures samples (`sampleears.ts`, `layer-measure.ts`, `numquery.ts`) may use `Math.*`:
 its numbers are printed rounded and settled before they are used.
 
+**Sampled instruments are sample layers made at the note.** An instrument may hold a table of zones (`core/src/zones.ts`): a sample or slice for the keys and
+velocities it covers, with a root and a tuning, loop points and mode, a trigger (attack or release), round-robin takes, a choke group and a drum hit name. When a note is
+rendered the zones that apply are made into ordinary `sample` layers of the note's sound (the same reader, the windowed sinc, the note envelope and the instrument's
+effects), so a zone sounds exactly as the layer it stands for would. Loops that must follow the key are built at the note (the loop run for as long as the key is held, the
+crossfade at each seam, the tail after it for a sustain loop) in `core` with the renderer's rules. A note's choice among round robins depends only on its channel and the
+placement in the song it stands in (a counter, or a hash of the channel, the note's time and its pitch), never on other channels, so a channel renders alone to the bytes it has
+in a full render; its render key holds the instrument's zones with the hash (and slice and loop points) of each sample they play. An instrument without zones has the key, the text and the
+render it always had, so every earlier project and golden is unchanged. Building commands (`from-samples`, `from-slices`, `from-sample`) measure once in the writer and put plain
+`instrument zone add` lines on the tape; the checks (`core/src/instrumentchecks.ts`) play each zone alone and measure, and never feed a render.
+
 **Licences travel with the audio.** Each sample has a licence (never inferred) and a provenance (source, origin, the original file's hash, who and when,
 and for generated or derived audio how). A sound, instrument or song carries the licences of every sample it reaches, through parents too, and a manifest
 export is gated by the project's policy. The tool records; it gives no legal advice.

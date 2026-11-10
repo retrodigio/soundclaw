@@ -29,7 +29,7 @@ function Knob({ label, min, max, step, value, testid, onCommit }: { label: strin
 }
 
 function instrumentText(i: Instrument): string {
-  return `root ${noteLabel(i.root)} · ${i.pitched ? 'pitched' : 'unpitched'} · adsr ${i.attack}/${i.decay}/${i.sustain}/${i.release}${i.range ? ` · range ${noteLabel(i.range[0])}–${noteLabel(i.range[1])}` : ''} · pitch check ${pitchCheckOf(i)}`;
+  return `root ${noteLabel(i.root)} · ${i.pitched ? 'pitched' : 'unpitched'} · adsr ${i.attack}/${i.decay}/${i.sustain}/${i.release}${i.range ? ` · range ${noteLabel(i.range[0])}–${noteLabel(i.range[1])}` : ''} · pitch check ${pitchCheckOf(i)}${i.zones?.length ? ` · ${i.zones.length} sample zone${i.zones.length === 1 ? '' : 's'}` : ''}`;
 }
 
 /** The sound commands the voice controls write, as the instrument's own commands. */

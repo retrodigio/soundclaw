@@ -125,7 +125,17 @@ export function channelOf(s: SongDoc, name: string): Channel | undefined {
 
 /** The instrument id a drum hit in a channel plays, or undefined. */
 export function drumInstrument(c: Channel, drum: string): string | undefined {
-  return c.kit?.[drum] ?? DEFAULT_KIT[drum];
+  return c.kit?.[drum] ?? c.kit?.[KIT_ALL] ?? DEFAULT_KIT[drum];
+}
+
+/** In a channel's kit, the hit name that stands for every hit: `kit=<instrument>` maps all hits to one instrument, whose zones are keyed by hit name. */
+export const KIT_ALL = '*';
+
+/** The kit as it is written after `kit=`: one instrument (every hit goes to it), `default`, or `hit:instrument` pairs. */
+export function kitText(kit: Record<string, string> | null): string {
+  const e = Object.entries(kit ?? {});
+  if (e.length === 1 && e[0]![0] === KIT_ALL) return e[0]![1];
+  return e.map(([k, v]) => `${k}:${v}`).join(',') || 'default';
 }
 
 // ---- the arrangement ----------------------------------------------------------------------------------------
@@ -295,7 +305,7 @@ export function serializeSongHead(s: SongDoc, fmt: (n: number) => string): strin
   if (s.tags.length) lines.push(`tags ${s.tags.join(',')}`);
   if (s.bible) lines.push(`bible ${s.bible}`);
   if (s.layers.length) lines.push(`layers ${s.layers.join(' ')}`);
-  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${Object.entries(c.kit ?? {}).map(([k, v]) => `${k}:${v}`).join(',') || 'default'}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}${c.reverb ? ` reverb=${fmt(c.reverb)}` : ''}${c.delay ? ` delay=${fmt(c.delay)}` : ''}`);
+  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${kitText(c.kit)}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}${c.reverb ? ` reverb=${fmt(c.reverb)}` : ''}${c.delay ? ` delay=${fmt(c.delay)}` : ''}`);
   for (const m of s.motifs) lines.push(`motif ${m.name} tpb=${m.tpb} ${motifText(m)}`);
   for (const x of s.sections) lines.push(`section ${x.name} ${x.patterns.join(' ')}${x.repeat > 1 ? ` x${x.repeat}` : ''}${s.intro === x.name ? ' intro' : ''}${s.ending === x.name ? ' ending' : ''}`);
   lines.push(`loop ${s.loop === false ? 'off' : s.loop ? `${s.loop.from}..${s.loop.to}` : 'auto'}`);
