@@ -71,6 +71,19 @@ All notable changes to SoundClaw are listed here. The format follows
   regions become plain `instrument zone add` lines, all one undo group, and nothing is read again on replay. Every opcode or generator the zones cannot carry is named, per region or zone, as lost or
   approximated; a sample that cannot be read names its region and nothing is written. `--list` shows a font's presets. SFZ export now writes the loop crossfade and counts a zone's `start` into its loop
   points, so an exported instrument imports back to the same zones and renders the same bytes.
+- **Bigger imported instruments.** An instrument holds up to 4096 zones (it was 512): a note from 4096 zones renders in about 30 ms, `check` takes about two seconds (zones that differ only in the keys and velocities they answer to are measured once) and the key-map view draws in under 0.1 s. Each sample of an SFZ or SoundFont 2 import records the file's own SHA-256 as `container-hash`.
+- **Samples in the dashboard.** The library's Samples tab is a browser with three modes: *Project* (a small waveform, length, loudness and note, where the
+  audio came from and its licence, each as a glyph and a word; the numbers query of `sample list` in the filter field, with chips; ↑↓, Space and Enter),
+  *Library* (the registered sample libraries, 48 files a page, nothing loaded until one is played, and *Use* to copy one in with its licence) and *Takes*
+  (what generation made, to keep under a name and a confirmed licence, or discard). A sample has a page, `#/sample/<name>`: waveform, spectrogram, pitch,
+  loop-seam and compare lenses on one time axis, handles for the trim, the loop points and the slice markers (each gesture is one command, as an agent would
+  write it; from a layer the trim writes that layer's start and end), the numbers, the words, the advisory checks, where the audio came from, its licence
+  (editable) and what uses it, with derive, make an instrument, generate again and ask for changes. Audio dropped on the window (or chosen from the palette)
+  is imported as the person, under the licence they choose; a record button records the microphone (an input meter, an optional count-in) and saves the
+  take as `recorded`, licence `own`, once they confirm it. A sample row drags onto a layer list. The agent's new samples carry the violet mark in the list
+  and the rail's feed until they are played, and the feed says what came in (an import, a library file, a recording, a take with its prompt and credits, a
+  derived sample, a bounce). The server makes each sample's numbers and waveform once per audio in a worker thread (`GET /api/sample-card/<hash>.json`) and
+  adds `GET /api/sample-detail/<name>.json`, `GET /api/libraries`, `GET /api/library/search` and `POST /api/library/use` for the page.
 - **The instrument page.** `#/instrument/<id>` draws a sampled instrument's key-map: keys across, velocity up, every zone a labelled box that wears its check as a
   glyph and a word (round robins stacked, release zones dashed). Letting go of a zone's edge writes one `instrument zone set`; the arrow keys move an edge and Enter
   writes it. A sample dragged from the Samples tab onto a key (or *Add zone…*) writes one `instrument zone add`, rooted at the sample's own root, else its measured
@@ -111,6 +124,9 @@ All notable changes to SoundClaw are listed here. The format follows
   dragged from the Samples tab onto the lane places one, and *+ audio* adds an audio channel. The mixer has a strip for the channel and one for the convolution bus. A convolve device card draws the
   response it uses and its panel picks the response from the project's samples; a grain layer has a card and a map (the sample, the band the grains are taken from, how many sound at once).
   The page renders a song with clips and a room to the bytes Node renders.
+- **The skill teaches three sample workflows**: a sound effect from a library file and a generated take layered with synthesis, an instrument from single
+  notes, and a synth note frozen into an instrument; the README and the design notes describe sampled sources.
+
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.
@@ -118,6 +134,7 @@ All notable changes to SoundClaw are listed here. The format follows
 - A project's generation cap is set by a person: `soundclaw generate cap <project> <credits>`, or `POST /api/generation/cap` from the page (which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap.
 
 ### Fixed
+- The mixer's convolution bus meter moves while a song plays (the meters worker is given the room's response).
 - The generation dialog's help text ends the provider's terms with a full stop.
 - The library rail's five tabs fit at 1440 px and every width above 900: they share the strip, which scrolls sideways when they do not all fit.
 - On the key-map, the small text of a zone (root, round robin, loop mode) no longer overlaps its name line.
@@ -137,19 +154,6 @@ All notable changes to SoundClaw are listed here. The format follows
 The first release.
 
 ### Setup
-- **Bigger imported instruments.** An instrument holds up to 4096 zones (it was 512): a note from 4096 zones renders in about 30 ms, `check` takes about two seconds (zones that differ only in the keys and velocities they answer to are measured once) and the key-map view draws in under 0.1 s. Each sample of an SFZ or SoundFont 2 import records the file's own SHA-256 as `container-hash`.
-- **Samples in the dashboard.** The library's Samples tab is a browser with three modes: *Project* (a small waveform, length, loudness and note, where the
-  audio came from and its licence, each as a glyph and a word; the numbers query of `sample list` in the filter field, with chips; ↑↓, Space and Enter),
-  *Library* (the registered sample libraries, 48 files a page, nothing loaded until one is played, and *Use* to copy one in with its licence) and *Takes*
-  (what generation made, to keep under a name and a confirmed licence, or discard). A sample has a page, `#/sample/<name>`: waveform, spectrogram, pitch,
-  loop-seam and compare lenses on one time axis, handles for the trim, the loop points and the slice markers (each gesture is one command, as an agent would
-  write it; from a layer the trim writes that layer's start and end), the numbers, the words, the advisory checks, where the audio came from, its licence
-  (editable) and what uses it, with derive, make an instrument, generate again and ask for changes. Audio dropped on the window (or chosen from the palette)
-  is imported as the person, under the licence they choose; a record button records the microphone (an input meter, an optional count-in) and saves the
-  take as `recorded`, licence `own`, once they confirm it. A sample row drags onto a layer list. The agent's new samples carry the violet mark in the list
-  and the rail's feed until they are played, and the feed says what came in (an import, a library file, a recording, a take with its prompt and credits, a
-  derived sample, a bounce). The server makes each sample's numbers and waveform once per audio in a worker thread (`GET /api/sample-card/<hash>.json`) and
-  adds `GET /api/sample-detail/<name>.json`, `GET /api/libraries`, `GET /api/library/search` and `POST /api/library/use` for the page.
 - **`soundclaw init`** sets up Claude Code in one step: it makes the project (or uses the one there), installs the skill, and
   registers the MCP server at this version with `claude mcp add` (or in `.mcp.json` when `claude` is not on the PATH).
   `--scope project` shares both with the repo.
