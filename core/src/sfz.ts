@@ -66,8 +66,8 @@ export function instrumentToSfz(inst: Instrument, entry: (name: string) => Sampl
       if (z.loopmode === 'oneshot') w.push('loop_mode=one_shot');
       else if (z.loopmode === 'none' || z.loop === null) w.push('loop_mode=no_loop');
       else {
-        const lp = z.loop === 'sample' ? e.loop : ([sliceStart + Math.round(z.loop[0] * e.rate), sliceStart + Math.round(z.loop[1] * e.rate)] as [number, number]);
-        if (lp) w.push(`loop_mode=${z.loopmode === 'continuous' ? 'loop_continuous' : 'loop_sustain'}`, `loop_start=${lp[0]}`, `loop_end=${lp[1] - 1}`);
+        const lp = z.loop === 'sample' ? e.loop : ([sliceStart + Math.round((z.start + z.loop[0]) * e.rate), sliceStart + Math.round((z.start + z.loop[1]) * e.rate)] as [number, number]);
+        if (lp) w.push(`loop_mode=${z.loopmode === 'continuous' ? 'loop_continuous' : 'loop_sustain'}`, `loop_start=${lp[0]}`, `loop_end=${lp[1] - 1}`, `loop_crossfade=${r(z.xfade)}`);
         else w.push('loop_mode=no_loop');
       }
     } else {
