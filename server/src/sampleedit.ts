@@ -24,7 +24,7 @@ export interface Expanded {
   notes: string[];
 }
 
-export const MEASURED_OPS = new Set(['sample-derive', 'sample-bounce', 'sample-slice', 'sample-loop', 'layer-align', 'layer-match', 'env-follow', 'inst-zones', 'inst-from-sample']);
+export const MEASURED_OPS = new Set(['song-clip', 'sample-derive', 'sample-bounce', 'sample-slice', 'sample-loop', 'layer-align', 'layer-match', 'env-follow', 'inst-zones', 'inst-from-sample']);
 
 const word = (v: string): string => (/^[^\s"\\;]+$/.test(v) ? v : quote(v));
 
@@ -144,7 +144,41 @@ function buildZones(host: EditHost, next: Library, c: Extract<MusicCommandLike, 
 type MusicCommandLike = { op: 'inst-zones'; id: string; how: 'from-samples' | 'from-slices'; names: string[]; root: 'detect' | null; vel: [number, number] | null; start: number | null; text: string }
   | { op: 'inst-from-sample'; id: string; sample: string; loop: 'find' | null; text: string };
 
+/** `song clip add|set`: checks the sample, settles `from-tempo` when the clip is to follow the tempo and no tempo was given, and says which clip it made. */
+function settleClip(host: EditHost, next: Library, c: ClipCommandLike): Expanded {
+  if (c.verb === 'remove') return { commands: [c.text], notes: [] };
+  const song = next.songs.get(c.id);
+  const channel = song?.channels.find((x) => x.name === c.channel);
+  const have = c.verb === 'set' ? channel?.clips?.find((k) => k.id === c.clip) : undefined;
+  const name = c.fields.sample ?? have?.sample;
+  if (!name) return { commands: [c.text], notes: [] };
+  const e = entryOf(host, next, name);
+  const slice = c.fields.slice ?? have?.slice ?? 0;
+  if (slice > (e.slices?.length ?? 0)) throw new Error(`song ${c.id}: clip plays slice ${slice}, but sample ${name} ${e.slices?.length ? `has ${e.slices.length} slice${e.slices.length === 1 ? '' : 's'}` : 'has no slice points'} (sample slice ${name} at=onsets, or grid=<n>)`);
+  const stretch = c.fields.stretch ?? (c.fields.fromTempo !== undefined && c.fields.fromTempo !== 'none' ? 'tempo' : have?.stretch ?? 'none');
+  const given = c.fields.fromTempo !== undefined ? (c.fields.fromTempo === 'none' ? null : c.fields.fromTempo) : have?.fromTempo ?? null;
+  const notes: string[] = [];
+  let text = c.text;
+  if (stretch === 'tempo' && !given) {
+    const a = audioOf(host, e.hash);
+    if (!a) throw new Error(`the audio of sample ${name} is not in the store`);
+    const m = measureSample(pcmChannels(a, 8), a.rate, { maxSeconds: 30 });
+    if (!m.tempo) throw new Error(`I cannot hear a steady tempo in sample ${name}: give from-tempo=<bpm>, the tempo it was made at`);
+    const bpm = Math.round(m.tempo * 10) / 10;
+    text += ` from-tempo=${bpm}`;
+    notes.push(`clip of ${name}: from-tempo=${bpm} (measured from the spacing of its onsets)`);
+  }
+  if (c.verb === 'add' && song) {
+    const id = 1 + song.channels.reduce((m, ch) => (ch.clips ?? []).reduce((n, k) => Math.max(n, k.id), m), 0);
+    notes.unshift(`song ${c.id}: clip ${id} on ${c.channel}: ${name} at ${c.fields.at}`);
+  }
+  return { commands: [text], notes };
+}
+
+type ClipCommandLike = { op: 'song-clip'; verb: 'add' | 'set' | 'remove'; id: string; channel: string; clip: number | null; fields: { sample?: string; at?: string; slice?: number; stretch?: 'none' | 'tempo'; fromTempo?: number | 'none' }; text: string };
+
 export function expand(host: EditHost, next: Library, c: Command): Expanded {
+  if (c.op === 'song-clip') return settleClip(host, next, c as unknown as ClipCommandLike);
   if (c.op === 'inst-zones' || c.op === 'inst-from-sample') return buildZones(host, next, c as unknown as MusicCommandLike);
   if (c.op === 'layer-align' || c.op === 'layer-match' || c.op === 'env-follow') return measureLayerCommand(next, c, host.samples.bankFor(next));
   const sc = c as unknown as SampleCommand;

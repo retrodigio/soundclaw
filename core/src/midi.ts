@@ -83,6 +83,7 @@ export function exportMidi(song: SongDoc, instances: { pattern: Pattern; t0: num
   const drumNames = new Map<string, number>();
   let nextDrum = 60;
   for (const ch of song.channels) {
+    if (ch.clips) continue; // an audio channel has recordings, not notes
     const events: TrackEvent[] = [{ tick: 0, order: 0, data: meta(0x03, textBytes(ch.name)) }];
     const isDrum = !!ch.kit;
     let mch = 0;

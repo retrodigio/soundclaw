@@ -253,7 +253,7 @@ export function songNumbersText(w: Writer, id: string): string {
     `  length ${secs(n.length)}${n.loopLength !== null ? `, loop ${secs(n.loopLength)}` : ''}; tempo ${n.tempo} bpm, ${n.time}${n.swing ? `, swing ${n.swing}` : ''}${n.key ? `; key ${n.key}` : ''}`,
     `  loudness ${f1(n.lufs)} LUFS (${n.rule.basis}: ${n.rule.target} ±${n.rule.tolerance} LU), true peak ${f1(n.truePeakDb)} dBTP${n.masterReductionDb > 0.05 ? `, the master chain turns the mix down by up to ${f1(n.masterReductionDb)} dB` : ''}`,
     '  channels (alone, before the master chain):',
-    ...n.channels.map((c) => `    ${c.name.padEnd(10)} ${f1(c.lufs).padStart(6)} LUFS  peak ${f1(c.peakDb).padStart(6)} dB  ${String(c.notes).padStart(4)} notes  layer ${c.layer}`),
+    ...n.channels.map((c) => { const clips = w.song(id).channels.find((x) => x.name === c.name)?.clips; return `    ${c.name.padEnd(10)} ${f1(c.lufs).padStart(6)} LUFS  peak ${f1(c.peakDb).padStart(6)} dB  ${clips ? `${String(clips.length).padStart(4)} clips ` : `${String(c.notes).padStart(4)} notes`}  layer ${c.layer}`; }),
   ];
   return lines.join('\n');
 }
@@ -462,7 +462,7 @@ export function exportSong(w: Writer, id: string, o: SongExportOptions): SongExp
     const mode = loopRegion ? 'loop' : 'full';
     const r = w.bench.render(song, { mode });
     stemInfo = masterChainForStems(song);
-    const stems = o.stemsThroughMaster ? renderStems(song, r.parts, r.length, mode === 'loop', true) : r.stems;
+    const stems = o.stemsThroughMaster ? renderStems(song, r.parts, r.length, mode === 'loop', true, w.samples) : r.stems;
     const notes = o.stemsThroughMaster ? [
       `stems through the master chain: ${stemInfo.applied.length ? `applied ${stemInfo.applied.map((f) => f.kind + ' ' + Object.entries(f.p).map(([k, v]) => `${k}=${v}`).join(' ')).join('; ')}` : 'the chain has no filter to apply'}`,
       ...stemInfo.skipped.map((x) => `not applied: ${x.fx.kind}: ${x.why}`),
@@ -540,7 +540,7 @@ function normalizeLayers(w: Writer, id: string, song: SongDoc, rule: SongLoudnes
   const lo = goal - tol, hi = goal + tol;
   const mode = arrange(song).loop ? 'loop' : 'full';
   const r = w.bench.render(song, { mode });
-  const stems = new Map(renderStems(song, r.parts, r.length, mode === 'loop').map((x) => [x.layer, x.channels] as const));
+  const stems = new Map(renderStems(song, r.parts, r.length, mode === 'loop', false, w.samples).map((x) => [x.layer, x.channels] as const));
   const n = r.length;
   const sumLufs = (combo: readonly string[], k: (layer: string) => number): number => {
     const out: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
@@ -582,7 +582,7 @@ function normalizeLayers(w: Writer, id: string, song: SongDoc, rule: SongLoudnes
   // measure with exactly those gains
   const trial: SongDoc = { ...song, gain, channels: song.channels.map((c) => (newGain.has(c.name) ? { ...c, gain: newGain.get(c.name)! } : c)) };
   const rt = w.bench.render(trial, { mode });
-  const st2 = new Map(renderStems(trial, rt.parts, rt.length, mode === 'loop').map((x) => [x.layer, x.channels] as const));
+  const st2 = new Map(renderStems(trial, rt.parts, rt.length, mode === 'loop', false, w.samples).map((x) => [x.layer, x.channels] as const));
   let worst: { name: string; lufs: number } | null = null;
   for (const combo of layerCombinations(order)) {
     const out: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];

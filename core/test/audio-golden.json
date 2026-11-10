@@ -50,5 +50,27 @@
    "detail": "1 ch, 49708 samples",
    "renderVersion": 4
   }
+ },
+ "songs": {
+  "song-clips-tempo-sync": {
+   "hash": "3b00d9972c39b28ca771a8b609dd0e5f49aa1031f1a300312c52f9c1bf9f8773",
+   "detail": "2 ch, 176841 samples",
+   "renderVersion": 4
+  },
+  "song-clips-pitch-and-pv": {
+   "hash": "203977b4812cd1377d390072f0f4f407efbd917c62c119136fc666b4db6d5a75",
+   "detail": "2 ch, 176841 samples",
+   "renderVersion": 4
+  },
+  "song-clips-loop-fold": {
+   "hash": "956181c9b2f7a5500c710f369cf760aecbd236ed7d5f1e50ac5786192a74da68",
+   "detail": "2 ch, 176400 samples",
+   "renderVersion": 4
+  },
+  "song-clips-convolve-send-and-master": {
+   "hash": "b66e849768b2599e6a98ea5779d4cc9d5c50188f13fd5fa624444cfcaee2c0eb",
+   "detail": "2 ch, 198450 samples",
+   "renderVersion": 4
+  }
  }
 }

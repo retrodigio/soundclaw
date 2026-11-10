@@ -467,10 +467,10 @@ export function soundSamples(s: Sound): string[] {
   return [...new Set([...s.layers.flatMap(layerSamples), ...fxSamples(s.master)])];
 }
 
-/** The names of the samples a song reads itself, not through its instruments: the impulse responses of its master chain and send buses. */
+/** The names of the samples a song reads itself, not through its instruments: its audio clips and the impulse responses of its master chain and send buses. */
 export function songDirectSamples(s: SongDoc): string[] {
   const fx: Fx[] = [...s.master, ...(s.reverb ? [s.reverb] : []), ...(s.delay ? [s.delay] : []), ...(s.convolve ? [s.convolve] : [])];
-  return [...new Set(fxSamples(fx))];
+  return [...new Set([...s.channels.flatMap((c) => (c.clips ?? []).map((k) => k.sample)), ...fxSamples(fx)])];
 }
 
 /** The names of the samples an instrument plays: its template's sample layers and its zones. */
@@ -504,6 +504,7 @@ function renameInLayers(s: LayeredSound, from: string, to: string): LayeredSound
 
 function renameInSong(s: SongDoc, from: string, to: string): SongDoc {
   const c = cloneSong(s);
+  for (const ch of c.channels) for (const k of ch.clips ?? []) if (k.sample === from) k.sample = to;
   renameInFx(c.master, from, to);
   for (const f of [c.reverb, c.delay, c.convolve]) if (f) renameInFx([f], from, to);
   return c;

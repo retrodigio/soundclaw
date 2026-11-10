@@ -26,6 +26,8 @@ const load = (): void => {
 };
 const SONG = 'instrument new sine kind=osc\nsong new s tempo=120\nsong channel add s lead inst=sine\npattern s.a steps=16 tpb=4\n  lead: C5 - - - - - - - - - - - - - - -\nsong section add s a a x4\n';
 
+const SONG_A = SONG.replace('song channel add s lead', 'song channel add s drums audio\nsong channel add s lead');
+
 describe('impulse responses on a project', () => {
   beforeEach(load);
 
@@ -66,6 +68,50 @@ describe('impulse responses on a project', () => {
     const l = itemLicence(f.w.sampleLibrary(), 'song', 's');
     expect(l.samples.map((x) => x.name)).toEqual(['hall']);
     expect(l.state).toBe('attribution');
+  });
+});
+
+describe('audio clips on a project', () => {
+  beforeEach(load);
+
+  it('a clip that follows the tempo and gives none gets the tempo measured from the recording, written as a number, and the command says which clip it made', () => {
+    const r = run(SONG_A + 'song clip add s drums loop90 at=1 stretch=tempo');
+    const line = tape().find((t) => t.startsWith('song clip add'))!;
+    expect(line).toMatch(/^song clip add s drums loop90 at=1 stretch=tempo from-tempo=(8\d|9\d)(\.\d)?$/);
+    expect(r.warnings.join('\n')).toMatch(/song s: clip 1 on drums: loop90 at 1/);
+    expect(r.warnings.join('\n')).toMatch(/from-tempo=\d+(\.\d)? \(measured/);
+    expect(f.reopen().sampleLibrary().songs.get('s')!.channels[0]!.clips![0]!.fromTempo).toBe(f.w.sampleLibrary().songs.get('s')!.channels[0]!.clips![0]!.fromTempo);
+  });
+
+  it('a recording with no steady tempo asks for one', () => {
+    expect(fail(SONG_A + 'song clip add s drums bed at=1 stretch=tempo')).toMatch(/cannot hear a steady tempo in sample bed: give from-tempo/);
+  });
+
+  it('refuses a clip of a sample that is not in the project, and a slice it does not have', () => {
+    run(SONG_A);
+    expect(fail('song clip add s drums nothing at=1')).toMatch(/no sample 'nothing'/);
+    expect(fail('song clip add s drums bed at=1 slice=2')).toMatch(/plays slice 2, but sample bed has no slice points/);
+    run('sample slice bed grid=2');
+    run('song clip add s drums bed at=1 slice=2');
+  });
+
+  it('keeps the recording from going away while a clip plays it, follows a rename, and gives the song its licence', () => {
+    run(SONG_A + 'song clip add s drums loop90 at=1 from-tempo=90\nsong clip add s drums bed at=3');
+    expect(fail('sample remove bed')).toMatch(/played by song s/);
+    run('sample rename bed pad');
+    expect(f.w.sampleLibrary().songs.get('s')!.channels[0]!.clips!.map((k) => k.sample)).toEqual(['loop90', 'pad']);
+    expect(itemLicence(f.w.sampleLibrary(), 'song', 's').samples.map((x) => x.name)).toEqual(['loop90', 'pad']);
+    // undoing the rename gives the clip its old name again
+    run('undo');
+    expect(f.w.sampleLibrary().songs.get('s')!.channels[0]!.clips!.map((k) => k.sample)).toEqual(['loop90', 'bed']);
+  });
+
+  it('is part of the song\'s file and survives a restart', () => {
+    run(SONG_A + 'song clip add s drums loop90 at=2.2 len=1 from-tempo=90 gain=0.8');
+    const text = readFileSync(join(f.dir, 'songs', 's.song'), 'utf8');
+    expect(text).toMatch(/channel drums audio gain=1 pan=0 layer=base/);
+    expect(text).toMatch(/clip drums 1 sample=loop90 at=2.2 len=1 stretch=tempo from-tempo=90 gain=0.8/);
+    expect(f.reopen().sampleLibrary().songs.get('s')!.channels[0]!.clips![0]).toMatchObject({ id: 1, sample: 'loop90', fromTempo: 90, gain: 0.8 });
   });
 });
 

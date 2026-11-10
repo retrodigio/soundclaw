@@ -7,6 +7,7 @@
 import { clonePattern, channelEvents, formatCell, formatPattern, type Cell, type NoteFx, type Pattern } from './pattern.ts';
 import { parseKey } from './music.ts';
 import { FX_SPECS, defaultsOf, type Fx } from './layered.ts';
+import { clipWords } from './clips.ts';
 
 export const SONG_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 export const SECTION_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
@@ -18,6 +19,30 @@ export const MAX_SECTIONS = 64;
 export const MAX_SONG_SECONDS = 600;
 export const DEFAULT_LAYER = 'base';
 
+/** A recording placed on an audio channel: played by a sample layer, stretched to the song's tempo when asked (see clips.ts). */
+export interface AudioClip {
+  /** A number that stays with the clip (the commands name it). */
+  id: number;
+  sample: string;
+  /** Quarter-note beats from the start of the song, before the nudge. */
+  at: number;
+  /** Milliseconds the clip is moved off its place (either way). */
+  nudge: number;
+  /** Quarter-note beats it plays for; null: the whole sample. */
+  len: number | null;
+  stretch: 'none' | 'tempo';
+  /** The tempo the recording was made at (bpm); with `stretch: 'tempo'` the clip is stretched by this over the song's tempo. */
+  fromTempo: number | null;
+  method: 'wsola' | 'pv';
+  /** Semitones, the tempo kept when it is stretched to it. */
+  pitch: number;
+  gain: number;
+  /** Seconds faded in and out at each end. */
+  fade: number;
+  /** Plays slice n of the sample (0: the whole). */
+  slice: number;
+}
+
 export interface Channel {
   name: string;
   /** The instrument (project or built-in) a pitched channel plays; null for a drum channel. */
@@ -28,6 +53,8 @@ export interface Channel {
   pan: number;
   /** The game layer (stem) the channel belongs to. */
   layer: string;
+  /** An audio channel (it plays these clips and no instrument): present, even when empty, on an audio channel only. */
+  clips?: AudioClip[];
   /** A harmony part: the voice-leading check looks at it. */
   harmony?: true;
   /** How much of the channel goes to the song's send reverb, send delay and send convolution (0..1; left out when 0). */
@@ -108,7 +135,7 @@ export function cloneSong(s: SongDoc): SongDoc {
   return {
     ...s,
     time: [...s.time],
-    channels: s.channels.map((c) => ({ ...c, kit: c.kit ? { ...c.kit } : null })),
+    channels: s.channels.map((c) => ({ ...c, kit: c.kit ? { ...c.kit } : null, ...(c.clips ? { clips: c.clips.map((k) => ({ ...k })) } : {}) })),
     sections: s.sections.map((x) => ({ ...x, patterns: [...x.patterns] })),
     loop: s.loop && typeof s.loop === 'object' ? { ...s.loop } : s.loop,
     master: s.master.map(cloneFx),
@@ -270,6 +297,7 @@ export function songProblems(song: SongDoc, hasInstrument: (id: string) => boole
   const warnings: string[] = [];
   if (song.key) { try { parseKey(song.key); } catch (e) { errors.push((e as Error).message); } }
   for (const c of song.channels) {
+    if (c.clips && (c.inst || c.kit)) errors.push(`channel ${c.name} is an audio channel and also names an instrument`);
     if (c.inst && !hasInstrument(c.inst)) errors.push(`channel ${c.name} plays instrument '${c.inst}', which does not exist (instrument new ${c.inst} from=square_lead)`);
     if (c.kit) for (const [k, id] of Object.entries(c.kit)) if (!hasInstrument(id)) errors.push(`channel ${c.name} maps hit '${k}' to instrument '${id}', which does not exist`);
   }
@@ -289,6 +317,7 @@ export function songProblems(song: SongDoc, hasInstrument: (id: string) => boole
     for (const row of p.channels) {
       const ch = channelOf(song, row.name);
       if (!ch) { warnings.push(`pattern ${p.name} has a row for channel '${row.name}', which the song does not have (it is not played)`); continue; }
+      if (ch.clips) { warnings.push(`pattern ${p.name} has a row for channel '${row.name}', an audio channel (it plays clips, not notes, so the row is not played)`); continue; }
       for (const e of channelEvents(row)) {
         if (ch.inst && e.drum !== null) { errors.push(`pattern ${p.name}: channel ${row.name} plays instrument ${ch.inst}, but step ${e.step} is a drum hit '${e.drum}'`); break; }
         if (ch.kit && e.drum === null) { errors.push(`pattern ${p.name}: channel ${row.name} is a drum channel (kit), but step ${e.step} is a note`); break; }
@@ -308,7 +337,8 @@ export function serializeSongHead(s: SongDoc, fmt: (n: number) => string): strin
   if (s.tags.length) lines.push(`tags ${s.tags.join(',')}`);
   if (s.bible) lines.push(`bible ${s.bible}`);
   if (s.layers.length) lines.push(`layers ${s.layers.join(' ')}`);
-  for (const c of s.channels) lines.push(`channel ${c.name} ${c.inst ? `inst=${c.inst}` : `kit=${kitText(c.kit)}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}${c.reverb ? ` reverb=${fmt(c.reverb)}` : ''}${c.delay ? ` delay=${fmt(c.delay)}` : ''}${c.convolve ? ` convolve=${fmt(c.convolve)}` : ''}`);
+  for (const c of s.channels) lines.push(`channel ${c.name} ${c.clips ? 'audio' : c.inst ? `inst=${c.inst}` : `kit=${kitText(c.kit)}`} gain=${fmt(c.gain)} pan=${fmt(c.pan)} layer=${c.layer}${c.harmony ? ' harmony=yes' : ''}${c.reverb ? ` reverb=${fmt(c.reverb)}` : ''}${c.delay ? ` delay=${fmt(c.delay)}` : ''}${c.convolve ? ` convolve=${fmt(c.convolve)}` : ''}`);
+  for (const c of s.channels) for (const k of c.clips ?? []) lines.push(`clip ${c.name} ${k.id} ${clipWords(k, s.time).join(' ')}`);
   for (const m of s.motifs) lines.push(`motif ${m.name} tpb=${m.tpb} ${motifText(m)}`);
   for (const x of s.sections) lines.push(`section ${x.name} ${x.patterns.join(' ')}${x.repeat > 1 ? ` x${x.repeat}` : ''}${s.intro === x.name ? ' intro' : ''}${s.ending === x.name ? ' ending' : ''}`);
   lines.push(`loop ${s.loop === false ? 'off' : s.loop ? `${s.loop.from}..${s.loop.to}` : 'auto'}`);

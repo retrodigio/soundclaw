@@ -100,6 +100,12 @@ All notable changes to SoundClaw are listed here. The format follows
   names a sample like a sample layer does (the batch is refused when it is not in the project; the sample cannot be removed while a sound plays it).
 - **Recipes take a sample.** `sound new <id> voice=layered preset=<recipe> sample=<name>` (and `sound generate <id> <recipe> sample=<name>`) lays the first 0.3 s of a recording over the
   recipe's synth body as one more sample layer. No recipe ships audio.
+- **Audio clips in songs.** `song channel add <song> loops audio` makes a channel that plays recordings, and `song clip add <song> loops <sample> at=3.2 [len=<bars>] [stretch=tempo
+  from-tempo=<bpm>] [pitch=] [gain=] [fade=] [slice=] [nudge=]` places one on a bar and beat; `song clip set` and `song clip remove` take the clip's number. A clip is played by the sample
+  layer the renderer already has (the windowed sinc and both time stretches), fitted to the song's tempo when asked and following it when it changes; `stretch=tempo` without a tempo
+  listens to the recording once and writes the one it found. Audio channels have the gain, pan, game layer and sends of any channel and render and cache like the others (a partial render is
+  the render of the whole to the byte, the same in Node and the browser); loops fold a clip that runs past the end onto the start. The song carries the clips' licences, a clip's sample cannot
+  be removed while it is there, and a rename follows.
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.
 - Undoing a change that would take away a sample that is still played says which sounds and instruments play it.

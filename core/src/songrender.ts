@@ -17,6 +17,8 @@ import { instrumentKey, noteLengthAtMost, renderNote, velocityGain, zoneChoiceKe
 import { CHOKE_FADE, rrGroupOf, rrHash } from './zones.ts';
 import { sha256Text } from './sha256.ts';
 import { RENDER_VERSION, SAMPLE_RATE } from './sound.ts';
+import { clipSeconds, clipSound, clipStarts, type ClipWhere } from './clips.ts';
+import { renderLayered } from './synth.ts';
 import { applyFxChain, fxTail, panGains, type LimiterMemo, type SampleBank } from './synth.ts';
 import type { Fx } from './layered.ts';
 
@@ -185,6 +187,63 @@ function renderChannelAudio(song: SongDoc, ch: Channel, ev: readonly NoteEv[], N
   return out;
 }
 
+const SQRT2 = 1.4142135623730951;
+
+/**
+ * An audio channel: each clip is rendered by the sample layer it stands for (stretched to the song's tempo when it asks), placed at its bar and
+ * beat, and summed with the channel's gain and pan. A stereo clip keeps its sides (a centred channel plays it as it is; a pan turns one side down),
+ * a mono one is panned with the constant-power law as the notes of an instrument are. In a loop the clips are folded onto the region like notes.
+ */
+function renderAudioChannel(song: SongDoc, ch: Channel, N: number, wrap: boolean, o: SongRenderOptions, where: ClipWhere, cache: { key: string; hit: boolean }): [Float32Array, Float32Array] {
+  const placed = clipStarts(song, ch.clips ?? [], where);
+  const hash = (n: string): string => o.bank?.hash(n) ?? 'missing';
+  const clipKey = (k: (typeof placed)[number]['clip']): string => `${k.sample}=${hash(k.sample)}/${k.len ?? 'f'}/${k.stretch}/${k.fromTempo ?? ''}/${k.method}/${k.pitch}/${k.fade}/${k.slice}/${song.tempo}`;
+  const key = sha256Text(`${RENDER_VERSION}|audio|${wrap ? 'wrap' : 'run'}|${ch.gain}|${ch.pan}|${placed.map(({ clip: k, t }) => `${Math.round(t * SR)}/${k.gain}/${clipKey(k)}`).join(';')}#${N}`);
+  cache.key = key;
+  const hit = o.store?.get(key);
+  if (hit && hit.length === 2 * N) { cache.hit = true; return [hit.subarray(0, N), hit.subarray(N)]; }
+  const notes = o.notes ?? new Map<string, Float32Array[]>();
+  const [pl, pr] = panGains(ch.pan);
+  const items = placed.map(({ clip: k, t }) => {
+    const ck = `clip|${clipKey(k)}`;
+    let buf = notes.get(ck);
+    if (!buf) { buf = renderLayered(clipSound(song, k, o.bank), o.bank); notes.set(ck, buf); }
+    const raw = Math.round(t * SR);
+    return { k, buf, at: raw >= 0 ? raw : wrap ? raw + N : 0 };
+  });
+  let size = N;
+  if (wrap) for (const it of items) size = Math.max(size, it.at + it.buf[0]!.length);
+  const L = new Float64Array(size), R = new Float64Array(size);
+  for (const { k, buf, at } of items) {
+    const a = buf[0]!, b = buf[1] ?? a;
+    const g = k.gain * ch.gain;
+    const gl = buf.length > 1 ? g * Math.min(1, pl * SQRT2) : g * pl;
+    const gr = buf.length > 1 ? g * Math.min(1, pr * SQRT2) : g * pr;
+    const n = Math.min(a.length, size - at);
+    for (let i = 0; i < n; i++) {
+      L[at + i] = L[at + i]! + a[i]! * gl;
+      R[at + i] = R[at + i]! + b[i]! * gr;
+    }
+  }
+  const out: [Float32Array, Float32Array] = [new Float32Array(N), new Float32Array(N)];
+  const src = [L, R];
+  for (let c = 0; c < 2; c++) {
+    const x = src[c]!;
+    if (wrap) {
+      const folded = new Float64Array(N);
+      for (let i = 0; i < size; i++) { const j = i % N; folded[j] = folded[j]! + x[i]!; }
+      for (let i = 0; i < N; i++) out[c]![i] = folded[i]!;
+    } else for (let i = 0; i < N; i++) out[c]![i] = x[i]!;
+  }
+  if (o.store) {
+    const joined = new Float32Array(2 * N);
+    joined.set(out[0]);
+    joined.set(out[1], N);
+    o.store.put(key, joined);
+  }
+  return out;
+}
+
 /** Render a song (or its loop region). Throws a plain Error when a channel names an instrument that does not exist, or the song cannot be arranged. */
 export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
   const mode = o.mode ?? 'full';
@@ -204,6 +263,7 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
     N = Math.max(1, Math.round(pl.total * SR));
   }
   const only = o.only ? new Set(o.only) : null;
+  const where: ClipWhere = mode === 'loop' ? { mode, loops: 1, total: window.end - window.start, loop: arr.loop } : { mode, loops: Math.max(1, Math.min(16, Math.floor(o.loops ?? 1))), total: window.end, loop: arr.loop };
   const events = new Map<string, NoteEv[]>();
   const parts: ChannelAudio[] = [];
   let cached = 0;
@@ -225,13 +285,15 @@ export function renderSong(song: SongDoc, o: SongRenderOptions): SongRender {
       if (!inst) continue;
       extra = Math.max(extra, Math.min(MAX_TAIL, e.t + noteLengthAtMost(inst, { midi: e.midi ?? inst.root, gate: e.len, vel: e.vel, hit: e.drum }, o.bank) - N / SR));
     }
+    // a clip may run on past the end
+    for (const { ch } of rendered) if (ch.clips) for (const { clip: k, t } of clipStarts(song, ch.clips, where)) extra = Math.max(extra, Math.min(MAX_TAIL, t + clipSeconds(song, k, o.bank) - N / SR));
     // the send buses ring on after the last note too
     for (const { ch } of rendered) for (const k of SEND_KINDS) if (ch[k] && song[k]) extra = Math.max(extra, Math.min(MAX_TAIL, fxTail(wet(song[k]!))));
     N += Math.max(0, Math.ceil(extra * SR));
   }
   for (const { ch, ev } of rendered) {
     const k = { key: '', hit: false };
-    const audio = renderChannelAudio(song, ch, ev, N, wrap, o, k);
+    const audio = ch.clips ? renderAudioChannel(song, ch, N, wrap, o, where, k) : renderChannelAudio(song, ch, ev, N, wrap, o, k);
     keys.push(k.key);
     if (k.hit) cached++;
     parts.push({ name: ch.name, layer: ch.layer || DEFAULT_LAYER, key: k.key, channels: audio });

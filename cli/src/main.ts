@@ -88,6 +88,8 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
         instrument zones <id> from-samples <sample>... [root=detect] [vel=<lo>-<hi>]   instrument zones <id> from-slices <sample> [start=C1]   instrument from-sample <id> <sample> [loop=find]   (measured, written as instrument zone add)
         instrument layer|fx|env <as the sound commands> ...   (built-ins to play as they are: square_lead pulse_lead triangle_bass saw_pad fm_bell fm_bass pluck kick snare hat hat_open)
         song new <id> [tempo=] [swing=] [time=4/4] [key=A:minor] [class=music|stinger]   song set <id> ...   song channel add|set <song> <name> inst=<instrument>|kit=default|kit=<kit instrument>|kit=<hit>:<instrument>,... [gain=] [pan=] [layer=]
+        song channel add <song> <name> audio [gain=] [pan=] [layer=]   song clip add <song> <channel> <sample> at=<bar>[.<beat>] [len=<bars>|full] [stretch=tempo] [from-tempo=<bpm>] [method=wsola|pv] [pitch=] [gain=] [fade=<s>] [slice=] [nudge=<ms>]
+        song clip set <song> <channel> <clip> <key>=<value> ...   song clip remove <song> <channel> <clip>   (recordings on an audio channel; tempo-synced by stretch)
         pattern <song>.<name> steps=16 tpb=4 [bar=8], then indented rows:  lead: C5 . E5 - | G5v80 . E5~slide .      pattern set|remove|copy|rename <song>.<name> ...
         pattern note add|remove|move|len|set <song>.<pattern> <channel> <step> ...   (one note at a time: add C5 len=2, move step= note=, set vel= fx=)
         song section add|set|remove <song> <name> <pattern>... [x<n>]   song order|intro|ending|loop|fx|copy|rename|remove|mark <song> ...   (music: docs/commands.md)

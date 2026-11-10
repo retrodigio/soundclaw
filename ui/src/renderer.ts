@@ -1,7 +1,7 @@
 // The page's side of the render worker: ask for a sound's channels, get them when the worker has
 // rendered them. The page's own thread does no rendering for playback.
 
-import type { Sound, Style } from '@soundclaw/core';
+import { soundSamples, type Sound, type Style } from '@soundclaw/core';
 import type { SampleInfo } from '@soundclaw/server/protocol';
 import type { CellReply, DiffReply, LensReply, MeasureReply, RenderReply, RenderRequest, StripPeaks } from './render.worker.ts';
 
@@ -11,7 +11,7 @@ export interface Rendered { key: string; channels: Float32Array[]; hash: string;
 export function samplesNamed(s: Sound, all: readonly SampleInfo[]): SampleInfo[] {
   if (s.voice !== 'layered') return [];
   const names = new Set<string>();
-  for (const l of s.layers) if (l.kind === 'sample' && l.p.sample) names.add(String(l.p.sample));
+  for (const n of soundSamples(s)) names.add(n);
   return all.filter((x) => names.has(x.name));
 }
 

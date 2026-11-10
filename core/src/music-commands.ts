@@ -12,6 +12,9 @@
 //   song new <id> [tempo=] [swing=] [time=4/4] [key=C:major] [class=] ...    song set <id> <key>=<value> ...
 //   song channel add|set <song> <name> inst=<instrument> | kit=<k:instrument,…>|default  [gain=] [pan=] [layer=]
 //   song channel remove <song> <name>
+//   song channel add <song> <name> audio [gain=] [pan=] [layer=] [reverb=] [delay=] [convolve=]     an audio channel, which plays clips
+//   song clip add <song> <channel> <sample> at=<bar>[.<beat>] [len=<bars>|full] [stretch=tempo|none] [from-tempo=<bpm>] [method=wsola|pv] [pitch=] [gain=] [fade=] [slice=] [nudge=<ms>]
+//   song clip set <song> <channel> <clip> <key>=<value> ...     song clip remove <song> <channel> <clip>
 //   song section add|set <song> <name> <pattern>… [x<n>]    song section remove <song> <name>    song order <song> <section>…
 //   song intro|ending <song> <section>|none     song loop <song> <from>[..<to>]|auto|off
 //   song fx add|set|remove|move <song> …        the master chain
@@ -26,8 +29,9 @@ import { SOURCE_KINDS, newLayer, parseEnv, parseValue, type Env, type SourceKind
 import type { Library } from './sets.ts';
 import { noteLabel, parseKey, parseNote, parseRange } from './music.ts';
 import { formatPattern, parsePattern, PATTERN_NAME_RE, type Pattern } from './pattern.ts';
+import { CLIP_ID_RE, MAX_CLIPS, beatsPerBar, parseAt } from './clips.ts';
 import {
-  MAX_CHANNELS, DEFAULT_LAYER, LAYER_NAME_RE, SECTION_RE, SONG_ID_RE, SWING, TEMPO, cloneSong, newSong, songProblems, type Channel, type SongDoc,
+  MAX_CHANNELS, DEFAULT_LAYER, LAYER_NAME_RE, SECTION_RE, SONG_ID_RE, SWING, TEMPO, cloneSong, newSong, songProblems, type AudioClip, type Channel, type SongDoc,
 } from './song.ts';
 import { applyLayerCommand } from './layer-ops.ts';
 import { applyNoteEdit, noteEditText, parseNoteEdit, type NoteEdit } from './songedit.ts';
@@ -59,7 +63,8 @@ export type MusicCommand =
   | { op: 'pattern-copy' | 'pattern-rename'; song: string; name: string; to: string; text: string }
   | { op: 'song-new'; id: string; values: [string, SongValue][]; fromBible: string | null; template: string | null; text: string }
   | { op: 'song-set'; id: string; values: [string, SongValue][]; text: string }
-  | { op: 'song-channel'; verb: 'add' | 'set'; id: string; name: string; inst: string | null; kit: Record<string, string> | null; gain: number | null; pan: number | null; layer: string | null; harmony: boolean | null; reverb: number | null; delay: number | null; convolve: number | null; text: string }
+  | { op: 'song-clip'; verb: 'add' | 'set' | 'remove'; id: string; channel: string; clip: number | null; fields: ClipFields; text: string }
+  | { op: 'song-channel'; verb: 'add' | 'set'; id: string; name: string; audio: boolean; inst: string | null; kit: Record<string, string> | null; gain: number | null; pan: number | null; layer: string | null; harmony: boolean | null; reverb: number | null; delay: number | null; convolve: number | null; text: string }
   | { op: 'song-send'; id: string; kind: SendKind; off: boolean; values: [string, number | string][]; text: string }
   | { op: 'song-channel-remove'; id: string; name: string; text: string }
   | { op: 'song-section'; verb: 'add' | 'set'; id: string; name: string; patterns: string[]; repeat: number; text: string }
@@ -73,6 +78,80 @@ export type MusicCommand =
   | { op: 'song-mark'; id: string; status: 'approved' | 'rejected' | 'draft'; text: string };
 
 export type SongValue = number | string | null;
+
+/** What a `song clip add|set` gives (each key only when given). `at` is the bar and beat as written; it is turned into beats by the song's time signature when the command runs. */
+export interface ClipFields {
+  sample?: string;
+  at?: string;
+  nudge?: number;
+  len?: number | 'full';
+  stretch?: 'none' | 'tempo';
+  fromTempo?: number | 'none';
+  method?: 'wsola' | 'pv';
+  pitch?: number;
+  gain?: number;
+  fade?: number;
+  slice?: number;
+}
+
+const CLIP_KEYS = ['sample', 'at', 'nudge', 'len', 'stretch', 'from-tempo', 'method', 'pitch', 'gain', 'fade', 'slice'] as const;
+
+function clipField(key: string, v: string): ClipFields {
+  switch (key) {
+    case 'sample': if (!SAMPLE_NAME_RE.test(v)) throw new Error(`'${v}' is not a sample name (letters, digits, _ and -)`); return { sample: v };
+    case 'at': if (!/^\d{1,4}(\.\d{1,2})?$/.test(v)) throw new Error(`at is a bar, or a bar and a beat: 3 (the start of bar 3) or 3.2 (beat 2 of bar 3); got '${v}'`); return { at: v };
+    case 'nudge': return { nudge: numIn('nudge', v, -500, 500, 'ms') };
+    case 'len': return { len: v === 'full' ? 'full' : numIn('len', v, 0.0625, 512, 'bars') };
+    case 'stretch': if (v !== 'none' && v !== 'tempo') throw new Error(`stretch is tempo (fit the clip to the song's tempo, from from-tempo) or none (got '${v}')`); return { stretch: v };
+    case 'from-tempo': return { fromTempo: v === 'none' ? 'none' : numIn('from-tempo', v, 30, 300, 'bpm') };
+    case 'method': if (v !== 'wsola' && v !== 'pv') throw new Error(`method is wsola (hits, drums, voices) or pv (tones, pads) (got '${v}')`); return { method: v };
+    case 'pitch': return { pitch: numIn('pitch', v, -48, 48, 'semitones') };
+    case 'gain': return { gain: numIn('gain', v, 0, 4) };
+    case 'fade': return { fade: numIn('fade', v, 0, 10, 's') };
+    case 'slice': { const n = numIn('slice', v, 0, 1024); if (!Number.isInteger(n)) throw new Error(`slice is a whole number (got '${v}')`); return { slice: n }; }
+    default: throw new Error(`a clip has ${CLIP_KEYS.join(', ')} (got '${key}')`);
+  }
+}
+
+/** The fields as the words that give them, in a fixed order (the normal form of a clip command). */
+function clipFieldWords(f: ClipFields): string[] {
+  const w: string[] = [];
+  if (f.sample !== undefined) w.push(`sample=${f.sample}`);
+  if (f.at !== undefined) w.push(`at=${f.at}`);
+  if (f.nudge !== undefined) w.push(`nudge=${f.nudge}`);
+  if (f.len !== undefined) w.push(`len=${f.len}`);
+  if (f.stretch !== undefined) w.push(`stretch=${f.stretch}`);
+  if (f.fromTempo !== undefined) w.push(`from-tempo=${f.fromTempo}`);
+  if (f.method !== undefined) w.push(`method=${f.method}`);
+  if (f.pitch !== undefined) w.push(`pitch=${f.pitch}`);
+  if (f.gain !== undefined) w.push(`gain=${f.gain}`);
+  if (f.fade !== undefined) w.push(`fade=${f.fade}`);
+  if (f.slice !== undefined) w.push(`slice=${f.slice}`);
+  return w;
+}
+
+function applyClipFields(k: AudioClip, f: ClipFields, time: readonly [number, number]): void {
+  if (f.sample !== undefined) k.sample = f.sample;
+  if (f.at !== undefined) k.at = parseAt(f.at, time);
+  if (f.nudge !== undefined) k.nudge = f.nudge;
+  if (f.len !== undefined) k.len = f.len === 'full' ? null : f.len * beatsPerBar(time);
+  if (f.fromTempo !== undefined) {
+    k.fromTempo = f.fromTempo === 'none' ? null : f.fromTempo;
+    if (f.fromTempo !== 'none' && f.stretch === undefined) k.stretch = 'tempo';
+  }
+  if (f.stretch !== undefined) k.stretch = f.stretch;
+  if (f.method !== undefined) k.method = f.method;
+  if (f.pitch !== undefined) k.pitch = f.pitch;
+  if (f.gain !== undefined) k.gain = f.gain;
+  if (f.fade !== undefined) k.fade = f.fade;
+  if (f.slice !== undefined) k.slice = f.slice;
+  if (k.stretch === 'tempo' && !k.fromTempo) throw new Error('stretch=tempo needs from-tempo=<bpm>, the tempo the recording was made at (run through a project, the command measures one and writes it for you)');
+}
+
+const newClip = (id: number, sample: string): AudioClip => ({ id, sample, at: 0, nudge: 0, len: null, stretch: 'none', fromTempo: null, method: 'wsola', pitch: 0, gain: 1, fade: 0, slice: 0 });
+
+/** The number the next clip of a song gets. */
+export const nextClipId = (s: Pick<SongDoc, 'channels'>): number => 1 + s.channels.reduce((m, c) => (c.clips ?? []).reduce((n, k) => Math.max(n, k.id), m), 0);
 
 export const MUSIC_HEADS = ['instrument', 'pattern', 'song'] as const;
 
@@ -451,7 +530,8 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
     if (!name || !/^[A-Za-z][A-Za-z0-9_]{0,23}$/.test(name.v)) throw new DiagError(line, (name ?? sub).col, `song channel ${sub.v} ${id}: give the channel's name (letters, digits and _, like lead or bass)`);
     if (sub.v === 'remove') return { op: 'song-channel-remove', id, name: name.v, text: `song channel remove ${id} ${name.v}` };
     let inst: string | null = null, kit: Record<string, string> | null = null, gain: number | null = null, pan: number | null = null, layer: string | null = null, harmony: boolean | null = null, reverb: number | null = null, delay: number | null = null, convolve: number | null = null;
-    for (const p of pairs(a.slice(2), line, `song channel ${sub.v} ${id} ${name.v}`)) {
+    const audio = a.slice(2).some((t) => t.v === 'audio' || t.v === 'audio=yes');
+    for (const p of pairs(a.slice(2).filter((t) => t.v !== 'audio' && t.v !== 'audio=yes'), line, `song channel ${sub.v} ${id} ${name.v}`)) {
       try {
         if (p.key === 'inst') { if (!INSTRUMENT_ID_RE.test(p.value)) throw new Error(`'${p.value}' is not an instrument id`); inst = p.value; }
         else if (p.key === 'kit') {
@@ -476,10 +556,44 @@ function parseSong(head: Token, rest: Token[], line: number, parseSub: ParseLine
       } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
     }
     if (inst && kit) throw new DiagError(line, name.col, 'song channel: give inst= (a pitched channel) or kit= (a drum channel), not both');
-    if (sub.v === 'add' && !inst && !kit) throw new DiagError(line, name.col, `song channel add ${id} ${name.v}: give inst=<instrument> (or kit=default for drums)`);
-    const words = [inst ? `inst=${inst}` : kit ? `kit=${kitText(kit)}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : '', reverb !== null ? `reverb=${reverb}` : '', delay !== null ? `delay=${delay}` : '', convolve !== null ? `convolve=${convolve}` : ''].filter(Boolean);
+    if (audio && (inst || kit)) throw new DiagError(line, name.col, 'song channel: an audio channel plays clips; give audio, or inst= or kit=, not both');
+    if (audio && sub.v === 'set') throw new DiagError(line, name.col, `song channel set ${id} ${name.v}: audio is for song channel add (a channel is one kind for good: add a new one)`);
+    if (sub.v === 'add' && !inst && !kit && !audio) throw new DiagError(line, name.col, `song channel add ${id} ${name.v}: give inst=<instrument> (or kit=default for drums, or audio for clips)`);
+    const words = [audio ? 'audio' : inst ? `inst=${inst}` : kit ? `kit=${kitText(kit)}` : '', gain !== null ? `gain=${gain}` : '', pan !== null ? `pan=${pan}` : '', layer ? `layer=${layer}` : '', harmony !== null ? `harmony=${harmony ? 'yes' : 'no'}` : '', reverb !== null ? `reverb=${reverb}` : '', delay !== null ? `delay=${delay}` : '', convolve !== null ? `convolve=${convolve}` : ''].filter(Boolean);
     if (sub.v === 'set' && !words.length) throw new DiagError(line, name.col, `song channel set ${id} ${name.v}: give what changes (inst=, kit=, gain=, pan=, layer=, harmony=, reverb=, delay=, convolve=)`);
-    return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, inst, kit, gain, pan, layer, harmony, reverb, delay, convolve, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
+    return { op: 'song-channel', verb: sub.v as 'add' | 'set', id, name: name.v, audio, inst, kit, gain, pan, layer, harmony, reverb, delay, convolve, text: `song channel ${sub.v} ${id} ${name.v} ${words.join(' ')}`.trim() };
+  }
+  if (verb.v === 'clip') {
+    const [sub, ...a] = args;
+    if (!sub || !['add', 'set', 'remove'].includes(sub.v)) throw new DiagError(line, (sub ?? verb).col, 'song clip: add, set or remove');
+    const id = checkIn(a[0], line, `song clip ${sub.v}`, SONG_ID_RE, 'song id');
+    const ch = a[1];
+    if (!ch || !/^[A-Za-z][A-Za-z0-9_]{0,23}$/.test(ch.v)) throw new DiagError(line, (ch ?? sub).col, `song clip ${sub.v} ${id}: give the audio channel's name`);
+    const fields: ClipFields = {};
+    let clip: number | null = null;
+    let rest = a.slice(2);
+    if (sub.v === 'add') {
+      const smp = rest[0];
+      if (!smp || !SAMPLE_NAME_RE.test(smp.v)) throw new DiagError(line, (smp ?? ch).col, `song clip add ${id} ${ch.v}: give the sample to place (song clip add ${id} ${ch.v} <sample> at=<bar>[.<beat>])`);
+      fields.sample = smp.v;
+      rest = rest.slice(1);
+    } else {
+      const n = rest[0];
+      if (!n || !CLIP_ID_RE.test(n.v)) throw new DiagError(line, (n ?? ch).col, `song clip ${sub.v} ${id} ${ch.v}: give the clip's number (song show lists them)`);
+      clip = Number(n.v);
+      rest = rest.slice(1);
+    }
+    if (sub.v === 'remove') {
+      if (rest.length) throw new DiagError(line, rest[0]!.col, 'song clip remove takes no settings');
+      return { op: 'song-clip', verb: 'remove', id, channel: ch.v, clip, fields, text: `song clip remove ${id} ${ch.v} ${clip}` };
+    }
+    for (const p of pairs(rest, line, `song clip ${sub.v} ${id} ${ch.v}`)) {
+      try { Object.assign(fields, clipField(p.key, p.value)); } catch (e) { throw new DiagError(line, p.t.col, (e as Error).message); }
+    }
+    if (sub.v === 'add' && fields.at === undefined) throw new DiagError(line, ch.col, `song clip add ${id} ${ch.v} ${fields.sample}: give at=<bar>[.<beat>] (bars and beats count from 1)`);
+    if (sub.v === 'set' && !Object.keys(fields).length) throw new DiagError(line, sub.col, `song clip set ${id} ${ch.v} ${clip}: give at least one of ${CLIP_KEYS.join(', ')}`);
+    const words = clipFieldWords(fields).filter((x) => !(sub.v === 'add' && x.startsWith('sample=')));
+    return { op: 'song-clip', verb: sub.v as 'add' | 'set', id, channel: ch.v, clip, fields, text: `song clip ${sub.v} ${id} ${ch.v} ${sub.v === 'add' ? fields.sample : clip} ${words.join(' ')}`.trim() };
   }
   if (verb.v === 'section') {
     const [sub, ...a] = args;
@@ -838,6 +952,7 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (at >= 0) throw new Error(`song ${c.id} has a channel ${c.name} already (song channel set changes it)`);
         if (s.channels.length >= MAX_CHANNELS) throw new Error(`a song has at most ${MAX_CHANNELS} channels`);
         const ch: Channel = { name: c.name, inst: c.inst, kit: c.kit, gain: c.gain ?? 1, pan: c.pan ?? 0, layer: c.layer ?? DEFAULT_LAYER };
+        if (c.audio) ch.clips = [];
         if (c.harmony) ch.harmony = true;
         if (c.reverb) ch.reverb = c.reverb;
         if (c.delay) ch.delay = c.delay;
@@ -846,6 +961,7 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
       } else {
         if (at < 0) throw new Error(`song ${c.id} has no channel ${c.name} (channels: ${s.channels.map((x) => x.name).join(', ') || 'none'})`);
         const ch = { ...s.channels[at]! };
+        if (ch.clips && (c.inst || c.kit)) throw new Error(`channel ${c.name} of ${c.id} is an audio channel: it plays clips, not an instrument (song channel add makes a channel of the other kind)`);
         if (c.inst) { ch.inst = c.inst; ch.kit = null; }
         if (c.kit) { ch.kit = c.kit; ch.inst = null; }
         if (c.gain !== null) ch.gain = c.gain;
@@ -858,6 +974,30 @@ export function applyMusic(lib: Library, c: MusicCommand): string | undefined {
         if (c.convolve !== null) { if (c.convolve) ch.convolve = c.convolve; else delete ch.convolve; }
         s.channels[at] = ch;
       }
+      lib.songs.set(c.id, s);
+      return undefined;
+    }
+    case 'song-clip': {
+      const s = songOf(lib, c.id);
+      const ci = s.channels.findIndex((x) => x.name === c.channel);
+      if (ci < 0) throw new Error(`song ${c.id} has no channel ${c.channel} (channels: ${s.channels.map((x) => x.name).join(', ') || 'none'})`);
+      const ch = { ...s.channels[ci]! };
+      if (!ch.clips) throw new Error(`channel ${c.channel} of ${c.id} plays an instrument, and clips go in an audio channel (song channel add ${c.id} <name> audio)`);
+      const clips = ch.clips.map((k) => ({ ...k }));
+      if (c.verb === 'add') {
+        if (s.channels.reduce((n, x) => n + (x.clips?.length ?? 0), 0) >= MAX_CLIPS) throw new Error(`a song has at most ${MAX_CLIPS} clips`);
+        if (c.fields.at === undefined) throw new Error(`song clip add ${c.id} ${c.channel}: give at=<bar>[.<beat>] (bars and beats count from 1)`);
+        const k = newClip(nextClipId(s), c.fields.sample!);
+        applyClipFields(k, c.fields, s.time);
+        clips.push(k);
+      } else {
+        const at = clips.findIndex((k) => k.id === c.clip);
+        if (at < 0) throw new Error(`channel ${c.channel} of ${c.id} has no clip ${c.clip} (clips: ${clips.map((k) => k.id).join(', ') || 'none'})`);
+        if (c.verb === 'remove') clips.splice(at, 1);
+        else applyClipFields(clips[at]!, c.fields, s.time);
+      }
+      ch.clips = clips;
+      s.channels[ci] = ch;
       lib.songs.set(c.id, s);
       return undefined;
     }

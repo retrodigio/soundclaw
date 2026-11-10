@@ -642,6 +642,7 @@ export class Writer {
         if (song === this.library.songs.get(id)) continue;
         const at = parsed.commands.filter((c) => ('id' in c && c.id === id) || ('song' in c && c.song === id)).at(-1);
         missingIr(song.master, `song ${id} master`, at?.line ?? 1);
+        for (const ch of song.channels) for (const k of ch.clips ?? []) if (!(next.samples.has(k.sample) || this.samples.info(k.sample))) errors.push({ line: at?.line ?? 1, col: 1, message: `song ${id} clip ${k.id} on ${ch.name} names sample '${k.sample}', which is not in the project (soundclaw sample import <project> <file> as=<name>${this.samples.names().length ? `; samples: ${this.samples.names().join(', ')}` : ''})` });
         for (const k of ['reverb', 'delay', 'convolve'] as const) if (song[k]) missingIr([song[k]!], `song ${id} ${k} bus`, at?.line ?? 1);
       }
       // A sample or grain layer must name a sample that is in the project.

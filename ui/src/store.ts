@@ -3,7 +3,7 @@
 // core, the same code the agent's renders use, so what plays here is what the agent rendered.
 // React reads it via useSyncExternalStore.
 
-import { sampleKeyPart, decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
+import { sampleKeyPart, decodeAudio, pcmToSampleData, Library, applyCommand, parse, replay, restoreCommands, restoreSongCommands, arrange, layerOrder, builtinInstruments, renderNote, type LimiterMemo, type PartStore, instrumentKey, mixParts, renderSong, sha256Text, songDirectSamples, songFromJson, songText, stepTime, type Instance, type Instrument, type SongDoc, type SongRender, DEFAULT_STYLE, HUMAN_RE, analyze, peaks, cloneSound, measuredChannels, fullScaleOf, joinChannels, melSpectrogram, mixdown, renderChannels, renderExact, renderKey, runChecks, samplesHash, soundExport, soundStyle, classTable, loudnessFor, type LoudnessRule, type Analysis, type CheckResult, type Diag, type MelSpec, type SampleBank, type SampleData, type SetDoc, type SetMeasure, type Sound, type Style, type TapeEntry, type WorkRequest } from '@soundclaw/core';
 import type { BatchProgress, CardInfo, ClientMessage, Review, PersonRequest, Presence, SampleInfo, ServerMessage, Snapshot, SoundSummary } from '@soundclaw/server/protocol';
 import { Renderer, samplesNamed } from './renderer.ts';
 import type { CellReply, DiffReply, LensReply } from './render.worker.ts';
@@ -772,7 +772,8 @@ export class Store {
     const used = new Set<string>();
     for (const c of song.channels) { if (c.inst) used.add(c.inst); for (const v of Object.values(c.kit ?? {})) used.add(v); }
     const text = [...used].map((id) => JSON.stringify(this.lookupInstrument(id) ?? '')).join('|');
-    return this.samples.filter((x) => text.includes(`"${x.name}"`)).map((x) => x.name);
+    const direct = new Set(songDirectSamples(song));
+    return this.samples.filter((x) => direct.has(x.name) || text.includes(`"${x.name}"`)).map((x) => x.name);
   }
 
   // ---- songs ---------------------------------------------------------------------------------------------------------
@@ -794,7 +795,8 @@ export class Store {
     for (const c of song.channels) { if (c.inst) used.add(c.inst); for (const v of Object.values(c.kit ?? {})) used.add(v); }
     if (song.channels.some((c) => c.kit)) for (const d of ['kick', 'snare', 'hat', 'hat_open']) used.add(d);
     const insts = [...used].sort().map((id) => { const i = this.lookupInstrument(id); return i ? `${id}:${instrumentKey(i, (n) => this.sampleBank.hash(n) ?? 'missing')}` : id; });
-    return sha256Text(`${songText(song)}|${insts.join(',')}`);
+    const direct = songDirectSamples(song).sort().map((n) => `${n}=${this.sampleBank.hash(n) ?? 'missing'}`);
+    return sha256Text(`${songText(song)}|${insts.join(',')}${direct.length ? `|${direct.join(',')}` : ''}`);
   }
 
   /** Channel parts kept between renders (a part's key is its notes, instruments, gain and pan): after an edit only the changed channel renders again. */
@@ -902,7 +904,7 @@ export class Store {
       const r = this.songRender(song, mode);
       const audible = this.songAudible(song);
       const all = audible.length === song.channels.length;
-      const mix = all ? r.mix : mixParts(song, r.parts.filter((p) => audible.includes(p.name)), r.length, mode === 'loop').mix;
+      const mix = all ? r.mix : mixParts(song, r.parts.filter((p) => audible.includes(p.name)), r.length, mode === 'loop', undefined, this.sampleBank).mix;
       // the hash of what was played is worked out when asked for (hashing a long song takes a while)
       let hash: string | null = null;
       this.songsPlayed.push({ id, mode, get hash() { return (hash ??= samplesHash(joinChannels([mix[0], mix[1]]))); }, muted: song.channels.map((c) => c.name).filter((n) => !audible.includes(n)), ...(from !== null ? { from } : {}), ...(region ? { region } : {}) });

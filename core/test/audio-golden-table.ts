@@ -25,3 +25,21 @@ export const RENDER_TABLE: Record<string, string> = {
 function GRAIN(layer: string): string {
   return `sound new s voice=layered seed=7\nsound set s duration=1\n${layer}\n`;
 }
+
+const SONG_BASE = `instrument new sine kind=osc
+instrument set sine adsr=0.001,0,1,0.01 gain=0.5 velocity=0
+song new s tempo=120
+song channel add s lead inst=sine gain=0.5
+song channel add s loops audio gain=0.9
+pattern s.a steps=16 tpb=4
+  lead: C5 - - - E5 - - - G5 - - - E5 - - -
+song section add s a a x2
+`;
+
+/** Songs, by name: a script that makes the song `s`, and which render of it is hashed. */
+export const SONG_TABLE: Record<string, { script: string; mode: 'full' | 'loop' }> = {
+  'song-clips-tempo-sync': { script: SONG_BASE + 'song clip add s loops beat at=1 stretch=tempo from-tempo=90\nsong clip add s loops tone at=2.3 len=0.5 fade=0.05 gain=0.7', mode: 'full' },
+  'song-clips-pitch-and-pv': { script: SONG_BASE + 'song clip add s loops tone at=1 stretch=tempo from-tempo=100 pitch=7 method=pv\nsong clip add s loops wide at=2 nudge=-20', mode: 'full' },
+  'song-clips-loop-fold': { script: SONG_BASE + 'song clip add s loops tone at=2.4\nsong clip add s loops beat at=1 from-tempo=90', mode: 'loop' },
+  'song-clips-convolve-send-and-master': { script: SONG_BASE + 'song clip add s loops beat at=1 from-tempo=90\nsong send s convolve ir=room len=0.5\nsong channel set s loops convolve=0.5\nsong channel set s lead convolve=0.2\nsong fx add s convolve ir=hall mix=0.15 len=0.4', mode: 'full' },
+};
