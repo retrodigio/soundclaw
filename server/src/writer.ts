@@ -14,7 +14,7 @@ import { expand, MEASURED_OPS, restoreDerived } from './sampleedit.ts';
 import { MAX_IR_SECONDS, type Fx, fxSamples, instrumentSamples, isSampleOp, layerSamples, settleSampleAdd, songDirectSamples, soundSamples, type SampleCommand, type SampleEntry } from '@soundclaw/core';
 import type { Measured } from './ears.ts';
 import { ProjectError, appendTape, readTape, writeInstruments, writeSamples, writeSets, writeSongs, writeSounds, type Project } from './project.ts';
-import { normalizePlan } from './normalize.ts';
+import { failureLines, normalizePlan } from './normalize.ts';
 import { SongBench, type SongMeasured } from './songs.ts';
 import { LEAN_AT, type BatchProgress, type CardLite, type ServerMessage, type Snapshot, type SoundSummary } from './protocol.ts';
 import { Thumbs } from './thumbs.ts';
@@ -567,7 +567,8 @@ export class Writer {
               applyCommand(next, parse(text).commands[0]!);
               added.push({ seq: ++seq, by: req.by, at, group, cmd: text });
             }
-            if (!plan.commands) warnings.push(`line ${c.line}: ${plan.already}: nothing to write`);
+            if (!plan.commands && !plan.failures.length) warnings.push(`line ${c.line}: ${plan.already}: nothing to write`);
+            warnings.push(...failureLines(plan));
             if (plan.info) warnings.push(plan.info);
             warnings.push(...plan.notes);
             continue;

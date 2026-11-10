@@ -127,6 +127,34 @@ describe('normalize', () => {
     expect(() => normalizeCommands(f.w, ['s'], 'target=-16')).toThrow(/s cannot reach -16 LUFS: at gain \d.* and a limiter gain of \+[\d.]+ dB.*it measures -[\d.]+ LUFS, [\d.]+ LU under/);
     expect(f.w.tape().length).toBe(before);
   });
+  const CLICK = 'layer add c osc wave=white dur=0.01 gain=0.05\nenv c 1.amp "0:0 0.0005:1 0.004:0@exp"\nsound set c duration=1';
+  it('several sounds: the ones that can be normalized are, the failures are listed and the failed sound is left as it was', () => {
+    run(SPARSE + '\nsound new c voice=layered seed=1\n' + CLICK);
+    const n = normalizeCommands(f.w, ['s', 'c'], 'target=-16');
+    expect(n.ids).toEqual(['s']);
+    expect(n.failures).toHaveLength(1);
+    expect(n.failures[0]).toMatch(/^c cannot reach -16 LUFS/);
+    expect(n.commands).not.toMatch(/sound set c /); // not even its loudness
+    run(n.commands);
+    expect(Math.abs(f.w.measure('s').analysis.lufs - -16)).toBeLessThan(0.1);
+    expect((f.w.sound('c') as LayeredSound).loudness).toBeUndefined();
+  });
+  it('a plan whose every sound fails is still an error, naming them all, and writes nothing', () => {
+    run('sound new c voice=layered seed=1\n' + CLICK + '\nsound new d voice=layered seed=2\n' + CLICK.replaceAll(' c ', ' d ').replace('layer add c', 'layer add d'));
+    expect(() => normalizeCommands(f.w, ['c', 'd'], 'target=-16')).toThrow(/c cannot reach[\s\S]*d cannot reach[\s\S]*nothing was changed/);
+  });
+  it('a sound that falls short by less than its class tolerance is done, with a warning', () => {
+    run('sound new c voice=layered seed=1\n' + CLICK);
+    let probe = '';
+    try { normalizeCommands(f.w, ['c'], 'target=-10'); } catch (e) { probe = (e as Error).message; }
+    const reach = Number(/measures (-[\d.]+) LUFS/.exec(probe)![1]);
+    const n = normalizeCommands(f.w, ['c'], `target=${Math.ceil((reach + 0.6) * 10) / 10}`);
+    expect(n.failures).toEqual([]);
+    expect(n.ids).toEqual(['c']);
+    expect(n.notes.join('\n')).toMatch(/c: reaches -[\d.]+ LUFS, [\d.]+ LU under the target .* but inside the class tolerance \(±1 LU\)/);
+    run(n.commands);
+    expect(f.w.measure('c').checks.find((x) => x.name === 'loudness')!.pass).toBe(true);
+  });
   it('a classic sound goes to its target by volume but stops where it would clip, and says how far short it is', () => {
     run('sound new a voice=classic preset=explosion seed=2');
     const n = normalizeCommands(f.w, ['a'], 'target=-3');

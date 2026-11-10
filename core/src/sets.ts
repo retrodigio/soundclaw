@@ -303,7 +303,7 @@ export function classicClipLimit(s: Sound, bank?: SampleBank, style: Style = DEF
  * left there and the note says by how many LU it falls short (`sound layer-up` makes the sound layered and sample-identical, and then
  * gain goes to 4 and `out` adds the rest).
  */
-export function matchGain(s: Sound, target: number, bank?: SampleBank, style: Style = DEFAULT_STYLE): Matched {
+export function matchGain(s: Sound, target: number, bank?: SampleBank, style: Style = DEFAULT_STYLE, tolerance = 0): Matched {
   if (s.voice === 'tone') return { command: null, lufs: loudnessOf(s, bank), reached: false, note: `${s.id} is a tone: it cannot be matched` };
   const cur = cloneSound(s);
   let lufs = loudnessOf(cur, bank);
@@ -364,7 +364,9 @@ export function matchGain(s: Sound, target: number, bank?: SampleBank, style: St
   const endLimGain = endLim ? Number(endLim.p.gain ?? 0) : 0;
   let note: string | null = null;
   let error: string | undefined;
-  if (!reached && lufs < target) error = `${s.id} cannot reach ${target} LUFS: at gain ${l.gain} and a limiter gain of +${endLimGain} dB (the most normalize adds) it measures ${lufs.toFixed(1)} LUFS, ${(target - lufs).toFixed(1)} LU under; the sound is too sparse or quiet for that target (the limiter holds its peaks under ${endLim?.p.ceiling ?? ceiling} dB): make its source louder (layer gain, a shorter sound, a compressor with makeup=auto) or aim lower with loudness=<LUFS>`;
+  const within = !reached && lufs < target && target - lufs <= tolerance - 0.05;
+  if (within) note = `${s.id}: reaches ${lufs.toFixed(1)} LUFS, ${(target - lufs).toFixed(1)} LU under the target ${target} but inside the class tolerance (±${tolerance} LU), so it passes the loudness check; that is the most normalize can add (gain ${l.gain}, limiter gain +${endLimGain} dB)`;
+  else if (!reached && lufs < target) error = `${s.id} cannot reach ${target} LUFS: at gain ${l.gain} and a limiter gain of +${endLimGain} dB (the most normalize adds) it measures ${lufs.toFixed(1)} LUFS, ${(target - lufs).toFixed(1)} LU under; the sound is too sparse or quiet for that target (the limiter holds its peaks under ${endLim?.p.ceiling ?? ceiling} dB): make its source louder (layer gain, a shorter sound, a compressor with makeup=auto) or aim lower with loudness=<LUFS>`;
   else if (!reached) note = `${s.id}: matching left it ${(lufs - target).toFixed(1)} LU over the target ${target}`;
   if (reached && endLimGain > startLimGain) note = `${s.id}: gain 4 was not enough; ${startLim ? 'the master limiter' : 'a limiter added to the master chain (ceiling ' + ceiling + ' dB)'} now takes +${endLimGain} dB before it, which brings it to ${lufs.toFixed(1)} LUFS with the peaks held under the ceiling`;
   const cmds: string[] = [];

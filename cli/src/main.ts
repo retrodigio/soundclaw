@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTHOR_RE, BIBLE_FILE, STYLE_FILE, guideText, openRequests, scaleText, shipPolicyOf, type ViewKind } from '@soundclaw/core';
 import { exportInstrument, formatInstrumentExport, formatInstrumentImport, importInstrument, isSoundFont, soundFontList, instrumentChecksText, instrumentZonesText, isProjectInstrument, viewKeymap, SONG_VIEWS, exportSong, formatSongExport, listInstruments, midiImportScript, songChecksText, songJsonObject, songNumbersText, songSummary, viewSong, type SongViewKind } from '@soundclaw/server';
 import {
-  EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
+  EXPORT_FORMATS, SAMPLE_VIEWS, isSampleRef, sampleView, sampleDescribeText, sampleMeasureJson, sampleCheckText, compareText, sampleLine, gcApply, gcPlan, gcReport, gitLfsLines, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject, changesText, ProjectError, Writer, describeJson, measureJson, measureText, normalizePlan, failureLines, soundJson, agentName, agentWork, checkText, cliSteps, createProject, describeText, exportFormat, formatErrors, formatExportFiles, formatRun, historyText, humanName,
   IMPORT_KINDS, formatImportReport, importCommands, loadProject, lockHolder, personRequest, plural, readRequests, renderText, requestBrief, requestLine, setSummary, shellArg, soundSummary, toPersonRequest, viewSound, type ExportFormat, type ImportKind, type Project,
 } from '@soundclaw/server';
 import { addLibrary, hitJson, listLibraries, listText, removeLibrary, searchLibraries, searchText, similarLibraries, stateUnder, tagFile, useLibraryFile } from '@soundclaw/server';
@@ -803,10 +803,12 @@ function cmdNormalize(io: Io, p: Parsed): number {
   assertNoServer(dir, io);
   const w = wr(io, dir);
   const n = normalizePlan(w, rest);
-  const warn = n.notes.map((x) => `warning: ${x}\n`).join('');
+  const warn = [...n.notes.map((x) => `warning: ${x}`), ...failureLines(n)].map((x) => `${x}\n`).join('');
+  // some sounds could not be brought to the target: the others are written, and the exit code says so
+  const code = n.failures.length ? 1 : 0;
   if (!n.commands) {
     io.out(`${n.already}: nothing to write\n${n.info ? n.info + '\n' : ''}${warn}`);
-    return 0;
+    return code;
   }
   const r = w.run({ commands: n.commands, by: author(p, 'agent:claude', (x) => `agent:${x}`) });
   if (!r.ok) {
@@ -815,7 +817,7 @@ function cmdNormalize(io: Io, p: Parsed): number {
   }
   const song = rest[0] !== undefined && w.hasSong(rest[0]) ? `${songSummary(w, rest[0])}\n` : '';
   io.out(`${n.info ? n.info + '\n' : ''}${warn}normalized ${n.what} as group ${r.group}\n${r.added.map((e) => `  #${e.seq} ${e.cmd}\n`).join('')}${song}`);
-  return 0;
+  return code;
 }
 
 function cmdCheck(io: Io, p: Parsed): number {

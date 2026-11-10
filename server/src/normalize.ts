@@ -12,6 +12,8 @@ export interface NormalizePlan {
   commands: string;
   /** Things worth saying that are not errors. */
   notes: string[];
+  /** Sounds that could not be brought to the target (the others were): one message each, naming the sound. Empty when every sound could. */
+  failures: string[];
   /** A song with layers: how the mixes were fitted. */
   info: string | null;
   /** "<what> to <target>", for the sentence "normalized …". */
@@ -30,12 +32,17 @@ export function normalizePlan(w: Writer, args: readonly string[]): NormalizePlan
     const target = t === undefined ? undefined : Number(t.replace(/lufs$/i, ''));
     if (target !== undefined && !(target >= -60 && target <= 0)) throw new ProjectError('normalize: a song takes target=<LUFS> (or nothing: its class target)');
     const n = normalizeSong(w, first, target);
-    return { commands: n.command ?? '', notes: n.notes, info: n.info ?? null, what: `${first} to ${n.target} LUFS`, already: `${first} is already at ${n.target} LUFS` };
+    return { commands: n.command ?? '', notes: n.notes, info: n.info ?? null, failures: [], what: `${first} to ${n.target} LUFS`, already: `${first} is already at ${n.target} LUFS` };
   }
   const names = [...args];
   const last = names[names.length - 1]!;
   const isName = (x: string): boolean => w.has(x) || w.hasSet(x);
   const spec = names.length > 1 && !isName(last) ? names.pop() : undefined;
   const n = normalizeCommands(w, names, spec);
-  return { commands: n.commands, notes: n.notes, info: null, what: `${plural(n.ids.length, 'sound')} to ${n.target}`, already: `${plural(n.ids.length, 'sound')} already at ${n.target}` };
+  return { commands: n.commands, notes: n.notes, info: null, failures: n.failures, what: `${plural(n.ids.length, 'sound')} to ${n.target}`, already: `${plural(n.ids.length, 'sound')} already at ${n.target}` };
+}
+
+/** The failures of a plan as lines for the agent: `not normalized (…): …`, or nothing. */
+export function failureLines(plan: NormalizePlan): string[] {
+  return plan.failures.map((x) => `not normalized: ${x.replace(/^normalize: /, '')}`);
 }

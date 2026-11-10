@@ -11,6 +11,9 @@ All notable changes to SoundClaw are listed here. The format follows
   `limit` parameter `gain`, 0 to 48 dB, added before limiting; `normalize` adds a `limit ceiling=-1` at the end of the master chain when it has
   none), not as an output level after the chain, so the peaks the extra level makes are held and the clip check passes. Going quieter takes that
   gain back first. Documents without the parameter render and key as before.
+- **`normalize` over several sounds is no longer all or nothing.** The sounds that can reach the target are normalized; the rest are listed as
+  `not normalized: …` and left exactly as they were (the CLI exits 1 when any was left; it is an error only when none could be done). A sound that
+  lands inside its class's tolerance counts as normalized, with a warning, instead of being refused.
 - **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
   (to 24), from the threshold and ratio the effect has then; the document holds the number.
 

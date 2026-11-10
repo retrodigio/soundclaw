@@ -166,7 +166,7 @@ export function measureText(w: Writer, ids: string[]): { text: string; pass: boo
  * class's target; `target=<LUFS>` gives them that loudness (`sound set <id> loudness=<LUFS>`) so the checks hold them to it. The
  * matching itself is the gain (a layered sound's `gain`; a classic sound's `volume`, which cannot go above 1: the note says how far it falls short).
  */
-export function normalizeCommands(w: Writer, names: string[], spec?: string): { commands: string; notes: string[]; ids: string[]; target: string } {
+export function normalizeCommands(w: Writer, names: string[], spec?: string): { commands: string; notes: string[]; ids: string[]; target: string; failures: string[] } {
   if (!names.length) throw new ProjectError('normalize: name sounds or a set');
   const ids: string[] = [];
   for (const n of names) {
@@ -193,24 +193,34 @@ export function normalizeCommands(w: Writer, names: string[], spec?: string): { 
   lib.sets = new Map(w.sets().map((x) => [x.id, x] as const));
   const out: string[] = [];
   const notes: string[] = [];
-  const unreachable: string[] = [];
+  const failures: string[] = [];
+  const done: string[] = [];
   for (const id of unique) {
+    const original = cloneSound(lib.get(id)!);
+    const mine: string[] = [];
     const pre = cls ? `sound set ${id} class=${cls} loudness=auto` : loud !== null ? `sound set ${id} loudness=${loud}` : null;
     if (pre) {
       const before = serializeSound(lib.get(id)!);
       applyCommand(lib, parse(pre).commands[0]!);
-      if (serializeSound(lib.get(id)!) !== before) out.push(pre);
+      if (serializeSound(lib.get(id)!) !== before) mine.push(pre);
     }
     const sound = lib.get(id)!;
     const rule = loudnessFor(sound, lib.sets.values(), w.style);
-    const m = matchGain(sound, rule.target, w.samples, w.style);
-    if (m.error) unreachable.push(m.error);
-    if (m.command) out.push(m.command);
+    const m = matchGain(sound, rule.target, w.samples, w.style, rule.tolerance);
+    if (m.error) {
+      // the ones that can be normalized are; this one is left as it was (even its class)
+      failures.push(m.error);
+      lib.set(id, original);
+      continue;
+    }
+    if (m.command) mine.push(m.command);
     if (m.note) notes.push(m.note);
+    out.push(...mine);
+    done.push(id);
   }
-  if (unreachable.length) throw new ProjectError(`normalize: ${unreachable.join('\n  ')}\n  (nothing was changed)`);
+  if (failures.length && !done.length) throw new ProjectError(`normalize: ${failures.join('\n  ')}\n  (nothing was changed)`);
   const target = cls ? `class ${cls} (${classTable(w.style)[cls]!.target} LUFS)` : loud !== null ? `${loud} LUFS` : 'each sound\'s own class';
-  return { commands: out.join('\n'), notes, ids: unique, target };
+  return { commands: out.join('\n'), notes, ids: done, target, failures };
 }
 
 /** `describe --json` and `render --json`: the sound's JSON (class, numbers, description, checks); render adds the key and the samples' hash. */
