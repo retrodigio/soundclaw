@@ -562,7 +562,7 @@ export function exportFormat(w: Writer, ids: string[], format: ExportFormat, out
     const attribution = attributionText(reached);
     const atFile = join(dir, 'ATTRIBUTION.txt');
     if (wantManifest) {
-      if (attribution) { writeFileSync(atFile, attribution); notes.push(`ATTRIBUTION.txt written (${reached.filter((r) => r.licence.attribution || /^CC-BY/.test(r.licence.id)).length} samples ask for attribution)`); }
+      if (attribution) { writeFileSync(atFile, attribution); { const asking = reached.filter((r) => r.licence.attribution || /^CC-BY/.test(r.licence.id)).length; notes.push(`ATTRIBUTION.txt written (${asking} sample${asking === 1 ? ' asks' : 's ask'} for attribution)`); } }
       else rmSync(atFile, { force: true });
     }
     if (wantManifest) writeFileSync(mf, JSON.stringify({ format: 'soundclaw-manifest', version: 1, project: w.project.json.name, ...(allow.length ? { allowedLicences: allow } : {}), samples: reached.map((r) => { const e = w.samples.entry(r.name); return { name: r.name, hash: r.hash, licence: r.licence.id, ...(r.licence.attribution ? { attribution: r.licence.attribution } : {}), ...(r.licence.terms ? { terms: r.licence.terms } : {}), source: e?.prov.source ?? 'file', ...(e?.prov.origin ? { origin: e.prov.origin } : {}) }; }), sounds: manifest, sets: w.sets().filter((x) => manifest.some((m) => x.members.includes(m.id))).map((x) => ({ id: x.id, members: x.members, target: x.target })) }, null, 2) + '\n');

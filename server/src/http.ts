@@ -13,7 +13,8 @@ import { AUTHOR_RE, HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, pcmToWav,
 import { decodeInWorker } from './decode.ts';
 import { hitJson, libraryAudioFile, loadIndex, readRegistry, searchLibraries, stateUnder, useLibraryFile } from './library.ts';
 import { sampleDetail } from './sampledetail.ts';
-import { generateBodyFrom, generateFromBody, setProjectCap } from './generate.ts';
+import { generateBodyFrom, generateFromBody, generationStatus, setProjectCap } from './generate.ts';
+import { instrumentCheckAsync } from './instrumentcheck.ts';
 import { commitImports } from './sampleimport.ts';
 import { songJsonObject } from './songs.ts';
 import { reviewOf } from './changes.ts';
@@ -430,6 +431,19 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       } catch (e) { json(res, e instanceof ProjectError ? 400 : 500, { error: (e as Error).message }); }
       return;
     }
+    if (url.pathname === '/api/generation') {
+      // what the generation panel and the session page show: the budget against the caps, the providers and whether a call could be made now (never a key), the totals and the latest ledger lines
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      try { json(res, 200, generationStatus(o.writer.project.dir, o.writer.stamp())); } catch (e) { json(res, e instanceof ProjectError ? 400 : 500, { error: (e as Error).message }); }
+      return;
+    }
+    const icm = /^\/api\/instrument-check\/([A-Za-z][A-Za-z0-9_-]*)\.json$/.exec(url.pathname);
+    if (icm) {
+      // an instrument's check (findings and each zone's measured pitch and level) for the key-map, worked out in a worker thread and kept
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      instrumentCheckAsync(o.writer, icm[1]!).then((c) => json(res, 200, c), (e: unknown) => json(res, e instanceof ProjectError ? 404 : 500, { error: (e as Error).message }));
+      return;
+    }
     const scm = /^\/api\/sample-card\/([0-9a-f]{64})\.json$/.exec(url.pathname);
     if (scm) {
       // a sample's numbers and small waveform, worked out in a worker thread once for these bytes (they never change under a hash)
@@ -474,7 +488,7 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       const headers = { 'Cache-Control': 'private, max-age=3600', ETag: src.etag };
       const have = auditionCache.get(src.etag);
       if (have) { sendAudio(req, res, have, headers); return; }
-      decodeInWorker({ bytes: src.bytes, filename: src.filename, options: { as: 'audition' } }).then((p) => {
+      decodeInWorker({ bytes: src.bytes, filename: src.filename, options: {}, audioOnly: true }).then((p) => {
         const wav = pcmToWav(p.audio);
         keepAudition(src.etag, wav);
         sendAudio(req, res, wav, headers);

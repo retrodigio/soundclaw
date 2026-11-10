@@ -8,6 +8,7 @@ import type { Diag, Instrument, RequestTarget, SetDoc, SongJson, Sound, Style, T
 export type { Presence, SampleInfo };
 export type { SampleDetail } from './sampledetail.ts';
 export type { SampleCard } from './samplecards.ts';
+export type { GenerationStatus } from './generate.ts';
 
 /** A registered sample library, as `GET /api/libraries` lists it. */
 export interface LibraryListing { id: string; name: string; licence: string; attribution?: string; declared: string; /** Files in its index, or null when it has not been indexed. */ files: number | null }

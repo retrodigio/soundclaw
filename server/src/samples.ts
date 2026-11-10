@@ -42,6 +42,8 @@ export interface SampleInfo {
   /** For generated audio: the prompt (cut at 160 characters), which take it is and the credits it cost. */
   prompt?: string;
   take?: string;
+  /** A kept take: the name it was generated under. */
+  keptFrom?: string;
   credits?: number;
 }
 
@@ -277,7 +279,7 @@ export class SampleStore extends MapBank {
       licence: e.licence.id, licenceState: licenceState(e.licence, this.policy).state, source: e.prov.source, tags: e.tags,
       ...(e.root !== undefined ? { root: noteLabel(e.root) } : {}), ...(e.slices?.length ? { slices: e.slices } : {}), ...(e.loop ? { loop: e.loop } : {}), ...(e.loopMode ? { loopMode: e.loopMode } : {}), ...(x.legacy ? { legacy: true as const } : {}),
       ...(e.prov.author ? { author: e.prov.author } : {}), ...(e.prov.date ? { date: e.prov.date } : {}),
-      ...(e.prov.prompt ? { prompt: e.prov.prompt.length > 160 ? `${e.prov.prompt.slice(0, 159)}…` : e.prov.prompt } : {}), ...(e.prov.take ? { take: e.prov.take } : {}), ...(e.prov.credits !== undefined ? { credits: e.prov.credits } : {}),
+      ...(e.prov.prompt ? { prompt: e.prov.prompt.length > 160 ? `${e.prov.prompt.slice(0, 159)}…` : e.prov.prompt } : {}), ...(e.prov.take ? { take: e.prov.take } : {}), ...(e.prov.keptFrom ? { keptFrom: e.prov.keptFrom } : {}), ...(e.prov.credits !== undefined ? { credits: e.prov.credits } : {}),
     };
   }
 

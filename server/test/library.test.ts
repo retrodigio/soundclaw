@@ -5,7 +5,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, w
 import { cpus, loadavg } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MANIFEST_FILE, decodeAudio, decodeMeasure, pcmHash } from '@soundclaw/core';
+import { MANIFEST_FILE, decodeAudio, decodeMeasure, pcmFromFloats, pcmHash, pcmToWav } from '@soundclaw/core';
+import { STREAM_OVER, chunkPlan, readWavHead, totalOf } from '../../ui/src/samples/stream.ts';
 import {
   addLibrary, confinedFile, defaultWorkers, moveLegacyCache, platformCacheDir, legacyCacheDir, getLibrary, hitJson, indexLibrary, listLibraries, loadIndex, readRegistry, removeLibrary, scanLibrary, searchLibraries, similarLibraries, stateUnder, tagFile,
   useLibraryFile, libraryAudioFile, licenceCheck, importPath,
@@ -421,6 +422,40 @@ describe('GET /api/library/<id>/audio', () => {
       expect(f.w.samples.all()).toEqual([]);
       expect(existsSync(join(f.dir, 'samples', 'objects'))).toBe(false);
       expect(libraryAudioFile('cellar-foley', 'bells/BellHigh.wav').filename).toBe('BellHigh.wav');
+    } finally {
+      await server.close();
+    }
+  });
+  it('streams a file over 2 MB the way the page plays it: the first range names the total, the planned ranges join to the whole file', async () => {
+    makeSmallLibrary(lib, outside);
+    put(lib, 'beds/long_bed.wav', pcmToWav(pcmFromFloats([Float32Array.from({ length: 44100 * 30 }, (_, i) => Math.sin(i / 30) * 0.25), Float32Array.from({ length: 44100 * 30 }, (_, i) => Math.sin(i / 17) * 0.25)], 44100, 'pcm16')));
+    addLibrary(lib, { licence: 'CC0-1.0' });
+    const server = await startWatchServer({ writer: f.w, token: 'tok', port: 0 });
+    try {
+      const url = `http://127.0.0.1:${server.port}/api/library/cellar-foley/audio?${new URLSearchParams({ token: 'tok', path: 'beds/long_bed.wav' })}`;
+      const first = await fetch(url, { headers: { Range: `bytes=0-${STREAM_OVER - 1}` } });
+      expect(first.status).toBe(206);
+      const total = totalOf(first.headers.get('content-range'))!;
+      expect(total).toBeGreaterThan(STREAM_OVER);
+      const head = new Uint8Array(await first.arrayBuffer());
+      expect(head.length).toBe(STREAM_OVER);
+      const h = readWavHead(head)!;
+      expect(h).toMatchObject({ channels: 2, rate: 44100, dataBytes: total - 44 });
+      const parts = [head];
+      for (const [a, b] of chunkPlan(head.length, total)) {
+        const r = await fetch(url, { headers: { Range: `bytes=${a}-${b}` } });
+        expect(r.status).toBe(206);
+        parts.push(new Uint8Array(await r.arrayBuffer()));
+      }
+      const joined = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+      let o = 0;
+      for (const p of parts) { joined.set(p, o); o += p.length; }
+      const whole = new Uint8Array(await (await fetch(url)).arrayBuffer());
+      expect(Buffer.compare(joined, whole)).toBe(0);
+      // a short file asked the same way comes back whole in the first range
+      const small = await fetch(url.replace('beds%2Flong_bed.wav', 'doors%2Fcreak_01.wav'), { headers: { Range: `bytes=0-${STREAM_OVER - 1}` } });
+      const sb = new Uint8Array(await small.arrayBuffer());
+      expect(totalOf(small.headers.get('content-range'))).toBe(sb.length);
     } finally {
       await server.close();
     }

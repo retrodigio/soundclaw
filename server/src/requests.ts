@@ -10,9 +10,14 @@ import { ANSWER_WORDS, AUTHOR_RE, parseRequestTarget, targetAdvice, targetProble
 import { unseenOpen, type AgentEvent } from './await.ts';
 import { checkLine, failingChecks } from './ears.ts';
 import { songCheckLine, songFailing } from './songs.ts';
+import { sampleDescribeText } from './sampleview.ts';
+import { sampleDetail } from './sampledetail.ts';
 import { REQUESTS_FILE, ProjectError, type Project } from './project.ts';
 import type { PersonRequest } from './protocol.ts';
 import type { Writer } from './writer.ts';
+
+/** A request may be about a sample itself: its item is `sample:<name>`. A sample is material, so such a request has no mark on the tape and no checks gate its `done` (only that the sample is still there). */
+export const sampleItem = (item: string): string | null => /^sample:([A-Za-z0-9][A-Za-z0-9_-]{0,47})$/.exec(item)?.[1] ?? null;
 
 /** Every record in the file, in order (a line that is not JSON is skipped). */
 export function readRequestRecords(p: Project): RequestRecord[] {
@@ -60,7 +65,13 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   const text = (q.note ?? '').trim();
   const tags = [...new Set(q.tags ?? [])];
   for (const t of tags) if (!isFeedbackTag(t)) throw new ProjectError(`no tag '${t}' (a sound: too loud, too quiet, too long, too short, too harsh, too dull, too similar to another sound, good; a song: too busy, too sparse, too loud, too repetitive, wrong mood, good)`);
-  if (!w.hasSong(q.sound)) w.sound(q.sound); // throws when there is no such sound or song
+  const onSample = sampleItem(q.sound);
+  if (q.sound.startsWith('sample:') && !onSample) throw new ProjectError(`'${q.sound}' is not a sample item (sample:<name>)`);
+  if (onSample) {
+    if (!w.samples.entry(onSample)) throw new ProjectError(`no sample '${onSample}' (soundclaw sample list shows the samples)`);
+    if (tags.length) throw new ProjectError('quick tags are for sounds and songs; say what should change about the sample');
+    if (q.other !== undefined) throw new ProjectError('a request on a sample has no other sound to be like');
+  } else if (!w.hasSong(q.sound)) w.sound(q.sound); // throws when there is no such sound or song
   if (q.other !== undefined) {
     if (!tags.includes(SIMILAR_TAG)) throw new ProjectError(`other names the sound a '${SIMILAR_TAG}' tag points at`);
     if (!w.has(q.other)) throw new ProjectError(`no sound '${q.other}' to compare with`);
@@ -68,13 +79,19 @@ export function personRequest(w: Writer, by: string, q: PersonRequest): WorkRequ
   }
   const note = text || tagsNote(tags, q.other);
   if (!note) throw new ProjectError('say what should change, or pick a tag');
-  if (q.target !== undefined) checkTarget(w, q.sound, q.target);
+  if (q.target !== undefined) {
+    if (onSample) {
+      const bad = targetProblem(q.target);
+      if (bad) throw new ProjectError(bad);
+      if (q.target.kind !== 'range' && q.target.kind !== 'item') throw new ProjectError(`a sample has a stretch of time to point at (range) or the whole (item), not a ${q.target.kind}`);
+    } else checkTarget(w, q.sound, q.target);
+  }
   // Praise alone is feedback: nothing to change, so the sound is not marked.
   const kind = tags.length && tags.every((t) => t === 'good') ? 'feedback' : 'change';
   const rec: RequestRecord = { type: 'request', id, sound: q.sound, kind, note, ...(tags.length ? { tags } : {}), ...(q.other ? { other: q.other } : {}), ...(q.target ? { target: q.target } : {}), ...(q.again ? { again: q.again } : {}), by, at };
   const problem = requestProblem(reqs, rec);
   if (problem) throw new ProjectError(problem);
-  if (kind === 'feedback') return appendRequest(p, rec);
+  if (kind === 'feedback' || onSample) return appendRequest(p, rec);
   const markNote = [tags.length && text ? `[${tags.join(', ')}]` : '', note].filter(Boolean).join(' ');
   const r = w.hub.withoutMarkEvents(() => w.run({ commands: `${w.hasSong(q.sound) ? 'song' : 'sound'} mark ${q.sound} rejected ${quote(markNote)}`, by }));
   if (!r.ok) throw new ProjectError(r.errors.map((e) => e.message).join('; '));
@@ -235,7 +252,11 @@ export function agentWork(w: Writer, agent: string, q: AgentWork, steps: WorkSte
   const id = q.id ?? mine(reqs, agent)?.id;
   if (!id) throw new ProjectError(`no claimed request to post ${q.action} on (give id)`);
   const target = reqs.get(id);
-  if (q.action === 'done' && target && target.state === 'claimed' && target.claimedBy === agent && !w.has(target.sound) && !w.hasSong(target.sound)) {
+  const sampleName = target ? sampleItem(target.sound) : null;
+  if (q.action === 'done' && target && sampleName && target.state === 'claimed' && target.claimedBy === agent && !w.samples.entry(sampleName)) {
+    throw new ProjectError(`${id} is not done: sample '${sampleName}' no longer exists. Make it again, or ${steps.blocked(id)} if you cannot`);
+  }
+  if (q.action === 'done' && target && !sampleName && target.state === 'claimed' && target.claimedBy === agent && !w.has(target.sound) && !w.hasSong(target.sound)) {
     throw new ProjectError(`${id} is not done: sound '${target.sound}' no longer exists. Make it again, or ${steps.blocked(id)} if you cannot`);
   }
   // done needs the sound's checks to pass: the person is handed something measured, not just claimed
@@ -275,9 +296,28 @@ export function cliSteps(dir: string): WorkSteps {
   };
 }
 
+/** The brief of a request on a sample: what the sample is (numbers, words, where it came from), what plays it, and the commands that change a sample. */
+function sampleBrief(w: Writer, q: WorkRequest, name: string, out: string[], steps: WorkSteps): string {
+  if (!w.samples.entry(name)) out.push(`sample '${name}' does not exist any more`);
+  else {
+    out.push(`the sample now:\n${sampleDescribeText(w, `sample:${name}`).split('\n').map((l) => `  ${l}`).join('\n')}`);
+    const d = sampleDetail(w, name).usedBy;
+    const used = [...d.sounds.map((s) => `sound ${s}`), ...d.instruments.map((s) => `instrument ${s}`), ...d.songs.map((s) => `song ${s}`), ...d.samples.map((s) => `sample ${s} (made from it)`)];
+    out.push(used.length ? `it is played by: ${used.join(', ')}` : 'nothing plays it yet');
+  }
+  if (q.target) out.push(targetAdvice(q.target));
+  if (q.again) out.push(`This asks again about ${q.again}, which you finished and the person looked at: what you did was not enough or not right.`);
+  out.push(`A sample is material, so there is no check to pass: \`sample check\` and \`describe sample:${name}\` give the numbers. Change it with \`sample derive <new> from=${name} op="…"\` (a new sample; point what plays it at the new one), \`sample set ${name} …\` (metadata), \`sample loop\` or \`sample slice\`; or bring other audio in (\`library search\`, \`generate\`). Then ${steps.done(q.id, 'what changed')}.`);
+  if (q.events.some((x) => x.type === 'reply')) out.push(`The person answered: "${q.events.filter((x) => x.type === 'reply').at(-1)!.text}"`);
+  out.push(`If you cannot go on without the person, ${steps.blocked(q.id)}.`);
+  return out.join('\n');
+}
+
 /** What a claimed request asks, with the sound as it stands and the next steps. */
 export function requestBrief(w: Writer, q: WorkRequest, steps: WorkSteps = MCP_STEPS): string {
   const out = [requestLine(q)];
+  const onSample = sampleItem(q.sound);
+  if (onSample) return sampleBrief(w, q, onSample, out, steps);
   if (w.hasSong(q.sound)) out.push(`the song now:\n${songText(w.song(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else if (w.has(q.sound)) out.push(`the sound now:\n${serializeSound(w.sound(q.sound)).trimEnd().split('\n').map((l) => `  ${l}`).join('\n')}`);
   else out.push(`sound '${q.sound}' does not exist any more`);

@@ -10,7 +10,7 @@ export interface SampleDetail {
   info: SampleInfo;
   /** The metadata a handle edits, frames at the sample's own rate. */
   meta: { root?: string; tune?: number; loop?: [number, number]; loopMode?: string; slices?: number[]; tags: string[]; gain?: number; note?: string };
-  prov: { source: string; origin?: string; origHash?: string; origFormat?: string; containerHash?: string; date?: string; author?: string; provider?: string; endpoint?: string; model?: string; prompt?: string; params?: string; seed?: number; take?: string; request?: string; credits?: number; parents?: { hash: string; name: string | null }[]; ops?: string };
+  prov: { source: string; origin?: string; origHash?: string; origFormat?: string; containerHash?: string; date?: string; author?: string; provider?: string; endpoint?: string; model?: string; prompt?: string; params?: string; seed?: number; take?: string; keptFrom?: string; request?: string; credits?: number; parents?: { hash: string; name: string | null }[]; ops?: string };
   licence: { id: string; state: string; reason: string; attribution?: string; terms?: string };
   /** What plays this sample, directly or through a sample made from it. */
   usedBy: { sounds: string[]; instruments: string[]; songs: string[]; samples: string[] };
@@ -38,7 +38,7 @@ export function sampleDetail(w: Writer, name: string): SampleDetail {
       ...(p.origin ? { origin: p.origin } : {}), ...(p.origHash ? { origHash: p.origHash } : {}), ...(p.origFormat ? { origFormat: p.origFormat } : {}), ...(p.containerHash ? { containerHash: p.containerHash } : {}),
       ...(p.date ? { date: p.date } : {}), ...(p.author ? { author: p.author } : {}), ...(p.provider ? { provider: p.provider } : {}), ...(p.endpoint ? { endpoint: p.endpoint } : {}),
       ...(p.model ? { model: p.model } : {}), ...(p.prompt ? { prompt: p.prompt } : {}), ...(p.params ? { params: p.params } : {}), ...(p.seed !== undefined ? { seed: p.seed } : {}),
-      ...(p.take ? { take: p.take } : {}), ...(p.request ? { request: p.request } : {}), ...(p.credits !== undefined ? { credits: p.credits } : {}),
+      ...(p.take ? { take: p.take } : {}), ...(p.keptFrom ? { keptFrom: p.keptFrom } : {}), ...(p.request ? { request: p.request } : {}), ...(p.credits !== undefined ? { credits: p.credits } : {}),
       ...(p.parents?.length ? { parents: p.parents.map((h) => ({ hash: h, name: byHash.get(h) ?? null })) } : {}), ...(p.ops ? { ops: p.ops } : {}),
     },
     licence: { id: e.licence.id, state: lic.state, reason: lic.reason, ...(e.licence.attribution ? { attribution: e.licence.attribution } : {}), ...(e.licence.terms ? { terms: e.licence.terms } : {}) },

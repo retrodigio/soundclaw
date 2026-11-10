@@ -323,6 +323,7 @@ export function reviewOf(w: Writer, o: { request?: string; group?: string }): Re
     const q = readRequests(w.project).get(o.request);
     if (!q) throw new ProjectError(`no request ${o.request}`);
     request = q.id;
+    if (q.sound.startsWith('sample:')) throw new ProjectError(`${q.id} is about a sample, which has no review page: ${q.sound.slice(7)}'s page shows the request and what changed`);
     item = q.sound;
     const claim = q.events.find((e) => e.type === 'claim');
     const done = [...q.events].reverse().find((e) => e.type === 'done');

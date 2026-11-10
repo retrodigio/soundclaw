@@ -45,6 +45,8 @@ export interface SampleProvenance {
   params?: string;
   seed?: number;
   take?: string;
+  /** For a kept take: the name it was generated under (the Takes list and the history survive a tag edit). */
+  keptFrom?: string;
   request?: string;
   credits?: number;
   parents?: string[];
@@ -108,7 +110,7 @@ export function sampleKeyPart(e: { hash: string; slices?: readonly number[]; loo
 export const SAMPLE_FIELDS = [
   'hash', 'rate', 'channels', 'frames', 'format',
   'root', 'tune', 'loop', 'loopmode', 'slices', 'tags', 'gain', 'note',
-  'source', 'origin', 'orig-hash', 'orig-format', 'container-hash', 'date', 'author', 'provider', 'endpoint', 'model', 'prompt', 'params', 'seed', 'take', 'request', 'credits', 'parents', 'ops',
+  'source', 'origin', 'orig-hash', 'orig-format', 'container-hash', 'date', 'author', 'provider', 'endpoint', 'model', 'prompt', 'params', 'seed', 'take', 'kept-from', 'request', 'credits', 'parents', 'ops',
   'licence', 'attribution', 'terms',
 ] as const;
 type Field = (typeof SAMPLE_FIELDS)[number];
@@ -177,6 +179,7 @@ function normField(k: Field, v: string): string {
     case 'prompt': case 'params': return v.length <= 2000 ? v : bad('at most 2000 characters');
     case 'ops': return v.length <= 1000 ? v : bad('at most 1000 characters');
     case 'seed': { const n = int(v); return n !== null ? String(n) : bad('a whole number'); }
+    case 'kept-from': return SAMPLE_NAME_RE.test(v) ? v : bad('a sample name');
     case 'take': return /^[1-9]\d?\/[1-9]\d?$/.test(v) && Number(v.split('/')[0]) <= Number(v.split('/')[1]) ? v : bad('<n>/<m>, like 2/3');
     case 'credits': { const n = num(v); return n !== null && n >= 0 ? String(n) : bad('credits, a number of 0 or more'); }
     case 'parents': {
@@ -238,7 +241,7 @@ function entryFields(e: SampleEntry): Partial<Record<Field, string>> {
     ...(e.prov.date ? { date: e.prov.date } : {}), ...(e.prov.author ? { author: e.prov.author } : {}),
     ...(e.prov.provider ? { provider: e.prov.provider } : {}), ...(e.prov.endpoint ? { endpoint: e.prov.endpoint } : {}), ...(e.prov.model ? { model: e.prov.model } : {}),
     ...(e.prov.prompt ? { prompt: e.prov.prompt } : {}), ...(e.prov.params ? { params: e.prov.params } : {}),
-    ...(e.prov.seed !== undefined ? { seed: String(e.prov.seed) } : {}), ...(e.prov.take ? { take: e.prov.take } : {}), ...(e.prov.request ? { request: e.prov.request } : {}),
+    ...(e.prov.seed !== undefined ? { seed: String(e.prov.seed) } : {}), ...(e.prov.take ? { take: e.prov.take } : {}), ...(e.prov.keptFrom ? { 'kept-from': e.prov.keptFrom } : {}), ...(e.prov.request ? { request: e.prov.request } : {}),
     ...(e.prov.credits !== undefined ? { credits: String(e.prov.credits) } : {}), ...(e.prov.parents?.length ? { parents: e.prov.parents.join(',') } : {}), ...(e.prov.ops ? { ops: e.prov.ops } : {}),
     licence: e.licence.id, ...(e.licence.attribution ? { attribution: e.licence.attribution } : {}), ...(e.licence.terms ? { terms: e.licence.terms } : {}),
   };
@@ -435,6 +438,7 @@ function applyFields(e: SampleEntry, f: Partial<Record<Field, string>>, clear: r
   if (g('params') !== undefined) p.params = g('params');
   if (g('seed') !== undefined) p.seed = Number(g('seed'));
   if (g('take') !== undefined) p.take = g('take');
+  if (g('kept-from') !== undefined) p.keptFrom = g('kept-from');
   if (g('request') !== undefined) p.request = g('request');
   if (g('credits') !== undefined) p.credits = Number(g('credits'));
   if (g('parents') !== undefined) p.parents = g('parents')!.split(',');

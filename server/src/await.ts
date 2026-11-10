@@ -223,7 +223,7 @@ export function formatEvents(events: AgentEvent[], cursor: string, o: { cli?: st
     out.push(e.next === 'work'
       ? `    next: work${e.kind === 'cancel' ? ' (action "list"; stop if you hold it)' : e.kind === 'comparison' ? ` (claim it: work id=${e.id}, read it, then close it with done: nothing is asked to change)` : e.id ? ` (claim it: work id=${e.id})` : ''}` +
         (o.cli && e.kind !== 'cancel' && e.id ? `; without MCP: soundclaw work ${o.cli} claim ${e.id}` : '')
-      : `    next: history (read what the person did: soundclaw history ${o.cli ?? '<project>'} --sound ${e.sound})`);
+      : `    next: history (read what the person did: soundclaw history ${o.cli ?? '<project>'}${e.sound.startsWith('sample:') ? '' : ` --sound ${e.sound}`})`);
   }
   out.push(`next cursor: ${cursor}`);
   return out.join('\n');

@@ -297,7 +297,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       Without --by: everyone but the agent itself; --by human: people only. Reading moves the
       cursor (not with --since or --peek). Never undo a person's edit silently.
   soundclaw request <project> [<id> --note "<what should change>"] [--tag <tag>]... [--like <sound>] [--target "<where>"] [--again <request>] [--by <author>]
-      Ask for a change on a sound, as the dashboard's Ask for changes does (also writes
+      Ask for a change on a sound (or a sample), as the dashboard's Ask for changes does (also writes
       sound mark <id> rejected "<note>" on the history). --tag adds the quick tags of the cards
       (too loud, too quiet, too long, too short, too harsh, too dull, too similar to another
       sound, good; with --like naming the other sound); a note may then be left out, and the tag
@@ -310,6 +310,7 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       you mean one), "param decay [layer 2] [fx 1]", "layer 2" or "item". The listing, await and the
       brief print it in words (pinned to 0.31–0.38 s, bars 9–12 of lead, parameter decay).
       --again names a done request this one asks again about.
+      The item may be a sample: request <project> sample:<name> --note "…" (no mark; --target range or item).
       --by is human:<name> (default human:cli).
   soundclaw reply <project> <request> "<answer>" [--by <author>]      answer a blocked request (it opens again)
   soundclaw cancel <project> <request> ["<why>"] [--by <author>]       withdraw a request

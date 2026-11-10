@@ -220,6 +220,8 @@ export interface WorkRequest {
 const ID_RE = /^r\d+$/;
 const NAME_RE = /^[a-z][a-z0-9_-]*$/;
 /** A sound id as the sounds have them (case kept). */
+/** A request about a sample itself: its item is `sample:<name>`. */
+export const SAMPLE_ITEM_RE = /^sample:[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/;
 const SOUND_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 
 /** Why a comparison cannot be recorded (null: it can). */
@@ -246,7 +248,7 @@ export function requestProblem(reqs: ReadonlyMap<string, WorkRequest>, r: Reques
   if (typeof r.at !== 'string') return 'a record needs a time (at)';
   if (r.type === 'request') {
     if (reqs.has(r.id)) return `request ${r.id} already exists`;
-    if (typeof r.sound !== 'string' || !(r.kind === 'comparison' ? SOUND_RE : NAME_RE).test(r.sound)) return 'a request names a sound (a-z, 0-9, _ and -)';
+    if (typeof r.sound !== 'string' || !((r.kind === 'comparison' ? SOUND_RE : NAME_RE).test(r.sound) || (r.kind === 'change' && SAMPLE_ITEM_RE.test(r.sound)))) return 'a request names a sound (a-z, 0-9, _ and -), or a sample (sample:<name>)';
     if (!(REQUEST_KINDS as readonly string[]).includes(r.kind)) return `a request's kind is ${REQUEST_KINDS.join(', ')}`;
     if (typeof r.note !== 'string') return 'a request has a note (it may be empty)';
     if (!r.note.trim()) return 'a change request says what should change';

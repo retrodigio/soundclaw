@@ -112,7 +112,7 @@ describe('manifest exports', () => {
     expect(at).toContain('Bell by Ana, CC BY 4.0');
     expect(at).toContain('https://creativecommons.org/licenses/by/4.0/');
     expect(at).not.toContain('own_hit');
-    expect(r.notes.join('\n')).toContain('ATTRIBUTION.txt written (1 samples ask for attribution)');
+    expect(r.notes.join('\n')).toContain('ATTRIBUTION.txt written (1 sample asks for attribution)');
   });
   it('write no ATTRIBUTION.txt when none asks (and remove an old one), and a set export lists its own samples', () => {
     const dir = out('plain');

@@ -183,7 +183,7 @@ describe('editing and hearing samples from the command line', () => {
     expect(m.code, m.err).toBe(0);
     expect((JSON.parse(m.out) as { samples: { ref: string; measure: { onsets: { count: number } } }[] }).samples[0]!.measure.onsets.count).toBe(4);
     expect(sc(['view', proj, 'sample:tone', 'wave']).out).toMatch(/^wave view saved to /);
-    expect(sc(['view', proj, 'sample:tone', 'slices']).out).toMatch(/onsets found; set them with sample slice tone/);
+    expect(sc(['view', proj, 'sample:tone', 'slices']).out).toMatch(/onsets? found; set them with sample slice tone/);
     expect(sc(['view', proj, 'sample:tone', 'layers']).err).toMatch(/a sample has the views wave, spec, pitch, loop, slices/);
     const c = sc(['compare', proj, 'sample:tone', 'sample:hits', '--json']);
     expect(c.code, c.err).toBe(0);

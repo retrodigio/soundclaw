@@ -240,7 +240,7 @@ export function expand(host: EditHost, next: Library, c: Command): Expanded {
         const step = h.tempo !== null ? (60 / h.tempo / h.n) * rate : e.frames / h.n;
         const count = h.tempo !== null ? Math.floor(e.frames / step) : h.n;
         pts = Array.from({ length: count }, (_, k) => Math.round(k * step));
-        note = h.tempo !== null ? `${count} slices of ${h.n} to the beat at ${h.tempo} bpm` : `${count} equal slices`;
+        note = h.tempo !== null ? `${count} slice${count === 1 ? '' : 's'} of ${h.n} to the beat at ${h.tempo} bpm` : `${count} equal slice${count === 1 ? '' : 's'}`;
       }
       // the first slice starts at the start: a point within 10 ms of it is moved there
       pts = [...new Set(pts)].sort((a, b) => a - b).filter((p) => p >= 0 && p < e.frames);
@@ -248,7 +248,7 @@ export function expand(host: EditHost, next: Library, c: Command): Expanded {
       else pts[0] = 0;
       pts = [...new Set(pts)];
       if (pts.length > 1024) throw new Error(`sample slice ${sc.name}: ${pts.length} slice points (at most 1024)`);
-      return { commands: [`sample set ${sc.name} slices=${pts.join(',')}`], notes: [`sample ${sc.name}: ${pts.length} slices (${note}); a layer plays one with slice=<n> (1-${pts.length}), sample derive takes one with op="slice <n>"`] };
+      return { commands: [`sample set ${sc.name} slices=${pts.join(',')}`], notes: [`sample ${sc.name}: ${pts.length} slice${pts.length === 1 ? '' : 's'} (${note}); a layer plays one with slice=<n> (1-${pts.length}), sample derive takes one with op="slice <n>"`] };
     }
     case 'sample-loop': {
       const e = entryOf(host, next, sc.name);

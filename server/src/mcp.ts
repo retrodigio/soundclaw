@@ -629,10 +629,10 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
   server.registerTool('request', {
     title: 'File, answer or withdraw a request',
     description: 'Ask for a change the way the dashboard does: action "request" (the default) with sound and a note saying what should change (this also writes `sound mark <sound> rejected "<note>"` on the history). ' +
-      'action "reply" answers a blocked request (id, text) and opens it again; "cancel" withdraws one (id, optional text). Returns the request as it stands.',
+      '`sound` may also be `sample:<name>`: a request about a sample itself (no mark, no check holds its `done`; the brief shows the sample). action "reply" answers a blocked request (id, text) and opens it again; "cancel" withdraws one (id, optional text). Returns the request as it stands.',
     inputSchema: z.object({
       action: z.enum(['request', 'reply', 'cancel']).optional().describe('Default request'),
-      sound: z.string().optional().describe('request: the sound'),
+      sound: z.string().optional().describe('request: the sound or song, or sample:<name> for a sample itself'),
       note: z.string().optional().describe('request: what should change (may be left out when tags say it)'),
       tags: z.array(z.enum(['too loud', 'too quiet', 'too long', 'too short', 'too harsh', 'too dull', 'too similar to another sound', 'good'])).optional().describe('request: the cards\' quick tags (good alone is praise: no mark)'),
       like: z.string().optional().describe('request with the tag too similar to another sound: the other sound'),

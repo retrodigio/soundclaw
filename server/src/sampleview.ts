@@ -99,7 +99,7 @@ function provenanceLines(w: Writer, s: SampleSide): string[] {
   const lic = licenceState(e.licence, w.samples.shipPolicy);
   const lines = [`source ${e.prov.source}${e.prov.origin ? ` (${e.prov.origin})` : ''}; licence ${e.licence.id} (${lic.state})${e.tags.length ? `; tags ${e.tags.join(', ')}` : ''}`];
   if (e.prov.ops) lines.push(`made by: ${e.prov.ops}`);
-  if (e.root !== undefined || e.loop || e.slices) lines.push([e.root !== undefined ? `root ${e.root}` : '', e.loop ? `loop ${e.loop[0]}-${e.loop[1]} frames` : '', e.slices ? `${e.slices.length} slices` : ''].filter(Boolean).join('; '));
+  if (e.root !== undefined || e.loop || e.slices) lines.push([e.root !== undefined ? `root ${e.root}` : '', e.loop ? `loop ${e.loop[0]}-${e.loop[1]} frames` : '', e.slices ? `${e.slices.length} slice${e.slices.length === 1 ? '' : 's'}` : ''].filter(Boolean).join('; '));
   return lines;
 }
 
@@ -204,7 +204,7 @@ export function sampleView(w: Writer, ref: string, kind: string, out?: string): 
     const pts = s.entry?.slices?.length ? s.entry.slices : null;
     const marks = pts ? pts.map((p, i) => ({ t: p / s.audio.rate, label: String(i + 1) })) : findOnsets(mixdown(pcmChannels(s.audio, 120)), s.audio.rate).map((t, i) => ({ t, label: String(i + 1) }));
     img = waveView(x, a, `${s.label} ${pts ? 'SLICES' : 'ONSETS (NO SLICE POINTS SET)'}`, marks);
-    extra = `\n${pts ? `${pts.length} slices at frames ${pts.join(', ')}` : `${marks.length} onsets found; set them with sample slice ${s.entry?.name ?? '<name>'} at=onsets`}`;
+    extra = `\n${pts ? `${pts.length} slice${pts.length === 1 ? '' : 's'} at frames ${pts.join(', ')}` : `${marks.length} onset${marks.length === 1 ? '' : 's'} found; set them with sample slice ${s.entry?.name ?? '<name>'} at=onsets`}`;
   } else {
     const e = s.entry;
     const lp = e?.loop ?? null;

@@ -16,7 +16,7 @@ import {
 import { compareSide } from './ears.ts';
 import { configDir } from './library.ts';
 import { ProjectError, loadProject } from './project.ts';
-import { GEN_KINDS, PLAN_RE, estimateTake, getProvider, redact, type GenKind, type GenRequest, type Provider, type ProviderSettings, type TakeOut } from './providers.ts';
+import { GEN_KINDS, PLAN_RE, PROVIDERS, estimateTake, getProvider, redact, type ProviderLimits, type GenKind, type GenRequest, type Provider, type ProviderSettings, type TakeOut } from './providers.ts';
 import { commitImports, decodeFileBytes, type Prepared } from './sampleimport.ts';
 import { monoAt44, sampleFacts, sampleNumbers } from './sampleview.ts';
 import type { Writer } from './writer.ts';
@@ -715,4 +715,38 @@ export function optionsFromPairs(kind: string, prompt: string, kv: Record<string
     try { o.composition = JSON.parse(kv.composition); } catch { throw new ProjectError('composition is the composition plan as JSON text'); }
   }
   return o;
+}
+
+// ---- what the dashboard shows beside the generation panel ---------------------------------------------------------------------
+
+export interface GenerationStatus {
+  budget: Budget;
+  /** The provider a call uses when it names none. */
+  provider: string;
+  providers: { id: string; paid: boolean; kinds: { kind: GenKind; min: number; max: number; default: number; rate: number; loop: boolean; influence: boolean; held: boolean }[]; maxTakes: number; keyVar?: string; /** Whether the variable is set in this server's environment (never its value). */ keySet: boolean; terms: string }[];
+  /** Why paid calls are refused whatever the caps say (CI, SOUNDCLAW_NO_PAID), or null. */
+  paidOff: string | null;
+  totals: LedgerTotals;
+  /** The latest commands of the project's ledger, newest first. */
+  recent: { at: string; by: string; provider: string; kind: GenKind; prompt: string; takes: number; estimate: number; charge: number; outcome: LedgerLine['outcome'] }[];
+}
+
+/** The project's budget, the providers (and whether a call to each could be made now), the totals and the latest ledger lines. Reads files; calls nothing. */
+export function generationStatus(dir: string, now: string): GenerationStatus {
+  const cfg = readGenerationConfig();
+  const ledger = readLedger(dir);
+  return {
+    budget: budgetOf(dir, now, cfg),
+    provider: cfg.provider ?? GENERATION_DEFAULTS.provider,
+    providers: Object.values(PROVIDERS).map((p) => {
+      const settings = cfg.providers?.[p.id] ?? {};
+      return {
+        id: p.id, paid: p.paid, maxTakes: p.limits.maxTakes, terms: p.terms, keySet: !p.keyVar || !!process.env[p.keyVar], ...(p.keyVar ? { keyVar: p.keyVar } : {}),
+        kinds: (Object.entries(p.limits.kinds) as [GenKind, NonNullable<ProviderLimits['kinds'][GenKind]>][]).map(([kind, l]) => ({ kind, min: l.minDuration, max: l.maxDuration, default: l.defaultDuration, rate: p.rate(kind, settings), loop: l.loop, influence: l.influence, held: kind === 'music' && p.paid && !settings.music })),
+      };
+    }),
+    paidOff: isPaidOff(),
+    totals: ledgerTotals(dir),
+    recent: ledger.slice(-12).reverse().map((l) => ({ at: l.at, by: l.by, provider: l.provider, kind: l.kind, prompt: l.prompt.length > 120 ? `${l.prompt.slice(0, 119)}…` : l.prompt, takes: l.takes, estimate: l.estimate, charge: l.charge, outcome: l.outcome })),
+  };
 }
