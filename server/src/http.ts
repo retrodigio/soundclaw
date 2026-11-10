@@ -12,7 +12,7 @@ import { createMcpHandler, type McpServerFactory } from '@modelcontextprotocol/s
 import { AUTHOR_RE, HUMAN_RE, SAMPLE_LIMITS, floatBytes, joinChannels, pcmToWav, renderExact, type SampleSource } from '@soundclaw/core';
 import { decodeInWorker } from './decode.ts';
 import { libraryAudioFile } from './library.ts';
-import { generateBodyFrom, generateFromBody } from './generate.ts';
+import { generateBodyFrom, generateFromBody, setProjectCap } from './generate.ts';
 import { commitImports } from './sampleimport.ts';
 import { songJsonObject } from './songs.ts';
 import { reviewOf } from './changes.ts';
@@ -299,6 +299,18 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
         if (!AUTHOR_RE.test(body.by)) throw new ProjectError('by is agent:<name> or human:<name>');
         const r = await generateFromBody(o.writer, body, o.writer.project.dir);
         json(res, 200, r);
+      }).catch((e: unknown) => json(res, e instanceof ProjectError || e instanceof SyntaxError ? 400 : 500, { error: (e as Error).message }));
+      return;
+    }
+    if (url.pathname === '/api/generation/cap' && req.method === 'POST') {
+      // the project's generation cap, set by a person from the page. An agent has no way to this: no MCP tool and no command of the language sets a cap,
+      // and this route takes only a human author.
+      if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
+      readBody(req, 4096).then((b) => {
+        const j = JSON.parse(b.toString('utf8')) as { capCredits?: unknown; by?: unknown };
+        if (typeof j.by !== 'string' || !/^human:[A-Za-z0-9_.-]{1,32}$/.test(j.by)) { json(res, 403, { error: 'a generation cap is set by a person (by: human:<name>), not by an agent' }); return; }
+        if (typeof j.capCredits !== 'number') throw new ProjectError('capCredits is a number of credits');
+        json(res, 200, { capCredits: setProjectCap(o.writer.project.dir, j.capCredits) });
       }).catch((e: unknown) => json(res, e instanceof ProjectError || e instanceof SyntaxError ? 400 : 500, { error: (e as Error).message }));
       return;
     }

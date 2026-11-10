@@ -98,15 +98,16 @@ describe('the fake provider', () => {
     expect(f.w.samples.entry('chime_t3')!.prov.take).toBe('1/1');
     expect(() => againOptions(f.w, 'nothing', claude)).toThrow(/no sample 'nothing'/);
   });
-  it('costs credits when its rates are set, so the caps can be tried without a paid call', async () => {
-    setGenerationConfig([['fake.rate.sfx', '10']]);
-    const p = await f.w.enqueue(() => planGeneration(f.w, sfx('a knock', { provider: 'fake', takes: 2, duration: 2 })));
-    expect(p.perTake).toBe(20);
-    expect(p.refusals.join(' ')).toMatch(/paid generation is off for this project: its cap is 0 credits/);
-    setCap(100);
+  it('is free and never counts against a cap: it runs at a project cap of 0, over any per-call maximum, and costs nothing in the ledgers', async () => {
+    expect(() => setGenerationConfig([['fake.rate.sfx', '10']])).toThrow(/the fake provider makes test audio and is always free/);
+    setGenerationConfig([['max-per-call', '1'], ['daily-cap', '0']]);
+    const p = await f.w.enqueue(() => planGeneration(f.w, sfx('a knock', { provider: 'fake', takes: 3, duration: 30 })));
+    expect(p.perTake).toBe(0);
+    expect(p.refusals).toEqual([]);
     const r = await runGeneration(f.w, sfx('a knock', { provider: 'fake', takes: 2, duration: 2 }));
-    expect(r.charge).toBe(40);
-    expect(budgetOf(f.dir, '2026-11-06T12:00:00Z').projectSpent).toBe(40);
+    expect(r.charge).toBe(0);
+    expect(budgetOf(f.dir, '2026-11-06T12:00:00Z').projectSpent).toBe(0);
+    expect(readSpend().reduce((n, l) => n + (l.credits || 0), 0)).toBe(0);
   });
 });
 
@@ -354,13 +355,14 @@ describe('settings and the ledger', () => {
     await expect(runGeneration(f.w, sfx('a bell', { duration: 1 }))).rejects.toThrow(/http:\/\/example\.org: a provider is called over https/);
   });
   it('totals the project’s ledger by provider and day, and the user’s spend by project too', async () => {
-    setGenerationConfig([['fake.rate.sfx', '10']]);
+    await useStub({}, 'pro');
     setCap(100);
-    await runGeneration(f.w, sfx('one', { provider: 'fake', duration: 1 }));
-    await runGeneration(f.w, sfx('two', { provider: 'fake', duration: 2 }));
+    await runGeneration(f.w, sfx('one', { duration: 1 }));
+    await runGeneration(f.w, sfx('two', { duration: 2 }));
+    await runGeneration(f.w, sfx('three', { provider: 'fake', duration: 2 }));
     const t = ledgerTotals(f.dir);
-    expect(t).toMatchObject({ credits: 30, commands: 2, takes: 2, byProvider: { fake: 30 }, byDay: { '2026-11-06': 30 } });
-    expect(ledgerText(t, f.dir)).toMatch(/^30 credits over 2 commands, 2 takes kept\nby provider:\n {2}fake {2}30 credits\nby day \(UTC\):\n {2}2026-11-06 {2}30 credits\n$/);
+    expect(t).toMatchObject({ credits: 30, commands: 3, takes: 3, byProvider: { elevenlabs: 30, fake: 0 }, byDay: { '2026-11-06': 30 } });
+    expect(ledgerText(t, f.dir)).toMatch(/^30 credits over 3 commands, 3 takes kept\nby provider:\n {2}elevenlabs {2}30 credits\n {2}fake {2}0 credits\nby day \(UTC\):\n {2}2026-11-06 {2}30 credits\n$/);
     const u = ledgerTotals(null);
     expect(u.byProject).toEqual({ [`demo (${f.dir})`]: 30 });
     expect(ledgerText(ledgerTotals(join(f.root, 'nothing')), join(f.root, 'nothing'))).toMatch(/no generation in this project yet/);

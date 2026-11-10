@@ -75,7 +75,7 @@ export function setGenerationConfig(pairs: [string, string][]): GenerationConfig
     if (k === 'max-per-call') { if (clear) delete c.maxPerCall; else c.maxPerCall = nonNegative(k, v); continue; }
     const m = /^([a-z0-9]+)\.(plan|music|format|url|rate\.(sfx|music))$/.exec(k);
     if (!m) throw new ProjectError(`no setting '${k}' (${CONFIG_KEYS.join(', ')})`);
-    getProvider(m[1]!);
+    if (!getProvider(m[1]!).paid) throw new ProjectError(`the ${m[1]} provider makes test audio and is always free: it has no ${m[2]} setting, and it never counts against a cap`);
     const s: ProviderSettings = { ...(c.providers?.[m[1]!] ?? {}) };
     const field = m[2]!;
     if (field === 'plan') { if (clear) delete s.plan; else if (PLAN_RE.test(v)) s.plan = v; else throw new ProjectError(`plan is a word like free, starter, creator or pro (not '${v}')`); }
@@ -231,6 +231,22 @@ export function projectCap(dir: string): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0;
 }
 
+/**
+ * Set the project's cap (`generate cap <project> <credits>`, and the dashboard's control). It is for people: no MCP tool and no command of the
+ * command language sets it, so an agent cannot raise its own cap with a SoundClaw command. It is project.json, read fresh at each command.
+ */
+export function setProjectCap(dir: string, credits: number): number {
+  if (!Number.isFinite(credits) || credits < 0 || credits > 1e7) throw new ProjectError(`a cap is a number of credits from 0 to 10000000 (got ${credits})`);
+  const root = loadProject(dir).dir;
+  const file = join(root, 'project.json');
+  const j = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  j.generation = { ...((j.generation as Record<string, unknown> | undefined) ?? {}), capCredits: credits };
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(j, null, 2) + '\n');
+  renameSync(tmp, file);
+  return credits;
+}
+
 export function budgetOf(dir: string, now: string, cfg: GenerationConfig = readGenerationConfig()): Budget {
   const today = day(now);
   return {
@@ -353,13 +369,14 @@ export function planGeneration(w: Writer, o: GenerateOptions, cfg: GenerationCon
     if ('problem' in lic) refusals.push(lic.problem);
     if (o.kind === 'music' && !settings.music) refusals.push(`the ${provider.id} music endpoint is held: it costs about ${provider.rate('music', settings)} credits a second, so it needs the user's OK first (soundclaw generate config ${provider.id}.music=on)`);
   }
-  if (perTake > budget.maxPerCall) refusals.push(`one take costs about ${perTake} credits, over the ${budget.maxPerCall} a call may cost (a shorter duration, or soundclaw generate config max-per-call=<credits>)`);
-  if (total > 0 && budget.projectSpent + total > budget.projectCap) {
+  // the caps guard spending: a provider that is free (the fake one) is never held to them
+  if (provider.paid && perTake > budget.maxPerCall) refusals.push(`one take costs about ${perTake} credits, over the ${budget.maxPerCall} a call may cost (a shorter duration, or soundclaw generate config max-per-call=<credits>)`);
+  if (provider.paid && total > 0 && budget.projectSpent + total > budget.projectCap) {
     refusals.push(budget.projectCap === 0
       ? `paid generation is off for this project: its cap is 0 credits until a person sets one in project.json: "generation": {"capCredits": <credits>} (this command needs about ${total})`
       : `this needs about ${total} credits and the project has ${round(Math.max(0, budget.projectCap - budget.projectSpent))} of its ${budget.projectCap} left (project.json "generation": {"capCredits": …})`);
   }
-  if (total > 0 && budget.daySpent + total > budget.dailyCap) refusals.push(`this needs about ${total} credits and today has ${round(Math.max(0, budget.dailyCap - budget.daySpent))} of the daily ${budget.dailyCap} left across projects (soundclaw generate config daily-cap=<credits>)`);
+  if (provider.paid && total > 0 && budget.daySpent + total > budget.dailyCap) refusals.push(`this needs about ${total} credits and today has ${round(Math.max(0, budget.dailyCap - budget.daySpent))} of the daily ${budget.dailyCap} left across projects (soundclaw generate config daily-cap=<credits>)`);
   if (provider.paid && provider.keyVar && !refusals.length && !process.env[provider.keyVar]) refusals.push(`${provider.keyVar} is not set in the environment of the process that calls (${process.argv.includes('serve') ? `the soundclaw server for this project, pid ${process.pid}` : 'this soundclaw command'}); the key is read from there only, never from a file`);
   const format = provider.outputFormat(o.kind, settings);
   const params: Record<string, unknown> = {

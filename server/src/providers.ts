@@ -2,7 +2,7 @@
 // the server, never in core: generation is acquisition, done once when a command runs, and what it returns is stored by hash and named on
 // the tape like any import, so a replay or a render never calls a provider.
 //
-//   fake        audio SoundClaw makes itself from a hash of the request, for tests and demos; no network, no key, free unless rates say otherwise
+//   fake        audio SoundClaw makes itself from a hash of the request, for tests and demos; no network, no key, always free (it never counts against a cap)
 //   elevenlabs  ElevenLabs' sound effects (POST /v1/sound-generation) and music (POST /v1/music) endpoints; the key comes from
 //               ELEVENLABS_API_KEY in the environment of the process that calls, and is never written anywhere
 
@@ -103,7 +103,7 @@ export interface Provider {
 }
 
 /** Credits for one take. */
-export const estimateTake = (p: Provider, kind: GenKind, duration: number, settings: ProviderSettings): number => Math.ceil(p.rate(kind, settings) * duration - 1e-9);
+export const estimateTake = (p: Provider, kind: GenKind, duration: number, settings: ProviderSettings): number => Math.ceil(p.rate(kind, settings) * duration - 1e-9) || 0;
 
 // ---- keys never leave the call ---------------------------------------------------------------------------------------
 
@@ -176,7 +176,7 @@ export const fakeProvider: Provider = {
   defaultModel: (kind) => (kind === 'sfx' ? 'fake-sfx-1' : 'fake-music-1'),
   endpoint: (kind) => (kind === 'sfx' ? 'sound-generation' : 'music'),
   outputFormat: () => 'pcm_44100',
-  rate: (kind, s) => s.rates?.[kind] ?? 0,
+  rate: () => 0,
   async generate(req, ctx) {
     const a = fakeAudio(req);
     const credits = estimateTake(fakeProvider, req.kind, req.duration, ctx.settings);

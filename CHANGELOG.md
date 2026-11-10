@@ -68,6 +68,8 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ### Changed
 - Releases are published from GitHub Actions by npm trusted publishing, with a provenance statement on the package.
+- The fake generation provider is free and never counts against a cap (it works at a project cap of 0), and has no rates to set.
+- A project's generation cap is set by a person: `soundclaw generate cap <project> <credits>`, or `POST /api/generation/cap` from the page (which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap.
 - A browser test of the command palette expects the platform's modifier key (⌘ on a Mac, Ctrl elsewhere).
 
 ## [0.1.0] - 2026-11-09

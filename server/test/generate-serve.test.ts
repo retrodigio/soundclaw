@@ -114,4 +114,57 @@ describe('generate while a server owns the project', () => {
     expect(files.some((x) => x.endsWith('spend.jsonl'))).toBe(true);
     for (const t of [serverErr, ...outputs, ...files.map((x) => readFileSync(x, 'latin1'))]) expect(t.includes(KEY)).toBe(false);
   }, 120_000);
+
+describe('the project cap', () => {
+  const capNow = (): number => (JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')) as { generation: { capCredits: number } }).generation.capCredits;
+
+  it('is set by a person only: the CLI and the page can; no MCP tool and no command of the language can', async () => {
+    const transport = new StdioClientTransport({ command: process.execPath, args: [BIN, 'serve', '--project', dir, '--port', '0'], stderr: 'pipe', env: { ...env, ELEVENLABS_API_KEY: KEY } as Record<string, string> });
+    let serverErr = '';
+    (transport.stderr as PassThrough).on('data', (d: Buffer) => { serverErr += d; });
+    client = new Client({ name: 'soundclaw-test', version: '1.0.0' });
+    await client.connect(transport);
+    await until(() => /watch at (\S+)/.test(serverErr), 'the watch URL');
+    const watch = /watch at (\S+)/.exec(serverErr)![1]!;
+    const token = new URL(watch).searchParams.get('token')!;
+    expect(capNow()).toBe(200);
+
+    // MCP: no tool sets a cap, the generate tool has no field for one, its config action only reads, and the command language does not know it
+    const tools = (await client.listTools()).tools;
+    expect(tools.map((t) => t.name).filter((n) => /cap/i.test(n))).toEqual([]);
+    expect(JSON.stringify(tools.find((t) => t.name === 'generate')!.inputSchema)).not.toMatch(/capCredits|cap_credits|"cap"|daily|per.call/i);
+    const viaRun = (await client.callTool({ name: 'run', arguments: { commands: 'generate cap demo 99999' } })) as { isError?: boolean; content: { text?: string }[] };
+    expect(viaRun.isError).toBe(true);
+    expect(viaRun.content.map((c) => c.text).join('')).toMatch(/unknown command 'generate'/);
+    const viaConfig = (await client.callTool({ name: 'generate', arguments: { action: 'config', prompt: 'project-cap=99999', cap: 99999, capCredits: 99999 } })) as { content: { text?: string }[] };
+    expect(viaConfig.content.map((c) => c.text).join('')).toMatch(/^provider /);
+    await expect(client.callTool({ name: 'generation_cap', arguments: { capCredits: 99999 } })).rejects.toThrow(/Tool generation_cap not found/);
+    expect(capNow()).toBe(200);
+
+    // the page: a person (human:<name>) with the token
+    const post = (body: unknown, auth = true): Promise<Response> => fetch(new URL('/api/generation/cap', watch), { method: 'POST', headers: { ...(auth ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await post({ capCredits: 900, by: 'human:tester' }, false)).status).toBe(401);
+    expect((await post({ capCredits: 900, by: 'agent:claude' })).status).toBe(403);
+    expect((await post({ capCredits: 900 })).status).toBe(403);
+    expect(capNow()).toBe(200);
+    expect((await post({ capCredits: -5, by: 'human:tester' })).status).toBe(400);
+    const ok = await post({ capCredits: 900, by: 'human:tester' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ capCredits: 900 });
+    expect(capNow()).toBe(900);
+
+    // the CLI, while the server runs: project.json is read fresh at every command, so the server sees it
+    const cli1 = await cli(['generate', 'cap', dir, '300']);
+    expect(cli1.code, cli1.err).toBe(0);
+    expect(cli1.out).toBe('project cap 300 credits\n');
+    expect(capNow()).toBe(300);
+    const est = (await client.callTool({ name: 'generate', arguments: { prompt: 'a bell', duration: 1, estimate: true } })) as { content: { text?: string }[] };
+    expect(est.content.map((c) => c.text).join('')).toMatch(/project 0 of 300 credits spent/);
+    expect((await cli(['generate', 'cap', dir, '0'])).out).toBe('project cap 0 credits (paid generation is off)\n');
+    expect((await cli(['generate', 'cap', dir, 'lots'])).code).toBe(2);
+    expect((await cli(['generate', 'cap', dir])).code).toBe(2);
+    // other fields of project.json are kept
+    expect((JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')) as { name?: string }).name).toBeTruthy();
+  }, 120_000);
+});
 });

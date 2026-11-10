@@ -1218,7 +1218,7 @@ beside the other tools rather than holding them up. Removing a library stays a C
 ### Generation
 
 `generate` makes audio from a prompt with an AI provider and keeps each take as a sample. Two providers come with SoundClaw: `elevenlabs` (its sound
-effects and music endpoints) and `fake`, which makes test audio from a hash of the request, with no network and no key, for tests and demos.
+effects and music endpoints) and `fake`, which makes test audio from a hash of the request, with no network and no key, for tests and demos. The fake provider is free: it never counts against a cap, so it works at a project cap of 0 and over any per-call maximum.
 
 ```
 soundclaw generate demo sfx "the slow creak of an old wooden door hinge, close, dry, no reverb" duration=2 takes=3 as=creak --estimate
@@ -1252,18 +1252,18 @@ call with the recorded prompt and parameters (from the ledger, else the provenan
 `library similar`. Listen before you build on one, and remove the takes you do not keep (`sample remove`; the audio stays until `sample gc`).
 
 **Costs are capped before the call.** A command is worked out first: the provider, the names, and an estimate per take (credits per second: sound
-effects 10, music 27.4, measured from the provider's cost header; `<provider>.rate.sfx` and `.rate.music` change them). Any of these refuses the whole
+effects 10, music 27.4, measured from the provider's cost header; `elevenlabs.rate.sfx` and `.rate.music` change them). Any of these refuses the whole
 command before the first call, and says which:
 
 | Cap | Default | Where |
 |---|---|---|
 | one call (one take) | 300 credits (30 s of sound effects) | `soundclaw generate config max-per-call=<credits>` |
-| the project | **0: paid generation is off until a person sets a cap** | `project.json`: `"generation": {"capCredits": <credits>}` |
+| the project | **0: paid generation is off until a person sets a cap** | `soundclaw generate cap <project> <credits>` (or the page); it is `project.json`: `"generation": {"capCredits": <credits>}` |
 | a day, across projects (UTC) | 3,000 credits | `soundclaw generate config daily-cap=<credits>` |
 
 A paid provider is also refused when `CI` is set or `SOUNDCLAW_NO_PAID=1`, until your plan is set (`generate config elevenlabs.plan=<plan>`: it decides the
 licence on the takes), and for music until `generate config elevenlabs.music=on` (music costs about 27 credits a second, so the endpoint is held until
-you turn it on). The caps guard against a runaway loop; they are not a security boundary. `--estimate` prints the cost, the budget left and what would
+you turn it on). **A cap is set by a person**: `generate cap` on the command line, or the page's control (`POST /api/generation/cap`, which takes only a `human:<name>` author). No MCP tool and no command of the command language sets one, so an agent cannot raise its own cap; it asks. The caps guard against a runaway loop; they are not a security boundary against someone who edits `project.json`. `--estimate` prints the cost, the budget left and what would
 refuse the command, and calls nothing. After each call the charge is logged: the provider's `character-cost` header, else the change in the account's
 counter read before and after, else the estimate (and the ledger says which).
 
@@ -1280,8 +1280,7 @@ the settings), which the daily cap reads. `generate --ledger [<project>] [--json
 
 **Settings** (`generate config`, kept in `generation.json` beside the library settings; `<key>=none` clears one): `provider` (the default provider),
 `daily-cap`, `max-per-call`, `elevenlabs.plan`, `elevenlabs.music` (`on`/`off`), `elevenlabs.format` (`pcm_44100`, `mp3_44100_128`, …),
-`elevenlabs.rate.sfx`, `elevenlabs.rate.music`, `elevenlabs.url`; the same for `fake` (its rates are 0 unless you set them, which lets you try the caps
-without a paid call).
+`elevenlabs.rate.sfx`, `elevenlabs.rate.music`, `elevenlabs.url` (the fake provider has none of these: it is free).
 
 **MCP and the page.** The MCP `generate` tool takes the same settings (`kind`, `prompt`, `duration`, `takes`, `loop`, `influence`, `model`, `as`, `want`,
 `like`, `provider`, `tags`, `composition`, `again`, `estimate`, `by`; `action: "ledger"` and `"config"` print the ledger and the settings).
@@ -1450,6 +1449,9 @@ It says which loudness class held each sound, and when two failing checks pull a
 
 **Numbers for scripts, and many sounds in one process.** Starting a process costs about half a second, so a script that measures 100 sounds one at a time
 spends a minute starting. `measure <project> [<id|set>...] [--json]` measures many sounds in one process (all of them when none is named): per sound its
+soundclaw generate cap <project> <credits>
+soundclaw instrument export <project> <id> [--format sfz] [--to <dir>]
+soundclaw instrument zones <project> <id>
 class and target, every number `describe` prints and every check's result. `--json` prints one document:
 
 ```

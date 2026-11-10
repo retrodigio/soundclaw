@@ -133,7 +133,7 @@ sound new door voice=layered preset=door seed=2               # recipes: footste
   calls nothing. Write the prompt as a sound designer would: source, action, material, distance, space ("the slow creak of an old wooden door hinge, close, dry,
   no reverb"); keep it dry and let the tool add the room. Then run it with `want="dur=1.5-2.5 centroid<2.5k attack<40ms"` (or `like=<your synth version>`) so
   the takes come back ranked, each with its numbers and words. Every take costs credits: the project's cap is 0 until the person sets one in `project.json`
-  (`"generation": {"capCredits": n}`), and you never raise a cap or turn on music yourself; ask. Never put a key in a command, a file or a message; it comes
+  (`"generation": {"capCredits": n}`), and you never raise a cap or turn on music yourself; ask (a person sets a cap with `soundclaw generate cap <project> <credits>`, or on the page; there is no tool for it). Never put a key in a command, a file or a message; it comes
   from the environment (`ELEVENLABS_API_KEY`). Pick a take by listening (`describe`, `compare` with your synth version), shape it in the tool (`sample derive
   … op="silence-trim -50; fade out=80ms"`, layers with synthesis) rather than generating again and again, and `sample remove` the takes you drop.
   `generate <project> --again <take>` gives new takes of the same prompt; `generate --ledger <project>` shows what was spent. `provider=fake` makes free test audio.

@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { resolve } from 'node:path';
 import {
-  ProjectError, Writer, configText, estimateText, findServer, generateJson, generateOptions, generateText, ledgerText, ledgerTotals, loadProject, lockHolder, planGeneration,
+  ProjectError, Writer, configText, estimateText, findServer, generateJson, generateOptions, generateText, setProjectCap, ledgerText, ledgerTotals, loadProject, lockHolder, planGeneration,
   readGenerationConfig, runGeneration, setGenerationConfig, shellArg, type GenerateBody, type ServerRef,
 } from '@soundclaw/server';
 import { AUTHOR_RE } from '@soundclaw/core';
@@ -47,6 +47,15 @@ export async function generateMain(argv: string[]): Promise<number> {
   if (p.pos[0] === 'config') {
     const kv = Object.entries(pairs(p.pos.slice(1)));
     out(configText(kv.length ? setGenerationConfig(kv) : readGenerationConfig()));
+    return 0;
+  }
+  if (p.pos[0] === 'cap') {
+    // a person sets a project's cap (project.json, read fresh at every command); there is no MCP tool and no command of the language for it
+    const [, dir, credits, ...extra] = p.pos;
+    if (!dir || credits === undefined || extra.length) throw new UsageError('generate cap <project> <credits>   (0 turns paid generation off)');
+    if (!/^\d+(\.\d+)?$/.test(credits)) throw new UsageError(`generate cap: credits is a number, 0 or more (not '${credits}')`);
+    const n = setProjectCap(dir, Number(credits));
+    out(`project cap ${n} credits${n === 0 ? ' (paid generation is off)' : ''}\n`);
     return 0;
   }
   if (p.flags.has('ledger')) {

@@ -224,12 +224,14 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
   soundclaw generate --ledger [<project>] [--json]
   soundclaw generate config [<key>=<value>...]
       Audio from a prompt by an AI provider (ElevenLabs sound effects and music; fake makes test audio for free, with no
-      network). Each take is one call and is stored as a sample <as>_t1, <as>_t2, ... (numbered after those there) with
+      network, and never counts against a cap). Each take is one call and is stored as a sample <as>_t1, <as>_t2, ... (numbered after those there) with
       its provenance (provider, endpoint, model, prompt, parameters, take n/m, request id, credits) and the licence
+  soundclaw generate cap <project> <credits>
       the provider's plan gives (generated:elevenlabs:<plan>), as one undo group; replay and undo never call. Before
       the first call every cap is checked and any excess refuses the whole command: one take at most max-per-call
       (300 credits), the command within what is left of the project's cap (project.json "generation":
-      {"capCredits": <n>}; 0 by default, so paid generation is off until a person sets it) and of the daily cap
+      {"capCredits": <n>}; 0 by default, so paid generation is off until a person sets it with generate cap <project> <credits>, or on the
+      dashboard; no MCP tool and no command of the language sets a cap: an agent asks) and of the daily cap
       across projects (3000). Estimates use credits per second (sound effects 10, music 27.4); the charge logged is
       the provider's cost header, else the change in the account's counter. --estimate prints the cost and the
       budget and calls nothing. want= and like= rank the takes; each prints its numbers and words. The key is read
