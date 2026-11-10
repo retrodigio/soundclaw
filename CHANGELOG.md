@@ -44,7 +44,9 @@ All notable changes to SoundClaw are listed here. The format follows
   licence file's text that you confirm). `library index` reads, hashes and measures every file once on worker threads (and again only what changed), keeping the numbers of `sample list`,
   the root and loop a file carries and tags from its folders and name. `library search "door creak" dur=0.8-2.5 pitched=no licence=shippable` ranks by word match and then by closeness to the
   ranges; `library similar` finds files that sound like a sound, sample or file by a documented feature distance; `library use` copies one into a project with its provenance and the library's licence;
-  `library tag` adds tags that survive a re-index. The MCP `library` tool has list, search, similar and use, and `GET /api/library/<id>/audio` lets a page audition a file without copying it.
+  `library tag` adds tags that survive a re-index (`library remove` asks for `--yes` before dropping them). `library similar` takes an audio file with no project. The MCP `library`
+  tool has list, search, similar, use, add and index, and `GET /api/library/<id>/audio` lets a page audition a file without copying it, with byte ranges for seeking. The index lives in
+  the system's cache folder (`~/Library/Caches/soundclaw` on macOS, `~/.cache/soundclaw` on Linux, `%LOCALAPPDATA%\soundclaw\cache` on Windows).
 
 ### Changed
 - Non-commercial and no-derivatives licences stay blocked unless a project's `allow` list names an NC or ND pattern itself; a broad pattern such as `CC-BY-*` never admits them.

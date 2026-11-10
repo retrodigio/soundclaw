@@ -94,6 +94,51 @@ export async function requestFromPage(w: Writer, m: Extract<ClientMessage, { typ
   });
 }
 
+/**
+ * One byte range of a body, from a `Range: bytes=…` header: `a-b`, `a-` or `-n` (one range; a list of several is answered whole). Null for no
+ * header or one this does not read (the whole body is sent); 'unsatisfiable' when the range lies outside the body.
+ */
+export function byteRange(header: string | undefined, size: number): { start: number; end: number } | 'unsatisfiable' | null {
+  const m = /^bytes=(\d*)-(\d*)$/.exec((header ?? '').trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  if (m[1] === '') {
+    const n = Number(m[2]);
+    if (n === 0) return 'unsatisfiable';
+    return { start: Math.max(0, size - n), end: size - 1 };
+  }
+  const start = Number(m[1]);
+  const end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  if (start >= size || end < start) return 'unsatisfiable';
+  return { start, end };
+}
+
+/** Send audio bytes, or the one range of them a `Range` header asks for (206), so a player can seek in a long file. */
+function sendAudio(req: IncomingMessage, res: ServerResponse, bytes: Uint8Array, headers: Record<string, string>): void {
+  const range = byteRange(req.headers.range, bytes.length);
+  const base = { ...HEADERS, 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes', ...headers };
+  if (range === 'unsatisfiable') { res.writeHead(416, { ...base, 'Content-Range': `bytes */${bytes.length}` }).end(); return; }
+  if (!range) { res.writeHead(200, { ...base, 'Content-Length': String(bytes.length) }); res.end(req.method === 'HEAD' ? undefined : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)); return; }
+  const part = bytes.subarray(range.start, range.end + 1);
+  res.writeHead(206, { ...base, 'Content-Range': `bytes ${range.start}-${range.end}/${bytes.length}`, 'Content-Length': String(part.length) });
+  res.end(req.method === 'HEAD' ? undefined : Buffer.from(part.buffer, part.byteOffset, part.byteLength));
+}
+
+/** Library files decoded for auditioning, by their ETag: a player asking for ranges of one file decodes it once. */
+const auditionCache = new Map<string, Uint8Array>();
+const AUDITION_CACHE_BYTES = 96 * 1024 * 1024;
+
+function keepAudition(etag: string, wav: Uint8Array): void {
+  auditionCache.delete(etag);
+  auditionCache.set(etag, wav);
+  let total = 0;
+  for (const v of auditionCache.values()) total += v.length;
+  for (const k of auditionCache.keys()) {
+    if (total <= AUDITION_CACHE_BYTES || auditionCache.size <= 1) break;
+    total -= auditionCache.get(k)!.length;
+    auditionCache.delete(k);
+  }
+}
+
 /** Largest upload (a CLI command's input). */
 const MAX_UPLOAD = 32 * 1024 * 1024;
 
@@ -338,8 +383,8 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       const bytes = o.writer.samples.objectBytes2(om[1]!);
       if (!bytes) { json(res, 404, { error: `no sample object ${om[1]!.slice(0, 12)}` }); return; }
-      res.writeHead(200, { ...HEADERS, 'Content-Type': 'audio/wav', 'Cache-Control': 'private, max-age=31536000, immutable', ETag: `"${om[1]}"` });
-      res.end(Buffer.from(bytes));
+      if (req.headers['if-none-match'] === `"${om[1]}"`) { res.writeHead(304, { ...HEADERS, ETag: `"${om[1]}"` }).end(); return; }
+      sendAudio(req, res, bytes, { 'Cache-Control': 'private, max-age=31536000, immutable', ETag: `"${om[1]}"` });
       return;
     }
     // A file of a registered sample library, for auditioning without copying it into the project: decoded to a WAV, confined to the library's folder.
@@ -348,10 +393,14 @@ export async function startWatchServer(o: WatchOptions): Promise<WatchServer> {
       if (!authed && !bearerOk(req)) { json(res, 401, { error: 'token required' }); return; }
       let src: ReturnType<typeof libraryAudioFile>;
       try { src = libraryAudioFile(lm[1]!, url.searchParams.get('path') ?? ''); } catch (e) { json(res, 404, { error: (e as Error).message }); return; }
-      if (req.headers['if-none-match'] === src.etag) { res.writeHead(304, { ...HEADERS, ETag: src.etag }).end(); return; }
+      if (req.headers['if-none-match'] === src.etag && !req.headers.range) { res.writeHead(304, { ...HEADERS, ETag: src.etag }).end(); return; }
+      const headers = { 'Cache-Control': 'private, max-age=3600', ETag: src.etag };
+      const have = auditionCache.get(src.etag);
+      if (have) { sendAudio(req, res, have, headers); return; }
       decodeInWorker({ bytes: src.bytes, filename: src.filename, options: { as: 'audition' } }).then((p) => {
-        res.writeHead(200, { ...HEADERS, 'Content-Type': 'audio/wav', 'Cache-Control': 'private, max-age=3600', ETag: src.etag });
-        res.end(Buffer.from(pcmToWav(p.audio)));
+        const wav = pcmToWav(p.audio);
+        keepAudition(src.etag, wav);
+        sendAudio(req, res, wav, headers);
       }).catch((e: unknown) => json(res, e instanceof ProjectError ? 422 : 500, { error: (e as Error).message }));
       return;
     }

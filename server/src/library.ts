@@ -19,7 +19,7 @@ import {
   licenceIdOk, licenceState, measureSample, noteLabel, parseLibraryManifest, parseQuery, searchFiles, similarDistance, similarVector, splitLibraryRef,
   type IndexedFile, type IndexedFileView, type LibraryDeclaration, type LibraryHit, type LibraryRef, type SampleLicence, type ShipPolicy,
 } from '@soundclaw/core';
-import { compareSide } from './ears.ts';
+import { compareSide, readAudioFile } from './ears.ts';
 import { indexOneFile, type IndexJob } from './libraryindex.ts';
 import type { IndexBatch, IndexBatchReply } from './library-worker.ts';
 import { ProjectError } from './project.ts';
@@ -37,12 +37,49 @@ export function configDir(): string {
   return xdg ? join(xdg, 'soundclaw') : join(homedir(), '.soundclaw');
 }
 
-/** Things that can be built again: SOUNDCLAW_CACHE_DIR, else $XDG_CACHE_HOME/soundclaw, else ~/.soundclaw/cache. */
+/**
+ * Where a platform keeps caches: macOS ~/Library/Caches/soundclaw; Windows %LOCALAPPDATA%\soundclaw\cache; elsewhere $XDG_CACHE_HOME/soundclaw,
+ * else ~/.cache/soundclaw.
+ */
+export function platformCacheDir(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string): string {
+  if (platform === 'darwin') return join(home, 'Library', 'Caches', 'soundclaw');
+  if (platform === 'win32') return join(env.LOCALAPPDATA || join(home, 'AppData', 'Local'), 'soundclaw', 'cache');
+  return env.XDG_CACHE_HOME ? join(env.XDG_CACHE_HOME, 'soundclaw') : join(home, '.cache', 'soundclaw');
+}
+
+/** The cache folder earlier versions used when nothing was set. */
+export const legacyCacheDir = (home: string): string => join(home, '.soundclaw', 'cache');
+
+let movedFrom: string | null = null;
+
+/**
+ * Move the cache an earlier version kept in ~/.soundclaw/cache to the platform's cache folder, once: only when the old folder exists and the new
+ * one does not. A move that fails (another disk, say) leaves the old folder, and the index is built again where it now lives.
+ */
+export function moveLegacyCache(home: string, to: string): boolean {
+  const from = legacyCacheDir(home);
+  if (from === to || !existsSync(from) || existsSync(to)) return false;
+  try {
+    mkdirSync(dirname(to), { recursive: true });
+    renameSync(from, to);
+    movedFrom = from;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Where the cache was moved from in this process, if it was (for a note). */
+export const cacheMovedFrom = (): string | null => movedFrom;
+
+/** Things that can be built again: SOUNDCLAW_CACHE_DIR, else the platform's cache folder (see platformCacheDir). */
 export function cacheDir(): string {
   const env = process.env.SOUNDCLAW_CACHE_DIR;
   if (env) return resolve(env);
-  const xdg = process.env.XDG_CACHE_HOME;
-  return xdg ? join(xdg, 'soundclaw') : join(homedir(), '.soundclaw', 'cache');
+  const home = homedir();
+  const dir = platformCacheDir(process.platform, process.env, home);
+  moveLegacyCache(home, dir);
+  return dir;
 }
 
 const registryFile = (): string => join(configDir(), 'libraries.json');
@@ -184,12 +221,24 @@ export function addLibrary(dirArg: string, o: AddOptions = {}): AddResult {
   return { entry, notes };
 }
 
-export function removeLibrary(id: string): void {
+/** How many files of a library carry tags added by hand (they cannot be rebuilt). */
+export function handTagCount(id: string): number {
+  return Object.values(readTags(id)).filter((t) => t.length).length;
+}
+
+/**
+ * Forget a library: its entry, its index and the tags added to its files by hand. The folder is never touched. Hand tags cannot be rebuilt, so
+ * when there are any it needs `yes`, and says how many it drops. Returns the number of files whose hand tags went.
+ */
+export function removeLibrary(id: string, o: { yes?: boolean } = {}): number {
   getLibrary(id);
+  const tagged = handTagCount(id);
+  if (tagged && !o.yes) throw new ProjectError(`library ${id} has tags added by hand on ${tagged} file${tagged === 1 ? '' : 's'}; removing it drops them (they cannot be rebuilt from the folder): give --yes to remove it anyway`);
   writeRegistry(readRegistry().filter((l) => l.id !== id));
   rmSync(indexFile(id), { force: true });
   rmSync(tagsFile(id), { force: true });
   loaded.delete(id);
+  return tagged;
 }
 
 // ---- tags added by hand --------------------------------------------------------------------------------------------
@@ -445,12 +494,15 @@ export function searchLibraries(queryText: string, o: SearchOptions = {}): Searc
   return { hits: hits.slice(0, o.limit ?? 20).map((hit) => ({ hit })), total: hits.length, notIndexed, query: queryText };
 }
 
-/** Files like a sound, sample or audio file: nearest first by the feature vector (SIMILAR_FEATURES), among those the query keeps. */
-export function similarLibraries(w: Writer, ref: string, queryText: string, o: SearchOptions = {}): SearchResult & { reference: string } {
+/**
+ * Files like a sound, sample or audio file: nearest first by the feature vector (SIMILAR_FEATURES), among those the query keeps. With no project
+ * (`w` null) the reference is an audio file.
+ */
+export function similarLibraries(w: Writer | null, ref: string, queryText: string, o: SearchOptions = {}): SearchResult & { reference: string } {
   const q = parse(queryText);
   const { entries, notIndexed } = entriesOf(pickLibraries(o.library));
   if (!entries.length && notIndexed.length) throw new ProjectError(`no index: soundclaw library index ${notIndexed.join(' ')}`);
-  const side = compareSide(w, ref);
+  const side = w ? compareSide(w, ref) : readAudioFile(ref);
   const m = measureSample([side.samples], 44100, { maxSeconds: 20 });
   const target = similarVector(m, bandEnergies(side.samples));
   const hits = searchFiles(entries, q, o.policy);

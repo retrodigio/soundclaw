@@ -140,7 +140,18 @@ describe('library index, search, similar, tag and use', () => {
     const j = JSON.parse(sc(['library', 'similar', proj, 'sample:a_creak', 'dur>2', '--json']).out) as Record<string, unknown>[];
     expect(j.map((h) => h.ref)).toContain('cellar:doors/creak_02.wav');
     expect(j.every((h) => typeof h.distance === 'number' && (h.dur as number) > 2)).toBe(true);
-    expect(sc(['library', 'similar', proj]).err).toMatch(/library similar: library similar <project>/);
+    expect(sc(['library', 'similar', proj]).err).toMatch(/library similar: library similar \[<project>\]/);
+    // a file needs no project
+    const alone = sc(['library', 'similar', ref, 'dur>1', '--limit', '1']);
+    expect(alone.code, alone.err).toBe(0);
+    expect(alone.out).toMatch(/^like a_creak\.wav:\ncellar:doors\/creak_0\d\.wav /);
+    expect(sc(['library', 'similar', 'sample:a_creak']).err).toMatch(/neither a project folder nor an audio file/);
+  }, 60_000);
+  it('asks for --yes before dropping tags added by hand with a library', () => {
+    index();
+    sc(['library', 'tag', 'cellar', 'doors/creak_01.wav', 'hinge']);
+    expect(sc(['library', 'remove', 'cellar']).err).toMatch(/tags added by hand on 1 file; .*--yes/);
+    expect(sc(['library', 'remove', 'cellar', '--yes']).out).toMatch(/removed library cellar .*; dropped the tags added by hand on 1 file/);
   }, 60_000);
   it('tags a file, finds it by the tag, and takes the tag along when it is used', () => {
     index();

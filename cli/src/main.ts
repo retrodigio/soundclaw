@@ -195,14 +195,14 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       unchanged. Such files work without it.
   soundclaw library add <folder> [--name <id>] [licence=<id>] [attribution="<text>"] [terms=<url>] [--yes]
   soundclaw library list [--json]
-  soundclaw library remove <id>
+  soundclaw library remove <id> [--yes]
   soundclaw library index [<id>...] [--rebuild] [--workers <n>]
   soundclaw library tag <id> <path> <tag>... [--remove]
   soundclaw library search ["<words>"] [<numbers query>] [--library <id>] [--limit <n>] [--project <project>] [--json]
-  soundclaw library similar <project> <sound | sample:<name> | audio file> [<numbers query>] [--library <id>] [--limit <n>] [--json]
+  soundclaw library similar [<project>] <sound | sample:<name> | audio file> [<numbers query>] [--library <id>] [--limit <n>] [--project <project>] [--json]
   soundclaw library use <project> <library>:<path> [as=<name>] [licence=<id>] [attribution="<text>"] [tags=<a,b>] [--by <author>]
       Sample libraries: folders of recordings kept outside any project and registered for you (settings in
-      ~/.soundclaw, or SOUNDCLAW_CONFIG_DIR; the index in ~/.soundclaw/cache, or SOUNDCLAW_CACHE_DIR). add records the
+      ~/.soundclaw, or SOUNDCLAW_CONFIG_DIR; the index in the system's cache folder, or SOUNDCLAW_CACHE_DIR). add records the
       folder and its licence: licence= or --yes, or the folder's soundclaw-library.json ({"name", "description",
       "licence", "attribution", "terms"}); a LICENSE file that says CC0, an SPDX-License-Identifier or a Creative
       Commons title is shown and needs --yes, anything else leaves the licence unknown. index reads, hashes and
@@ -215,7 +215,8 @@ export const USAGE = `soundclaw: a sound effects and music workbench driven by c
       middle of the ranges, each with its library:path, length, loudness, note, centroid, attack, licence and a
       line of words. --project judges licence=shippable by that project's policy. similar ranks the files by
       distance in a feature vector (length, loudness, brightness, flatness, attack, pitch, hits per second, eight
-      energy bands; docs/commands.md lists it) from a sound, a sample or a file. use copies one file into the
+      energy bands; docs/commands.md lists it) from a sound, a sample or a file (a file needs no project). remove
+      forgets a library and its index; tags added by hand go with it, so then it needs --yes. use copies one file into the
       project's store (a tape command, one undo group) as source=library, origin <library>:<path>, with the
       library's licence; the library itself never enters the project.
   soundclaw licence check <project> [<id>...] [--allow-licence <id>]...
@@ -616,8 +617,8 @@ function cmdLibrary(io: Io, p: Parsed): number {
   }
   if (verb === 'remove') {
     if (rest.length !== 1) throw new UsageError('library remove: give a library id');
-    removeLibrary(rest[0]!);
-    io.out(`removed library ${rest[0]} from the list (its folder and the files in it are untouched)\n`);
+    const dropped = removeLibrary(rest[0]!, { yes: p.flags.has('yes') });
+    io.out(`removed library ${rest[0]} from the list (its folder and the files in it are untouched)${dropped ? `; dropped the tags added by hand on ${plural(dropped, 'file')}` : ''}\n`);
     return 0;
   }
   if (verb === 'add') {
@@ -646,12 +647,23 @@ function cmdLibrary(io: Io, p: Parsed): number {
     return 0;
   }
   if (verb === 'similar') {
-    const [dir, ref, ...q] = rest;
-    if (!dir || !ref) throw new UsageError('library similar: library similar <project> <sound | sample:<name> | audio file> [<numbers query>]');
-    const w = wr(io, dir);
-    const policy = w.samples.shipPolicy;
-    const r = similarLibraries(w, ref, q.join(' '), { library: one(p, 'library'), limit: int('limit', 10, 500), policy });
-    const state = stateUnder(policy);
+    // with a project first: a sound, sample:<name> or a file, judged by that project's policy; without one: an audio file
+    const isProject = (d: string | undefined): boolean => !!d && existsSync(join(d, 'project.json'));
+    const [first, second, ...more] = rest;
+    if (isProject(first)) {
+      if (!second) throw new UsageError('library similar: library similar [<project>] <sound | sample:<name> | audio file> [<numbers query>]');
+      const w = wr(io, first!);
+      const policy = w.samples.shipPolicy;
+      const r = similarLibraries(w, second, more.join(' '), { library: one(p, 'library'), limit: int('limit', 10, 500), policy });
+      const state = stateUnder(policy);
+      io.out(p.flags.has('json') ? JSON.stringify(r.hits.map((h) => hitJson(h, state)), null, 1) + '\n' : `like ${r.reference}:\n${searchText(r, state)}\n`);
+      return 0;
+    }
+    if (!first) throw new UsageError('library similar: library similar [<project>] <sound | sample:<name> | audio file> [<numbers query>]');
+    if (!existsSync(first) || !statSync(first).isFile()) throw new UsageError(`library similar: '${first}' is neither a project folder nor an audio file (a sound or sample:<name> needs its project first)`);
+    const policy = policyOf(one(p, 'project'));
+    const r = similarLibraries(null, first, [second, ...more].filter((x) => x !== undefined).join(' '), { library: one(p, 'library'), limit: int('limit', 10, 500), ...(policy ? { policy } : {}) });
+    const state = policy ? stateUnder(policy) : undefined;
     io.out(p.flags.has('json') ? JSON.stringify(r.hits.map((h) => hitJson(h, state)), null, 1) + '\n' : `like ${r.reference}:\n${searchText(r, state)}\n`);
     return 0;
   }

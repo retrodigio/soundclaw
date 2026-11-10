@@ -10,7 +10,7 @@ import { builtinInstruments, guideText, openRequests, scaleText } from '@soundcl
 import { formatEvents } from './await.ts';
 import { changesText } from './changes.ts';
 import { sampleLine } from './samples.ts';
-import { hitJson, listLibraries, listText, searchLibraries, searchText, similarLibraries, stateUnder, useLibraryFile, type SearchResult } from './library.ts';
+import { addLibrary, hitJson, indexLibrary, indexStatsText, listLibraries, listText, readRegistry, searchLibraries, searchText, similarLibraries, stateUnder, useLibraryFile, type SearchResult } from './library.ts';
 import { gcApply, gcPlan, gcReport, importPath, importReport, licenceCheck, licencePolicyNote, licenceReportText, sampleListText, sampleShowText, upgradeProject } from './sampleimport.ts';
 import { sampleCheckText, sampleDescribeText, sampleMeasureJson, isSampleRef } from './sampleview.ts';
 import { checkText, describeJson, describeText, exportFormat, measureJson, measureText, formatExportFiles, formatImportReport, importCommands, renderText, setSummary, viewSound } from './ears.ts';
@@ -70,7 +70,7 @@ Loudness classes: \`sound set <id> class=ui|foley|impact|ambience|voice|music-st
 
 Samples as material: \`sample derive <new> from=<name> op="trim 0.1 0.9; fade out=50ms; normalize peak -3"\` makes new audio (ops: trim, fade, gain, normalize peak|lufs, silence-trim <dB>, dc, reverse, mono|left|right, pitch <semitones> [method=resample|stretch], stretch <ratio>|to=<s>|tempo=<a>:<b> [method=wsola|pv], loop <s> <e> xfade=<t>, slice <n>, mix <sample> at=<t> gain=<dB>; measured values are written into the history as numbers). \`sample slice <name> at=onsets|<t,t,..>|grid=<n>\`, \`sample loop <name> find|<start> <end>\`, \`sample bounce <new> from=<sound|song> [layer=<n>] [loop=yes]\` freezes a render. \`layer align <id> <n> to=<m>|start by=onset|peak\`, \`layer match <id> <n> to=<m> db=<offset>\`, \`env <id> <n>.amp follow=<layer>|sample:<name>\`. Hear samples with describe, measure and view (sample:<name> or hash:<sha256>: wave, spec, pitch, loop, slices, compare), sample check (advice only), and search with a numbers query: sample list "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k pitched=no onsets=1.
 
-Sample libraries (folders of recordings outside the project, registered by \`soundclaw library add\` and indexed by \`soundclaw library index\`): the \`library\` tool searches them (\`search\` with words and a numbers query such as "creak" dur=0.8-2.5 pitched=no licence=shippable), finds files that sound like a sound or sample (\`similar\`), and copies one into the project (\`use\`, with its provenance and the library's licence); then \`layer add <sound> sample sample=<name>\`.
+Sample libraries (folders of recordings outside the project, registered by \`soundclaw library add\` or the tool's \`add\`, and indexed by \`soundclaw library index\` or \`index\`): the \`library\` tool searches them (\`search\` with words and a numbers query such as "creak" dur=0.8-2.5 pitched=no licence=shippable), finds files that sound like a sound or sample (\`similar\`), and copies one into the project (\`use\`, with its provenance and the library's licence); then \`layer add <sound> sample sample=<name>\`.
 
 Checks (clip, loudness, dc, click, tail) hold a sound to the project's style (default -16 LUFS ±1, true peak at most -0.1 dBTP, no click at the first or last sample, no cut tail). A request's work(action="done") is refused while its sound fails them: look at \`check\`, fix the sound (volume sets loudness; attack and decay remove clicks), then finish.
 
@@ -402,23 +402,50 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
 
   server.registerTool('library', {
     title: 'Sample libraries',
-    description: 'Search the user\'s sample libraries (folders of recordings registered with `soundclaw library add`, outside any project) and copy a file into this project. list: the libraries and whether they are indexed. search: query is words (all must match names, tags and folders) and a numbers query, like "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k attack<20ms pitched=no onsets=1 loop=no channels=1 tag=wood licence=shippable; hits come best word match first, then nearest the middle of the ranges. similar: files nearest a sound of the project, sample:<name> or an audio file path (ref), optionally filtered by a query. use: ref is <library>:<path> from a hit; it copies the file into the project\'s sample store as source=library with the library\'s licence (override with licence), and then `layer add <sound> sample sample=<name>` plays it. Hits are one JSON object per line (ref, dur, lufs, note, centroid, attack, licence, state, desc); format=text prints the CLI lines. Indexing a library (soundclaw library index) is a CLI step: it can take minutes.',
+    description: 'Search the user\'s sample libraries (folders of recordings registered with `soundclaw library add`, outside any project) and copy a file into this project. list: the libraries and whether they are indexed. search: query is words (all must match names, tags and folders) and a numbers query, like "creak" dur=0.8-2.5 lufs>-30 centroid<2.5k attack<20ms pitched=no onsets=1 loop=no channels=1 tag=wood licence=shippable; hits come best word match first, then nearest the middle of the ranges. similar: files nearest a sound of the project, sample:<name> or an audio file path (ref), optionally filtered by a query. use: ref is <library>:<path> from a hit; it copies the file into the project\'s sample store as source=library with the library\'s licence (override with licence), and then `layer add <sound> sample sample=<name>` plays it. Hits are one JSON object per line (ref, dur, lufs, note, centroid, attack, licence, state, desc); format=text prints the CLI lines. add: register a folder (dir) as a library for this user, with licence (or yes to accept the licence its LICENSE file reads as; a soundclaw-library.json declares it outright). index: read and measure the files of the libraries named in ids (all when none; only changed files unless rebuild); it can take minutes and does not hold up other tools. Removing a library is the person\'s step (CLI: soundclaw library remove).',
     inputSchema: z.object({
-      action: z.enum(['list', 'search', 'similar', 'use']),
+      action: z.enum(['list', 'search', 'similar', 'use', 'add', 'index']),
       query: z.string().optional().describe('search, similar: words and a numbers query'),
+      dir: z.string().optional().describe('add: the folder to register'),
+      name: z.string().optional().describe('add: the library id (default: from the folder\'s name)'),
+      yes: z.boolean().optional().describe('add: accept the licence read from the folder\'s licence file'),
+      ids: z.array(z.string()).optional().describe('index: the libraries (default: all)'),
+      rebuild: z.boolean().optional().describe('index: measure every file again'),
       library: z.string().optional().describe('search, similar: only this library'),
       limit: z.number().int().min(1).max(200).optional().describe('search (default 20), similar (default 10)'),
       ref: z.string().optional().describe('similar: a sound id, sample:<name> or an audio file; use: <library>:<path>'),
       format: z.enum(['json', 'text']).optional().describe('hits as JSON lines (default) or text lines'),
       as: z.string().optional().describe('use: the sample\'s name (default: the file\'s)'),
-      licence: z.string().optional().describe('use: a licence id to write instead of the library\'s'),
-      attribution: z.string().optional().describe('use: attribution text'),
-      terms: z.string().optional().describe('use: a terms address'),
+      licence: z.string().optional().describe('use: a licence id to write instead of the library\'s; add: the library\'s licence'),
+      attribution: z.string().optional().describe('use, add: attribution text'),
+      terms: z.string().optional().describe('use, add: a terms address'),
       tags: z.string().optional().describe('use: comma-separated tags to add'),
       note: z.string().optional().describe('use: a note'),
       by: z.string().optional().describe('use: the author on the tape (default agent:claude)'),
     }),
-  }, (a) => w.enqueue(() => {
+  }, async (a) => {
+    // add and index change no project: index measures files on worker threads for minutes, so it runs outside the writer's queue
+    if (a.action === 'add' || a.action === 'index') {
+      try {
+        if (a.action === 'add') {
+          if (!a.dir) return fail('add needs dir (a folder)');
+          const r = addLibrary(a.dir, { ...(a.name ? { name: a.name } : {}), ...(a.licence ? { licence: a.licence } : {}), ...(a.attribution ? { attribution: a.attribution } : {}), ...(a.terms ? { terms: a.terms } : {}), yes: !!a.yes });
+          return { content: [text(`added library '${r.entry.id}' (${r.entry.dir})\n${r.notes.map((n) => `  ${n}\n`).join('')}next: library index with ids ["${r.entry.id}"]`)] };
+        }
+        const ids = a.ids?.length ? a.ids : readRegistry().map((l) => l.id);
+        if (!ids.length) return fail('no libraries registered: add one first (action add, dir=<folder>)');
+        const lines: string[] = [];
+        for (const id of ids) lines.push(indexStatsText(await indexLibrary(id, { rebuild: !!a.rebuild })));
+        return { content: [text(lines.join('\n'))] };
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+    return w.enqueue(() => libraryInQueue(a));
+  });
+
+  const libraryInQueue = (a: { action: string; query?: string; library?: string; limit?: number; ref?: string; format?: 'json' | 'text'; as?: string; licence?: string; attribution?: string; terms?: string; tags?: string; note?: string; by?: string }): CallToolResult => {
+    {
     try {
       const hits = (r: SearchResult, head?: string): CallToolResult => {
         const st = stateUnder(w.samples.shipPolicy);
@@ -439,7 +466,8 @@ export function createMcpServer(host: McpHost, version: string): McpServer {
     } catch (e) {
       return errorResult(e);
     }
-  }));
+    }
+  };
 
   server.registerTool('licence', {
     title: 'Licence check',

@@ -1145,13 +1145,16 @@ soundclaw library add ~/sounds/cellar licence=CC0-1.0            # register a fo
 soundclaw library index                                          # read, hash and measure every audio file (all libraries, or name them)
 soundclaw library search "door creak" dur=0.8-2.5 pitched=no licence=shippable --limit 8
 soundclaw library similar demo door_synth dur<3                  # files that sound like a sound of the project (or sample:<name>, or a file)
+soundclaw library similar ~/takes/creak.wav                      # files that sound like an audio file (no project needed)
 soundclaw library use demo cellar:doors/creak_04.wav as=creak    # copy one file into the project's store
 soundclaw library tag cellar doors/creak_04.wav hinge,rusty      # add tags to a file (they survive a re-index)
-soundclaw library list [--json]    soundclaw library remove <id>
+soundclaw library list [--json]    soundclaw library remove <id> [--yes]
 ```
 
 **Where things are kept.** The list of libraries and the tags you add are settings in `~/.soundclaw` (or `$SOUNDCLAW_CONFIG_DIR`, or `$XDG_CONFIG_HOME/soundclaw`); the
-index is a cache in `~/.soundclaw/cache` (`$SOUNDCLAW_CACHE_DIR`, `$XDG_CACHE_HOME/soundclaw`) and can be deleted and built again. Nothing about a library is written into a
+index is a cache in the system's cache folder (macOS `~/Library/Caches/soundclaw`; Linux `$XDG_CACHE_HOME/soundclaw`, else `~/.cache/soundclaw`; Windows
+`%LOCALAPPDATA%\soundclaw\cache`; `$SOUNDCLAW_CACHE_DIR` overrides it) and can be deleted and built again. A cache an earlier version kept in `~/.soundclaw/cache` is moved
+there once. Nothing about a library is written into a
 project except the files `library use` copies, and no path of your machine is written on the tape: a copied file's origin is `<library>:<path inside it>`.
 
 **The licence of a library.** `add` takes `licence=<id>` (with `attribution="…"` and `terms=<url>`), or reads the folder's own declaration, a
@@ -1178,7 +1181,7 @@ best word match first (a file-name word beats an added tag, which beats a folder
 loudness, note, centroid, attack, a licence glyph and word and a line of words (`tonal, one hit, dry, mono`). `--project` judges `licence=shippable` by that project's policy
 (the default policy otherwise). `--json` prints one object per hit.
 
-**Sounds like.** `library similar <project> <sound | sample:<name> | audio file> [<numbers query>] [--library <id>] [--limit <n>]` ranks the files (those the query keeps) by their distance
+**Sounds like.** `library similar [<project>] <sound | sample:<name> | audio file> [<numbers query>] [--library <id>] [--limit <n>]` ranks the files (those the query keeps) by their distance
 from the reference in this feature space, nearest first; the distance is the square root of the sum of weight × ((a − b) / scale)² over:
 
 | Feature | Value | One unit | Weight |
@@ -1193,7 +1196,11 @@ from the reference in this feature space, nearest first; the distance is the squ
 | onset rate | onsets per second | 3 | 0.6 |
 | eight bands | energy in 0-100, 100-250, 250-500, 500-1k, 1-2k, 2-4k, 4-8k and above 8k Hz, dB below the total | 12 dB | 0.35 each |
 
-The reference is measured as the others are (mixed to mono at 44.1 kHz). A sound of the project is rendered first.
+The reference is measured as the others are (mixed to mono at 44.1 kHz). A sound of the project is rendered first. An audio file needs no project: `library similar
+<file> [<query>]` (with `--project <project>` to judge `licence=shippable` by that project's policy).
+
+**Remove.** `library remove <id>` forgets the library and its index and never touches the folder. Tags added by hand with `library tag` cannot be rebuilt from the folder,
+so when there are any, `remove` says how many files carry them and needs `--yes`.
 
 **Use.** `library use <project> <library>:<path> [as=<name>] [licence=<id>] [attribution="…"] [terms=<url>] [tags=<a,b>] [note="…"]` copies the file into the
 project's store (one undo group, a tape command by `--by`, default `agent:claude`) as `source=library` with the origin `<library>:<path>`, the original file's hash and format, the tags from its
@@ -1201,10 +1208,12 @@ path and those you added, and the library's licence. The name defaults to the fi
 While a server runs, `library use` is sent to it like the other commands that write. The file must be inside the library's folder: `..`, absolute paths and links that lead out are refused.
 
 **For the dashboard.** `GET /api/library/<id>/audio?path=<path>` (behind the token) plays a library file without copying it: the server decodes it (in a worker) and sends a WAV, confined to the
-registered folder, with an ETag from the file's size and time.
+registered folder, with an ETag from the file's size and time. It answers a `Range: bytes=…` request with that part (206), so a player can seek in a long
+file without the server decoding it again.
 
-**MCP.** The `library` tool has `list`, `search`, `similar` and `use`; hits are one compact JSON object per line (`ref`, `dur`, `lufs`, `note`, `centroid`, `attack`, `licence`, `state`, `desc`, and
-`distance` for `similar`), or the CLI's lines with `format: "text"`. Indexing is a CLI step (it can take minutes).
+**MCP.** The `library` tool has `list`, `search`, `similar`, `use`, `add` (`dir`, `name`, `licence`, `attribution`, `terms`, `yes`) and `index` (`ids`, `rebuild`); hits are one compact JSON object per
+line (`ref`, `dur`, `lufs`, `note`, `centroid`, `attack`, `licence`, `state`, `desc`, and `distance` for `similar`), or the CLI's lines with `format: "text"`. `index` can take minutes; it runs
+beside the other tools rather than holding them up. Removing a library stays a CLI step.
 
 ### Licences
 
@@ -1633,7 +1642,8 @@ links keep working across a restart (the token is kept beside the lock file, rea
 | `GET /api/render/<id>.f64` | The exact doubles (for a classic sound, the reference samples that WAVs quantise): little-endian float64. |
 | `GET /api/render/<id>.wav` | The same as the exported WAV (a classic sound in the pre-rendered form, a layered sound through the limiter, stereo when it is). |
 | `GET /api/samples`, `GET /api/samples/<name>.wav` | The project's samples (name, hash, rate, length, format, licence and its state, source, tags) and the audio a name stands for. |
-| `GET /api/sample-object/<hash>` | The stored audio of a hash, as a WAV. The bytes never change, so it is sent as cacheable for ever; the page fetches the samples a sound names by hash to render its sample layers. |
+| `GET /api/sample-object/<hash>` | The stored audio of a hash, as a WAV. The bytes never change, so it is sent as cacheable for ever; the page fetches the samples a sound names by hash to render its sample layers. Byte ranges are answered. |
+| `GET /api/library/<id>/audio?path=<path>` | A file of a registered sample library, decoded to a WAV for auditioning, confined to the library's folder; byte ranges are answered. |
 | `POST /api/samples/import?by=human:<name>&name=<file name>` | An uploaded audio file (the body is its bytes, at most 200 MB), read in a worker thread and named on the tape as that person. `as`, `licence`, `attribution`, `terms`, `tags`, `source`, `origin` and `note` are as for `sample import`; the file name is cut to its last part. |
 | `GET /api/await?timeout=…&since=…&as=agent:<name>` | Long poll for events. |
 | `GET /api/presence` | Who is listening. |

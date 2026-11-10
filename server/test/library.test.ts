@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MANIFEST_FILE, decodeAudio, decodeMeasure, pcmHash } from '@soundclaw/core';
 import {
-  addLibrary, confinedFile, defaultWorkers, getLibrary, hitJson, indexLibrary, listLibraries, loadIndex, readRegistry, removeLibrary, scanLibrary, searchLibraries, similarLibraries, stateUnder, tagFile,
+  addLibrary, confinedFile, defaultWorkers, moveLegacyCache, platformCacheDir, legacyCacheDir, getLibrary, hitJson, indexLibrary, listLibraries, loadIndex, readRegistry, removeLibrary, scanLibrary, searchLibraries, similarLibraries, stateUnder, tagFile,
   useLibraryFile, libraryAudioFile, licenceCheck, importPath,
 } from '../src/index.ts';
-import { startWatchServer } from '../src/http.ts';
+import { byteRange, startWatchServer } from '../src/http.ts';
 import { fixture, type Fixture } from './helpers.ts';
 import { makeBigLibrary, makeSmallLibrary, put, wavOf } from './library-fixtures.ts';
 
@@ -83,9 +83,44 @@ describe('registering a library', () => {
     makeSmallLibrary(lib, outside);
     addLibrary(lib, { licence: 'CC0-1.0' });
     expect(() => getLibrary('nope')).toThrow(/no library 'nope' \(libraries: cellar-foley\)/);
-    removeLibrary('cellar-foley');
+    expect(removeLibrary('cellar-foley')).toBe(0);
     expect(readRegistry()).toEqual([]);
     expect(existsSync(join(lib, 'doors', 'creak_01.wav'))).toBe(true);
+  });
+  it('needs --yes to remove a library whose files carry tags added by hand, and says how many it drops', async () => {
+    makeSmallLibrary(lib, outside);
+    addLibrary(lib, { licence: 'CC0-1.0' });
+    await indexLibrary('cellar-foley', { workers: 0 });
+    tagFile('cellar-foley', 'doors/creak_01.wav', ['hinge']);
+    tagFile('cellar-foley', 'bells/BellHigh.wav', ['chime']);
+    expect(() => removeLibrary('cellar-foley')).toThrow(/tags added by hand on 2 files.*--yes/);
+    expect(readRegistry().map((l) => l.id)).toEqual(['cellar-foley']);
+    expect(removeLibrary('cellar-foley', { yes: true })).toBe(2);
+    expect(readRegistry()).toEqual([]);
+    expect(existsSync(join(process.env.SOUNDCLAW_CONFIG_DIR!, 'library-tags', 'cellar-foley.json'))).toBe(false);
+  });
+});
+
+describe('where the index lives', () => {
+  it('is the platform’s cache folder: Library/Caches on macOS, LOCALAPPDATA on Windows, XDG_CACHE_HOME or ~/.cache elsewhere', () => {
+    expect(platformCacheDir('darwin', {}, '/Users/someone')).toBe(join('/Users/someone', 'Library', 'Caches', 'soundclaw'));
+    expect(platformCacheDir('linux', {}, '/home/someone')).toBe(join('/home/someone', '.cache', 'soundclaw'));
+    expect(platformCacheDir('linux', { XDG_CACHE_HOME: '/var/cache/me' }, '/home/someone')).toBe(join('/var/cache/me', 'soundclaw'));
+    expect(platformCacheDir('win32', { LOCALAPPDATA: 'C:/Users/someone/AppData/Local' }, 'C:/Users/someone')).toBe(join('C:/Users/someone/AppData/Local', 'soundclaw', 'cache'));
+    expect(platformCacheDir('win32', {}, 'C:/Users/someone')).toBe(join('C:/Users/someone', 'AppData', 'Local', 'soundclaw', 'cache'));
+  });
+  it('moves a cache an earlier version kept in ~/.soundclaw/cache, once, and never over one that is there', () => {
+    const home = join(f.root, 'home');
+    const to = platformCacheDir('darwin', {}, home);
+    put(join(legacyCacheDir(home), 'library'), 'cellar.index.jsonl', '{"soundclawLibraryIndex":1}\n');
+    expect(moveLegacyCache(home, to)).toBe(true);
+    expect(readFileSync(join(to, 'library', 'cellar.index.jsonl'), 'utf8')).toMatch(/soundclawLibraryIndex/);
+    expect(existsSync(legacyCacheDir(home))).toBe(false);
+    // nothing to move the second time; and an old folder next to a new one is left alone
+    expect(moveLegacyCache(home, to)).toBe(false);
+    put(join(legacyCacheDir(home), 'library'), 'other.index.jsonl', 'x');
+    expect(moveLegacyCache(home, to)).toBe(false);
+    expect(existsSync(join(to, 'library', 'other.index.jsonl'))).toBe(false);
   });
 });
 
@@ -272,6 +307,13 @@ describe('sounds like', () => {
     const r = similarLibraries(f.w, creak, '');
     expect(typeof hitJson(r.hits[0]!).distance).toBe('number');
   });
+  it('finds files like an audio file with no project', () => {
+    const bell = join(f.root, 'a_bell.wav');
+    writeFileSync(bell, wavOf('bell', 22, 1.3));
+    const r = similarLibraries(null, bell, '', { limit: 2 });
+    expect(r.hits[0]!.hit.file.path).toBe('bells/BellHigh.wav');
+    expect(() => similarLibraries(null, 'sample:my_creak', '')).toThrow(/no audio file sample:my_creak/);
+  });
 });
 
 describe('copying a file into a project', () => {
@@ -382,6 +424,41 @@ describe('GET /api/library/<id>/audio', () => {
     } finally {
       await server.close();
     }
+  });
+  it('answers byte ranges, so a player can seek in a long file', async () => {
+    makeSmallLibrary(lib, outside);
+    addLibrary(lib, { licence: 'CC0-1.0' });
+    const server = await startWatchServer({ writer: f.w, token: 'tok', port: 0 });
+    try {
+      const url = `http://127.0.0.1:${server.port}/api/library/cellar-foley/audio?${new URLSearchParams({ token: 'tok', path: 'doors/creak_01.wav' })}`;
+      const whole = new Uint8Array(await (await fetch(url)).arrayBuffer());
+      const r = await fetch(url, { headers: { Range: 'bytes=100-199' } });
+      expect(r.status).toBe(206);
+      expect(r.headers.get('content-range')).toBe(`bytes 100-199/${whole.length}`);
+      expect(r.headers.get('accept-ranges')).toBe('bytes');
+      expect(new Uint8Array(await r.arrayBuffer())).toEqual(whole.subarray(100, 200));
+      const tail = await fetch(url, { headers: { Range: 'bytes=-10' } });
+      expect(new Uint8Array(await tail.arrayBuffer())).toEqual(whole.subarray(whole.length - 10));
+      const open = await fetch(url, { headers: { Range: `bytes=${whole.length - 4}-` } });
+      expect(open.status).toBe(206);
+      expect((await open.arrayBuffer()).byteLength).toBe(4);
+      const past = await fetch(url, { headers: { Range: `bytes=${whole.length}-` } });
+      expect(past.status).toBe(416);
+      expect(past.headers.get('content-range')).toBe(`bytes */${whole.length}`);
+    } finally {
+      await server.close();
+    }
+  });
+  it('reads one range of a Range header', () => {
+    expect(byteRange(undefined, 100)).toBeNull();
+    expect(byteRange('bytes=0-9', 100)).toEqual({ start: 0, end: 9 });
+    expect(byteRange('bytes=90-200', 100)).toEqual({ start: 90, end: 99 });
+    expect(byteRange('bytes=-20', 100)).toEqual({ start: 80, end: 99 });
+    expect(byteRange('bytes=-200', 100)).toEqual({ start: 0, end: 99 });
+    expect(byteRange('bytes=100-', 100)).toBe('unsatisfiable');
+    expect(byteRange('bytes=5-2', 100)).toBe('unsatisfiable');
+    expect(byteRange('bytes=0-1,5-6', 100)).toBeNull();
+    expect(byteRange('items=0-1', 100)).toBeNull();
   });
 });
 

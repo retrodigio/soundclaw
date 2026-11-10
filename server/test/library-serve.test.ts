@@ -97,6 +97,25 @@ describe('library over MCP', () => {
     expect((await call({ action: 'use', ref: 'cellar:../x.wav' })).isError).toBe(true);
     expect((await call({ action: 'use' })).isError).toBe(true);
   }, 90_000);
+  it('registers and indexes a library for an agent with no shell', async () => {
+    const transport = new StdioClientTransport({ command: process.execPath, args: [BIN, 'serve', '--project', dir, '--port', '0'], stderr: 'pipe', env: env as Record<string, string> });
+    client = new Client({ name: 'soundclaw-test', version: '1.0.0' });
+    await client.connect(transport);
+    const call = async (args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> => {
+      const r = (await client!.callTool({ name: 'library', arguments: args })) as { content: { type: string; text?: string }[]; isError?: boolean };
+      return { text: r.content.map((c) => c.text ?? '').join('\n'), isError: !!r.isError };
+    };
+    expect((await call({ action: 'index' })).text).toMatch(/no libraries registered/);
+    expect((await call({ action: 'add' })).isError).toBe(true);
+    const add = await call({ action: 'add', dir: lib, licence: 'CC0-1.0' });
+    expect(add.isError, add.text).toBe(false);
+    expect(add.text).toMatch(/added library 'cellar'/);
+    const idx = await call({ action: 'index', ids: ['cellar'] });
+    expect(idx.text).toMatch(/library cellar: 10 files indexed/);
+    // the tools keep working while an index runs, and search sees what it built
+    expect((await call({ action: 'search', query: 'creak' })).text.split('\n')[0]).toBe('2 hits');
+    expect((await call({ action: 'index' })).text).toMatch(/0 read, 10 unchanged/);
+  }, 90_000);
 });
 
 describe('library use while a server owns the project', () => {
