@@ -296,8 +296,20 @@ test('handles: each gesture writes one command; trim from a layer writes its sta
   await page.getByTestId('tool-trim').click();
   await expect(page.getByTestId('trim-make')).toBeDisabled();
   n = tape().length;
+  await expect(page.getByTestId('trim-saved-note')).toBeVisible();
+  await expect(page.getByTestId('trim-reset')).toBeDisabled();
   await dragHandle(page, page.getByTestId('trim-start'), 120);
   expect(tape().length).toBe(n);
+  // a drag is a draft: the page says it is unsaved (in the toolbar and in the header) until Make, and Reset takes it back
+  await expect(page.getByTestId('trim-unsaved')).toContainText('unsaved trim');
+  await expect(page.getByTestId('sample-unsaved-trim')).toBeVisible();
+  await page.getByTestId('trim-reset').click();
+  await expect(page.getByTestId('trim-unsaved')).toHaveCount(0);
+  await expect(page.getByTestId('sample-unsaved-trim')).toHaveCount(0);
+  expect(tape().length).toBe(n);
+  await page.getByTestId('trim-start').scrollIntoViewIfNeeded(); // pressing Reset scrolled the lens out of view
+  await dragHandle(page, page.getByTestId('trim-start'), 120);
+  await expect(page.getByTestId('trim-unsaved')).toBeVisible();
   await page.getByTestId('trim-name').fill('hum_short');
   await page.getByTestId('trim-make').click();
   await expect(page).toHaveURL(/#\/sample\/hum_short$/);

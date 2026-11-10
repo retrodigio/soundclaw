@@ -15,6 +15,7 @@ import { inTextField, useActions } from './studio/registry.ts';
 import { lufsText } from './studio/shellData.ts';
 import type { Version } from './sound/provenance.ts';
 import type { Store } from './store.ts';
+import { plural } from './studio/values.ts';
 
 const randomSeed = (): number => Math.floor(Math.random() * 4294967296);
 
@@ -196,7 +197,7 @@ export function SetPage({ store, set }: { store: Store; set: SetDoc }) {
       <header className="set-head">
         <a href="#/" className="back" data-testid="back">← all sounds</a>
         <h1 className="set-title" title={set.id}>{set.id.replace(/_/g, ' ')}</h1>
-        <span className="set-chip" data-testid="set-info">set · {set.members.length} members{set.from ? ` from ${set.from}` : ''} · {set.target !== null ? `target ${lufsText(set.target)} LUFS` : set.class ? `loudness class "${set.class}" ${lufsText(target)} LUFS` : 'no loudness target'} · seed <b data-testid="set-seed">{set.seed}</b></span>
+        <span className="set-chip" data-testid="set-info">set · {plural(set.members.length, 'member')}{set.from ? ` from ${set.from}` : ''} · {set.target !== null ? `target ${lufsText(set.target)} LUFS` : set.class ? `loudness class "${set.class}" ${lufsText(target)} LUFS` : 'no loudness target'} · seed <b data-testid="set-seed">{set.seed}</b></span>
         {spread !== null && <Badge kind={spreadKind} testId="set-spread" title="How far apart the members' loudness is, against twice the class tolerance">spread {spread.toFixed(1)} LU, max {spreadMax}</Badge>}
         {measure && <span className="badge" data-kind={measure.result.pass ? 'pass' : 'fail'} data-testid="set-check" data-pass={measure.result.pass}><span className="mono" aria-hidden>{measure.result.pass ? '✓' : '×'}</span>set-spread</span>}
       </header>

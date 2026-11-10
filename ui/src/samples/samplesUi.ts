@@ -3,8 +3,8 @@
 
 import { useSyncExternalStore } from 'react';
 
-interface State { files: File[] | null; recording: boolean; dragging: boolean }
-let state: State = { files: null, recording: false, dragging: false };
+interface State { files: File[] | null; recording: boolean; dragging: boolean; generating: boolean }
+let state: State = { files: null, recording: false, dragging: false, generating: false };
 const subs = new Set<() => void>();
 const set = (p: Partial<State>): void => { state = { ...state, ...p }; for (const f of [...subs]) f(); };
 
@@ -12,6 +12,8 @@ export const openImport = (files: File[]): void => { if (files.length) set({ fil
 export const closeImport = (): void => set({ files: null });
 export const openRecorder = (): void => set({ recording: true });
 export const closeRecorder = (): void => set({ recording: false });
+export const openGenerate = (): void => set({ generating: true });
+export const closeGenerate = (): void => set({ generating: false });
 export const setDragging = (v: boolean): void => { if (state.dragging !== v) set({ dragging: v }); };
 export const useSamplesUi = (): State => useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f); }; }, () => state);
 

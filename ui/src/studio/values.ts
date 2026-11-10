@@ -82,3 +82,6 @@ export function arcSpan(frac: number, bipolar: boolean): [number, number] {
 
 /** The sweep's fraction for a value, 0..1. */
 export const fracOf = (v: number, min: number, max: number): number => (max === min ? 0 : clampTo((v - min) / (max - min), 0, 1));
+
+/** "1 sound", "2 sounds": a count with its noun in the right number (the plural is the noun and an s unless given). */
+export const plural = (n: number, noun: string, many = `${noun}s`): string => `${n} ${n === 1 ? noun : many}`;

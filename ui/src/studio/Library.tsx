@@ -12,6 +12,7 @@ import { VirtualList, type VirtualHandle } from './layout.tsx';
 import { usePrefs, setPrefs, type Prefs } from './prefs.ts';
 import { checkOf, lufsText, rowName, useAttentionOrder, type Focus } from './shellData.ts';
 import { SamplesBrowser } from './Samples.tsx';
+import { plural } from './values.ts';
 
 const LICENCE_GLYPH: Record<string, string> = { shippable: '✓', attribution: '©', blocked: '×', unknown: '?' };
 const LICENCE_KIND: Record<string, CheckKind> = { shippable: 'pass', attribution: 'warn', blocked: 'fail', unknown: 'warn' };
@@ -132,16 +133,17 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
     const needle = q.trim().toLowerCase();
     const has = (id: string) => !needle || id.toLowerCase().includes(needle);
     return {
-      sets: store.sets.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: `${x.members.length} members${x.target !== null ? ` · ${x.target} LUFS` : ''}` })),
+      sets: store.sets.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: `${plural(x.members.length, 'member')}${x.target !== null ? ` · ${x.target} LUFS` : ''}` })),
       songs: store.songs.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: `${x.tempo} BPM${x.key ? ` · ${x.key}` : ''}` })),
-      instruments: store.instruments.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: '' })),
+      instruments: store.instruments.filter((x) => has(x.id)).map((x) => ({ id: x.id, sub: x.zones?.length ? plural(x.zones.length, 'zone') : 'synth' })),
     };
   }, [store.sets, store.songs, store.instruments, store.samples, q]);
 
+  const [instSel, setInstSel] = useState<string | null>(null);
   const kind: 'sound' | 'set' | 'song' | null = tab === 'sounds' ? 'sound' : tab === 'sets' ? 'set' : tab === 'songs' ? 'song' : null;
   const otherRows = tab === 'sounds' || tab === 'samples' ? [] : others[tab];
   const ids: string[] = tab === 'sounds' ? rows.map((s) => s.id) : otherRows.map((x) => x.id);
-  const at = selected && kind && selected.kind === kind ? ids.indexOf(selected.id) : -1;
+  const at = tab === 'instruments' ? (instSel ? ids.indexOf(instSel) : -1) : selected && kind && selected.kind === kind ? ids.indexOf(selected.id) : -1;
 
   // keep the selected row in view when it moves by keyboard
   // (not when the order changes under it because the agent wrote: the list never moves on a server update)
@@ -163,10 +165,11 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
 
   const pick = useCallback((i: number) => {
     const id = ids[i];
+    if (tab === 'instruments' && id) { setInstSel(id); return; }
     if (!id || !kind) return;
     onSelect({ kind, id });
     if (kind === 'sound') preview(id);
-  }, [ids, kind, onSelect, preview]);
+  }, [ids, kind, tab, onSelect, preview]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -174,6 +177,7 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
     else if (e.key === 'ArrowUp') { e.preventDefault(); pick(Math.max(0, at <= 0 ? 0 : at - 1)); }
     else if (e.key === 'Home') { e.preventDefault(); pick(0); }
     else if (e.key === 'End') { e.preventDefault(); pick(ids.length - 1); }
+    else if (e.key === 'Enter' && tab === 'instruments' && instSel) { e.preventDefault(); location.hash = `#/instrument/${instSel}`; }
     else if (e.key === 'Enter' && selected && kind) { e.preventDefault(); onOpen(selected); }
     else if (e.key === ' ' && selected && kind) {
       e.preventDefault();
@@ -203,9 +207,9 @@ export function Library({ store, selected, onSelect, onOpen, onAsk, inputRef }: 
   };
   const renderOther = (i: number) => {
     const x = otherRows[i]!;
-    const sel = !!kind && selected?.kind === kind && selected.id === x.id;
+    const sel = tab === 'instruments' ? instSel === x.id : !!kind && selected?.kind === kind && selected.id === x.id;
     return (
-      <div className={`lib-row${sel ? ' sel' : ''}`} data-testid={`lib-row-${x.id}`} data-ask-item={x.id} {...(kind === 'song' ? askAttr(x.id, { kind: 'item' }, x.id) : {})} onClick={() => pick(i)} onDoubleClick={() => kind && onOpen({ kind, id: x.id })}>
+      <div className={`lib-row${sel ? ' sel' : ''}`} data-testid={`lib-row-${x.id}`} data-ask-item={x.id} {...(kind === 'song' ? askAttr(x.id, { kind: 'item' }, x.id) : {})} onClick={() => pick(i)} onDoubleClick={() => { if (tab === 'instruments') location.hash = `#/instrument/${x.id}`; else if (kind) onOpen({ kind, id: x.id }); }}>
         <span className="new-dot" style={{ opacity: 0 }} />
         <span className="lib-name">{x.id}</span>
         <span className="mono lib-sub">{x.sub}</span>

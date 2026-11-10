@@ -16,6 +16,7 @@ import { fetchDetail, rowNumbers } from '../studio/samplesApi.ts';
 import { markSampleSeen } from '../studio/sampleSeen.ts';
 import { Dialog } from './Dialog.tsx';
 import { DeriveDialog, GenerateAgainDialog, freeName } from './SampleDialogs.tsx';
+import { AskDialog, RequestsPanel } from './SampleRequests.tsx';
 import { SampleLens, type LensDrafts, type Tool } from './SampleLens.tsx';
 import type { SampleLensReply } from './sample.worker.ts';
 import { sampleWorker } from './sampleWorker.ts';
@@ -52,6 +53,7 @@ function SampleView({ store, info, layer }: { store: Store; info: SampleInfo; la
   const [tool, setTool] = useState<Tool>(layer ? 'trim' : 'select');
   const [axis, setAxis] = useState<Axis>({ cursor: null, sel: null, t0: 0, t1: 0, level: 1 });
   const [dialog, setDialog] = useState<'derive' | 'again' | 'ask' | 'instrument' | null>(null);
+  const [askAgain, setAskAgain] = useState<string | undefined>(undefined);
   const duration = lens?.duration ?? info.seconds;
 
   // the layer this page was opened from: its trim now
@@ -103,6 +105,9 @@ function SampleView({ store, info, layer }: { store: Store; info: SampleInfo; la
     if (await run(`sample derive ${newName} from=${info.name} op="trim ${frame(a)}f ${frame(b)}f"`, `Made ${newName}`)) location.hash = `#/sample/${newName}`;
   };
 
+  // a trim dragged on this page is a draft: nothing is written until Make (a derive), so say so while it differs from the whole sample
+  const trimDirty = !layer && !!drafts.trim && (drafts.trim[0] > 1e-6 || drafts.trim[1] < duration - 1e-6);
+
   const checks: SampleCheck[] = useMemo(() => (lens ? checkSample(lens.measure, { frames: info.frames, rate: info.rate, ...(info.slices ? { slices: info.slices } : {}) }, []) : []), [lens, info.frames, info.rate, info.slices]);
   const playing = store.playing === `sample:${info.name}`;
   const playSelection = () => {
@@ -133,13 +138,14 @@ function SampleView({ store, info, layer }: { store: Store; info: SampleInfo; la
         <LicenceBadge state={info.licenceState} licence={info.licence} testId="sample-page-licence" />
         <span className="mono dim" data-testid="sample-meta">{rowNumbers(info.seconds, lens ? { hash: info.sha256, m: lens.measure, peaks: { min: [], max: [] } } : undefined, info.root)} {'·'} {Number((info.rate / 1000).toFixed(1))} kHz {'·'} {info.channels === 1 ? 'mono' : info.channels === 2 ? 'stereo' : `${info.channels} ch`} {'·'} {info.format}</span>
         {layer && <span className="chip-c tone-you" data-testid="sample-from-layer">trim writes {layer.sound} layer {layer.n}</span>}
+        {trimDirty && <button type="button" className="chip-c tone-warn" data-testid="sample-unsaved-trim" onClick={() => setTool('trim')} title="A trim you have not made yet: open the Trim tool to Make or Reset it"><span className="mono" aria-hidden>{'●'}</span>unsaved trim</button>}
       </header>
       <div className="sp-actions">
         <Button kind="secondary" testId="sample-play" icon={playing ? <Stop size={9} /> : <Play size={9} />} onClick={playSelection} title="Play the sample, or loop the selected region">{playing ? 'Stop' : axis.sel ? 'Play selection' : 'Play'}</Button>
         <Button kind="secondary" testId="sample-derive" onClick={() => setDialog('derive')}>Derive{'…'}</Button>
         <Button kind="secondary" testId="sample-instrument" onClick={() => setDialog('instrument')}>Make instrument{'…'}</Button>
         {info.source === 'generated' && <Button kind="agent" testId="sample-again" onClick={() => setDialog('again')}>Generate again{'…'}</Button>}
-        <Button kind="quiet" testId="sample-ask" onClick={() => setDialog('ask')} title={detail && detail.usedBy.sounds.length ? 'Ask the agent to change a sound that plays this sample' : 'No sound plays this sample yet'}>Ask for changes{'…'}</Button>
+        <Button kind="quiet" testId="sample-ask" onClick={() => { setAskAgain(undefined); setDialog('ask'); }} title="Ask the agent to change this sample (or a sound that plays it)">Ask for changes{'…'}</Button>
       </div>
 
       <div className="sp-tools">
@@ -167,10 +173,10 @@ function SampleView({ store, info, layer }: { store: Store; info: SampleInfo; la
               <>
                 <label className="sp-inline">as<input value={newName} onChange={(e) => setNewName(e.target.value.toLowerCase())} data-testid="trim-name" spellCheck={false} aria-label="Name of the trimmed sample" /></label>
                 <Button kind="primary" testId="trim-make" disabled={!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(newName) || store.samples.some((x) => x.name === newName) || !drafts.trim || (drafts.trim[0] <= 0 && drafts.trim[1] >= duration - 1e-6)} onClick={() => void makeTrim()}>Make {newName}</Button>
-                <span className="dim">a derive: the original stays as it is</span>
+                {trimDirty ? <span className="chip-c tone-warn" role="status" data-testid="trim-unsaved"><span className="mono" aria-hidden>{'●'}</span>unsaved trim: nothing is written until Make</span> : <span className="dim" data-testid="trim-saved-note">drag the handles; Make writes a new sample and the original stays as it is</span>}
               </>
             )}
-            <Button kind="quiet" testId="trim-reset" onClick={() => setDrafts((d) => ({ ...d, trim: [0, duration] }))}>Reset</Button>
+            <Button kind="quiet" testId="trim-reset" disabled={!layer && !trimDirty} onClick={() => setDrafts((d) => ({ ...d, trim: [0, duration] }))}>Reset</Button>
           </>
         )}
         {tool === 'loop' && (
@@ -216,6 +222,7 @@ function SampleView({ store, info, layer }: { store: Store; info: SampleInfo; la
 
         <div className="sp-col">
           <Provenance store={store} info={info} detail={detail} run={run} />
+          <RequestsPanel store={store} name={info.name} onAgain={(id) => { setAskAgain(id); setDialog('ask'); }} />
           <h2 className="cap">Used by</h2>
           <div className="sp-usedby" data-testid="sample-usedby">
             {detail && used === 0 && <span className="dim">nothing plays it yet</span>}
@@ -229,7 +236,7 @@ function SampleView({ store, info, layer }: { store: Store; info: SampleInfo; la
 
       {dialog === 'derive' && <DeriveDialog store={store} info={info} onClose={() => setDialog(null)} onMade={(n) => { setDialog(null); location.hash = `#/sample/${n}`; }} />}
       {dialog === 'again' && <GenerateAgainDialog store={store} info={info} onClose={() => setDialog(null)} />}
-      {dialog === 'ask' && <AskDialog store={store} info={info} sounds={detail?.usedBy.sounds ?? []} onClose={() => setDialog(null)} />}
+      {dialog === 'ask' && <AskDialog store={store} info={info} sounds={detail?.usedBy.sounds ?? []} selection={axis.sel && axis.sel.b > axis.sel.a ? [axis.sel.a, axis.sel.b] : null} again={askAgain} onClose={() => { setDialog(null); setAskAgain(undefined); }} />}
       {dialog === 'instrument' && <InstrumentDialog store={store} info={info} onClose={() => setDialog(null)} />}
     </section>
   );
@@ -259,6 +266,7 @@ function Provenance({ store, info, detail, run }: { store: Store; info: SampleIn
           {row('origin', p.origin ? <span className="mono">{p.origin}</span> : null, 'origin')}
           {row('prompt', p.prompt ? <q>{p.prompt}</q> : null, 'prompt')}
           {row('made by', p.provider ? <span className="mono">{p.provider}{p.endpoint ? ` ${p.endpoint}` : ''}{p.model ? ` (${p.model})` : ''}</span> : null, 'provider')}
+          {row('kept from', p.keptFrom ? <span className="mono">take {p.keptFrom}</span> : null, 'kept-from')}
           {row('take', p.take ? <span className="mono">{p.take}{p.credits !== undefined ? ` · ${p.credits} credits` : ''}{p.seed !== undefined ? ` · seed ${p.seed}` : ''}</span> : null, 'take')}
           {row('request', p.request ? <span className="mono">{p.request}</span> : null, 'request')}
           {row('parents', p.parents ? p.parents.map((x, i) => (x.name ? <a key={i} href={`#/sample/${x.name}`}>{x.name}</a> : <span key={i} className="mono">{x.hash.slice(0, 12)}</span>)).reduce<React.ReactNode[]>((a, n, i) => (i ? [...a, ', ', n] : [n]), []) : null, 'parents')}
@@ -291,27 +299,6 @@ function Provenance({ store, info, detail, run }: { store: Store; info: SampleIn
 }
 
 // ---- the dialogs that are small -------------------------------------------------------------------------------------------
-
-function AskDialog({ store, info, sounds, onClose }: { store: Store; info: SampleInfo; sounds: string[]; onClose(): void }) {
-  const toast = useToast();
-  const [sound, setSound] = useState(sounds[0] ?? '');
-  const [text, setText] = useState('');
-  const go = async () => {
-    const r = await store.askForChanges(sound, `About sample ${info.name}: ${text.trim()}`);
-    if (r.ok) { toast(`Sent to the agent about ${info.name} (on ${sound})`); onClose(); } else toast(r.error ?? 'The request was refused.', 'error');
-  };
-  return (
-    <Dialog title={`Ask for changes: ${info.name}`} onClose={onClose} testId="ask-sample-dialog">
-      <form className="smp-form" onSubmit={(e) => { e.preventDefault(); if (sound && text.trim()) void go(); }}>
-        {sounds.length === 0 ? <p className="dim" data-testid="ask-sample-none">No sound plays this sample yet, and requests are made on sounds. Add it to a layer first (drag it onto a layer list), or say what you want in the agent{'’'}s rail.</p> : (
-          <label>on the sound<select value={sound} onChange={(e) => setSound(e.target.value)} data-testid="ask-sample-sound">{sounds.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
-        )}
-        <label>what should change<textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} data-testid="ask-sample-text" placeholder="shorter, less noisy, a deeper version…" /></label>
-        <div className="smp-form-actions"><button type="submit" className="btn btn-agent" disabled={!sound || !text.trim()} data-testid="ask-sample-go">Send to the agent</button><button type="button" className="btn btn-quiet" onClick={onClose}>Cancel</button></div>
-      </form>
-    </Dialog>
-  );
-}
 
 function InstrumentDialog({ store, info, onClose }: { store: Store; info: SampleInfo; onClose(): void }) {
   const toast = useToast();

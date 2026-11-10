@@ -7,6 +7,7 @@ import type { SoundSummary } from '@soundclaw/server/protocol';
 import { CardGrid } from './studio/NeedCard.tsx';
 import { checkOf, useAttentionOrder } from './studio/shellData.ts';
 import type { Store } from './store.ts';
+import { plural } from './studio/values.ts';
 
 export const PAGE = 48;
 
@@ -93,7 +94,7 @@ export function SoundList({ store, attentionOnly = false }: { store: Store; atte
       {(store.index.length > PAGE / 2 || attentionOnly) && (
         <>
           {!attentionOnly && <FilterBar filters={filters} set={setFilters} tags={allTags} prefix="sounds" />}
-          <div className="dim" data-testid="sounds-count">{filtered.length} of {store.index.length} sounds{attentionOnly ? ' need attention' : ''}{store.index.some((s) => !s.info) ? ` · ${store.index.filter((s) => !s.info).length} not checked yet` : ''}</div>
+          <div className="dim" data-testid="sounds-count">{filtered.length} of {plural(store.index.length, 'sound')}{attentionOnly ? ' need attention' : ''}{store.index.some((s) => !s.info) ? ` · ${store.index.filter((s) => !s.info).length} not checked yet` : ''}</div>
         </>
       )}
       <section className="sounds need" data-testid="sounds" aria-label="Sounds" data-count={filtered.length}>

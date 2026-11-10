@@ -11,6 +11,7 @@ import './sound/sound.css';
 import './sets/sets.css';
 import './song/song.css';
 import './samples/samples.css';
+import './instruments/instruments.css';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const store = new Store();

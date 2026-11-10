@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arcSpan, formatValue, midiToNote, noteToMidi, parseValue, snap } from '../src/studio/values.ts';
+import { arcSpan, formatValue, midiToNote, noteToMidi, parseValue, plural, snap } from '../src/studio/values.ts';
 
 describe('typed values with units', () => {
   it('seconds accept ms, s and a bare number', () => {
@@ -64,5 +64,16 @@ describe('arcs and steps', () => {
   it('snaps to a step from the minimum', () => {
     expect(snap(0.14, 0.05, 0)).toBeCloseTo(0.15, 10);
     expect(snap(7.4, 0, 0)).toBe(7.4);
+  });
+});
+
+describe('counts with their noun', () => {
+  it('say one thing in the singular and everything else in the plural', () => {
+    expect(plural(1, 'sound')).toBe('1 sound');
+    expect(plural(0, 'sound')).toBe('0 sounds');
+    expect(plural(2, 'song')).toBe('2 songs');
+    expect(plural(1, 'member')).toBe('1 member');
+    expect(plural(3, 'copy', 'copies')).toBe('3 copies');
+    expect(plural(1, 'copy', 'copies')).toBe('1 copy');
   });
 });

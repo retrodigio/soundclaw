@@ -105,7 +105,7 @@ export function Rail({ store, onPlay, onOpen, ask, focus }: { store: Store; onPl
             return (
               <li key={f.key} className="feed-item" data-testid="feed-item" data-by={who} data-sample={f.sample} data-new={f.sample && freshSamples.has(f.sample) ? 'true' : undefined}>
                 <AuthorDot by={who} />
-                <div className="feed-body"><span className="feed-text">{f.sample ? <a href={`#/sample/${f.sample}`} className="feed-sample" data-testid={`feed-sample-${f.sample}`}>{f.text}</a> : f.text}</span><span className="mono feed-meta">{f.meta}</span></div>
+                <div className="feed-body"><span className="feed-text">{f.sample ? <a href={`#/sample/${f.sample}`} className="feed-sample" data-testid={`feed-sample-${f.sample}`}>{f.text}</a> : f.instrument ? <a href={`#/instrument/${f.instrument}`} className="feed-sample" data-testid={`feed-instrument-${f.instrument}`}>{f.text}</a> : f.text}</span><span className="mono feed-meta">{f.meta}</span></div>
                 {f.sound && <button type="button" className="feed-play" aria-label={`Play ${f.sound}`} title={`Play ${f.sound}`} onClick={() => onPlay(f.sound!)}><Play size={8} /></button>}
                 {f.sample && store.samples.some((x) => x.name === f.sample) && <button type="button" className="feed-play" data-testid={`feed-play-${f.sample}`} aria-label={`Play sample ${f.sample}`} title={`Play sample ${f.sample}`} onClick={() => void store.playSample(f.sample!)}><Play size={8} /></button>}
               </li>

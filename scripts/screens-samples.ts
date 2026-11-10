@@ -9,7 +9,7 @@ import { chromium, type Page } from '@playwright/test';
 import { pcmFromFloats } from '../core/src/index.ts';
 import { wavBytes } from '../core/test/audio-fixtures.ts';
 import { toneFloats } from '../core/test/sample-golden-table.ts';
-import { makeSamples } from '../e2e/example.ts';
+import { makeInstrument, makeSamples } from '../e2e/example.ts';
 import { startAgent } from '../e2e/helpers.ts';
 
 const OUT = join(import.meta.dirname, '..', '.dev', 'screens', 'samples');
@@ -19,6 +19,7 @@ const agent = await startAgent();
 const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 try {
   await makeSamples(agent);
+  await makeInstrument(agent);
   const run = async (script: string, by = 'agent:claude') => { const r = await agent.cli(['run', agent.dir, '-e', script, '--by', by]); if (r.code !== 0) throw new Error(r.err || r.out); };
   await run('sound new knock voice=layered seed=3\nlayer add knock osc wave=sine freq=120 dur=0.2\nlayer add knock sample sample=door_hits');
   await run('instrument new creak_pad kind=zones\ninstrument zone add creak_pad sample=hum_tone root=A3 keys=A2-A4');
@@ -141,6 +142,73 @@ try {
     await dlg.getByTestId('record-stop').click();
     await dlg.getByTestId('record-name').waitFor();
     await shot('samples-record-done');
+    await page.keyboard.press('Escape');
+
+    // the instrument page: the key-map with a fault, a warning and a release zone; a zone selected; a sample over a key; the piano strip
+    await open('#/instrument/harp', 'instrument-page');
+    await page.getByTestId('instrument-check-badge').waitFor({ timeout: 30_000 });
+    await shot('instrument-keymap');
+    await page.getByTestId('zone-row-2').click();
+    await page.getByTestId('zone-editor').waitFor();
+    await shot('instrument-zone-selected');
+    await page.evaluate(() => document.querySelector('.page')?.scrollTo(0, 99999));
+    await shot('instrument-lower');
+    await page.evaluate(() => document.querySelector('.page')?.scrollTo(0, 0));
+    await page.getByTestId('lib-tab-samples').click();
+    await page.getByTestId('lib-row-hum_tone').waitFor();
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.setData('application/x-soundclaw-sample', 'hum_tone');
+      const svg = document.querySelector('[data-testid=keymap-svg]')!;
+      const r = svg.getBoundingClientRect();
+      svg.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + r.width * 0.85, clientY: r.top + r.height * 0.4 }));
+    });
+    await shot('instrument-drop-target');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('instrument-add').click();
+    await shot('instrument-add-zone');
+    await page.keyboard.press('Escape');
+
+    // generating: the free test provider, a paid provider refused until a person sets a cap, and the spend on the session page
+    await open('#/', 'home');
+    await page.getByTestId('lib-tab-samples').click();
+    await page.getByTestId('samples-mode-takes').click();
+    await page.getByTestId('takes-generate').click();
+    await page.getByTestId('gen-provider').selectOption('elevenlabs');
+    await page.getByTestId('gen-prompt').fill('the slow creak of an old wooden door hinge, close and dry');
+    await page.getByTestId('gen-refusal').first().waitFor();
+    await shot('generate-paid-refused');
+    await page.getByTestId('gen-provider').selectOption('fake');
+    await page.getByTestId('gen-cost').waitFor();
+    await shot('generate-panel');
+    await page.getByTestId('gen-name').fill(`click_${theme}`);
+    await page.getByTestId('gen-go').click();
+    await page.getByTestId('generate-dialog').waitFor({ state: 'detached', timeout: 30_000 });
+    await shot('samples-takes-generated');
+    await open('#/session', 'session-spend');
+    await shot('session-spend');
+
+    // a request about a sample, and a trim that has not been made yet
+    await open('#/sample/door_hits', 'sample-page');
+    await lens();
+    await page.getByTestId('sample-ask').click();
+    await shot('sample-ask-dialog');
+    await page.getByTestId('ask-sample-text').fill('shorter, and drier');
+    await page.getByTestId('ask-sample-go').click();
+    await page.getByTestId('sample-requests').waitFor();
+    await agent.cli(['work', agent.dir, 'claim', '--by', 'agent:claude']);
+    await agent.cli(['work', agent.dir, 'progress', '--by', 'agent:claude', 'trimming the tail']);
+    await page.evaluate(() => document.querySelector('.page')?.scrollTo(0, 99999));
+    await shot('sample-requests');
+    await agent.cli(['work', agent.dir, 'done', '--by', 'agent:claude', 'made a shorter copy']);
+    await shot('sample-requests-done');
+    await open('#/sample/hum_tone', 'sample-page');
+    await lens();
+    await page.getByTestId('tool-trim').click();
+    await page.getByTestId('trim-start').focus();
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight');
+    await page.getByTestId('trim-unsaved').waitFor();
+    await shot('sample-unsaved-trim');
     await ctx.close();
   }
   console.log(`saved to ${OUT}`);

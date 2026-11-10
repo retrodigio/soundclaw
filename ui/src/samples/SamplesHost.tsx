@@ -7,7 +7,8 @@ import type { Store } from '../store.ts';
 import { useToast } from '../studio/controls.tsx';
 import { Dialog } from './Dialog.tsx';
 import { Recorder } from './recorder.ts';
-import { closeImport, closeRecorder, filesOfDrop, openImport, setDragging, useSamplesUi } from './samplesUi.ts';
+import { GenerateDialog } from './GenerateDialog.tsx';
+import { closeGenerate, closeImport, closeRecorder, filesOfDrop, openImport, setDragging, useSamplesUi } from './samplesUi.ts';
 
 const LICENCES: { id: string; note: string }[] = [
   { id: 'unknown', note: 'not known yet: the tool never guesses, and a manifest export refuses it until you set one' },
@@ -212,6 +213,7 @@ export function SamplesHost({ store }: { store: Store }) {
       {ui.dragging && <div className="smp-dropveil" data-testid="drop-veil" role="presentation"><div><b>Drop audio to import</b><span>WAV, AIFF, FLAC, OGG, MP3 or M4A, or a folder of them</span></div></div>}
       {ui.files && <ImportDialog store={store} files={ui.files} onClose={closeImport} />}
       {ui.recording && <RecordDialog store={store} onClose={closeRecorder} />}
+      {ui.generating && <GenerateDialog store={store} onClose={closeGenerate} />}
     </>
   );
 }

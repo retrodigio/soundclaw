@@ -16,6 +16,7 @@ import { MiniWave } from './studio/Library.tsx';
 import { inTextField } from './studio/registry.ts';
 import { lastChanges, lufsText } from './studio/shellData.ts';
 import type { Store } from './store.ts';
+import { plural } from './studio/values.ts';
 
 function AskBox({ store, id, onClose }: { store: Store; id: string; onClose(): void }) {
   const [note, setNote] = useState('');
@@ -163,7 +164,7 @@ export function AuditionPage({ store, setId }: { store: Store; setId: string | n
       <header className="set-head">
         <a href="#/" className="back" data-testid="back">← all sounds</a>
         <h1 className="set-title">Audition{set ? ` · set ${set.id}` : ''}</h1>
-        <span className="set-chip" data-testid="aud-count">{shown.length} of {pool.length} sounds · {counts.approved} approved · {counts.rejected} asked for changes</span>
+        <span className="set-chip" data-testid="aud-count">{shown.length} of {plural(pool.length, 'sound')} · {counts.approved} approved · {counts.rejected} asked for changes</span>
         <span className="spacer" />
         <label className="dim small">gap <input type="number" min={0} max={5000} step={50} value={gap} data-testid="aud-gap" className="num-input" onChange={(e) => setGap(Math.max(0, Number(e.target.value)))} /> ms</label>
         <button type="button" className="btn btn-primary" data-testid="aud-play-all" data-playing={sequencing} disabled={!shown.length} onClick={() => void (sequencing ? store.stopSequence() : store.playSequence(ids, gap))}>{sequencing ? '■ Stop' : '▶ Play all'}</button>

@@ -13,6 +13,7 @@ import { useBatch } from './live.tsx';
 import { useSelection } from './NeedCard.tsx';
 import { ago, doneAt, laneOf, type LaneId } from './shellData.ts';
 import { Tape } from './Tape.tsx';
+import { Spend } from './Spend.tsx';
 
 const LANES: { id: LaneId; title: string; glyph: string; tone: 'quiet' | 'agent' | 'warn' | 'pass' }[] = [
   { id: 'sent', title: 'Sent', glyph: '→', tone: 'quiet' },
@@ -61,7 +62,9 @@ function LaneCard({ store, q, lane, now, onOpen }: { store: Store; q: WorkReques
       {lane === 'review' && (
         <div className="lane-actions">
           {q.latest && <span className="lane-progress">{q.latest}</span>}
-          <a className="btn btn-primary" href={`#/review/${q.id}`} data-testid={`lane-review-${q.id}`}>Review</a>
+          {q.sound.startsWith('sample:')
+            ? <a className="btn btn-primary" href={`#/sample/${q.sound.slice(7)}`} data-testid={`lane-review-${q.id}`}>Open sample</a>
+            : <a className="btn btn-primary" href={`#/review/${q.id}`} data-testid={`lane-review-${q.id}`}>Review</a>}
         </div>
       )}
       {(lane === 'sent' || lane === 'seen' || lane === 'claimed' || lane === 'working' || lane === 'blocked') && (
@@ -165,6 +168,7 @@ export function Session({ store, onOpen }: { store: Store; onOpen(id: string): v
           <div className="closed-cards">{closed.map((q) => <LaneCard key={q.id} store={store} q={q} lane="closed" now={now} onOpen={onOpen} />)}</div>
         </details>
       </section>
+      <Spend store={store} now={now} />
       <section className="card live-rules" aria-label="While you edit">
           <div className="working-head"><span className="cap">While you edit</span><span className="grow" /><span className="dim small">nothing moves under your cursor</span></div>
           {held.length === 0

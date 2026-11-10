@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
-import { pcmFromFloats } from '../core/src/index.ts';
+import { midiFreq, pcmFromFloats, sinRad } from '../core/src/index.ts';
 import { wavBytes } from '../core/test/audio-fixtures.ts';
 import { hitsFloats, toneFloats } from '../core/test/sample-golden-table.ts';
 import { wavOf } from '../server/test/library-fixtures.ts';
@@ -104,6 +104,7 @@ export async function makeExample(a: Agent): Promise<void> {
   await run(Array.from({ length: 6 }, (_, i) => `sound mutate laser amount=0.1 seed=${40 + i} as=laser_v${i + 1}`).join('\n'), 'agent:otter');
   await run('sound set jump punch=0.4', 'human:ana');
   await makeSamples(a);
+  await makeInstrument(a);
 }
 
 /**
@@ -129,6 +130,40 @@ export async function makeSamples(a: Agent): Promise<void> {
   }
   await cli(['library', 'add', lib, 'licence=CC0-1.0']);
   await cli(['library', 'index', 'cellar-foley']);
+}
+
+/** A steady tone (a fundamental and a partial) at `hz`: it has a pitch the tool can hear. */
+export const steadyTone = (hz: number, secs: number): Float32Array => {
+  const x = new Float32Array(Math.round(44100 * secs));
+  for (let i = 0; i < x.length; i++) { const t = (i / 44100) * 6.283185307179586; x[i] = 0.4 * sinRad(t * hz) + 0.12 * sinRad(t * hz * 2); }
+  return x;
+};
+
+/** The notes the example instrument is made from. */
+export const HARP_NOTES: Record<string, number> = { harp_c3: 48, harp_g3: 55 };
+/** Their pitches: the G is a quarter tone sharp, so the check finds a fault until the zone is tuned. */
+export const HARP_HZ: Record<string, number> = { harp_c3: midiFreq(48), harp_g3: midiFreq(55) * 2 ** (50 / 1200) };
+
+/**
+ * An instrument of samples with one zone that reaches a long way from its root (a warning), one whose pitch is a quarter tone off (a fault), a release zone that
+ * passes, and keys left without a zone (a fault): every state the key-map draws. The audio is made here from integers.
+ */
+export async function makeInstrument(a: Agent): Promise<void> {
+  const cli = async (args: string[]) => { const r = await a.cli(args); if (r.code !== 0) throw new Error(`${args.join(' ')}: ${r.err || r.out}`); return r; };
+  const files = join(a.root, 'audio');
+  mkdirSync(files, { recursive: true });
+  for (const [name, midi] of Object.entries(HARP_NOTES)) {
+    writeFileSync(join(files, `${name}.wav`), wavBytes(pcmFromFloats([steadyTone(HARP_HZ[name]!, 1)], 44100, 'pcm16')));
+    await cli(['sample', 'import', a.dir, join(files, `${name}.wav`), 'licence=own', 'tags=harp']);
+  }
+  const script = [
+    'instrument new harp kind=zones',
+    'instrument set harp adsr=0.01,0.1,0.8,0.25 range=C2-B4',
+    'instrument zone add harp sample=harp_c3 root=C3 keys=C2-D#3',
+    'instrument zone add harp sample=harp_g3 root=G3 keys=E3-B3',
+    'instrument zone add harp sample=harp_c3 root=C3 keys=C2-F#3 trigger=release release-decay=6 gain=-14',
+  ].join('\n');
+  await cli(['run', a.dir, '-e', script, '--by', 'agent:claude']);
 }
 
 export interface Screen {
@@ -180,6 +215,14 @@ export const SCREENS: Screen[] = [
   { name: 'sample-generated', hash: '#/sample/creak_gen_t1', ready: 'sample-page', act: async (p) => { await p.getByTestId('prov-prompt').waitFor(); await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); } },
   { name: 'sample-derive', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('sample-derive').click(); await p.getByTestId('derive-dialog').waitFor(); } },
   { name: 'sample-compare', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await unfocus(p); await p.keyboard.press('5'); await p.getByTestId('compare-other').waitFor(); } },
+  { name: 'instrument', hash: '#/instrument/harp', ready: 'instrument-page', act: async (p) => { await p.getByTestId('instrument-check-badge').waitFor({ timeout: 30_000 }); await p.getByTestId('zone-row-2').click(); await p.getByTestId('zone-editor').waitFor(); } },
+  { name: 'instrument-add-zone', hash: '#/instrument/harp', ready: 'instrument-page', act: async (p) => { await p.getByTestId('instrument-check-badge').waitFor({ timeout: 30_000 }); await p.getByTestId('instrument-add').click(); await p.getByTestId('add-zone-dialog').waitFor(); } },
+  { name: 'instrument-builtin', hash: '#/instrument/pluck', ready: 'instrument-page', act: async (p) => { await p.getByTestId('instrument-builtin').waitFor(); } },
+  { name: 'generate-dialog', hash: '#/', ready: 'home', act: async (p) => { await samplesTab(p); await p.getByTestId('samples-mode-takes').click(); await p.getByTestId('takes-generate').click(); await p.getByTestId('gen-provider').selectOption('fake'); await p.getByTestId('gen-prompt').fill('a short wooden click, dry'); await p.getByTestId('gen-cost').waitFor(); } },
+  { name: 'generate-dialog-paid', hash: '#/', ready: 'home', act: async (p) => { await samplesTab(p); await p.getByTestId('samples-mode-takes').click(); await p.getByTestId('takes-generate').click(); await p.getByTestId('gen-provider').selectOption('elevenlabs'); await p.getByTestId('gen-prompt').fill('the slow creak of an old door'); await p.getByTestId('gen-refusal').first().waitFor(); await p.getByTestId('gen-cap').waitFor(); } },
+  { name: 'sample-request', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); if (!(await p.locator('[data-testid^=sample-request-r]').count())) { await p.getByTestId('sample-ask').click(); await p.getByTestId('ask-sample-text').fill('shorter and drier'); await p.getByTestId('ask-sample-go').click(); } await p.locator('[data-testid^=sample-request-state-r]').first().waitFor(); } },
+  { name: 'sample-ask-dialog', hash: '#/sample/door_hits', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await p.getByTestId('sample-ask').click(); await p.getByTestId('ask-sample-dialog').waitFor(); } },
+  { name: 'sample-unsaved-trim', hash: '#/sample/hum_tone', ready: 'sample-page', act: async (p) => { await p.getByTestId('snum-length').waitFor({ timeout: 20_000 }); await p.getByTestId('tool-trim').click(); await p.getByTestId('trim-start').focus(); for (let i = 0; i < 6; i++) await p.keyboard.press('Shift+ArrowRight'); await p.getByTestId('trim-unsaved').waitFor(); } },
   { name: 'record-dialog', hash: '#/', ready: 'home', act: async (p) => { await p.getByTestId('transport-record').click(); await p.getByTestId('record-dialog').waitFor(); await p.waitForTimeout(500); } },
   { name: 'palette', hash: '#/sound/coin_pickup', ready: 'editor', act: async (p) => { await p.getByTestId('open-palette').click(); await p.getByRole('dialog').first().waitFor(); await p.keyboard.type('make the coin brighter'); } },
   { name: 'shortcuts', hash: '#/', ready: 'home', act: async (p) => { await unfocus(p); await p.keyboard.press('?'); await p.getByRole('dialog').first().waitFor(); } },

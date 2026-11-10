@@ -11,7 +11,7 @@ import { ToastHost, useToast } from './controls.tsx';
 import { Chevron, Close, KindIcon, Spark, type TabKind } from './icons.tsx';
 import { Library } from './Library.tsx';
 import { SamplesHost } from '../samples/SamplesHost.tsx';
-import { chooseFiles, openRecorder } from '../samples/samplesUi.ts';
+import { chooseFiles, openGenerate, openRecorder } from '../samples/samplesUi.ts';
 import { markSampleSeen } from './sampleSeen.ts';
 import { UndoBar } from './decisions.tsx';
 import { BatchStrip, UpdateChip } from './live.tsx';
@@ -34,7 +34,7 @@ interface TabInfo { hash: string; label: string; kind: TabKind; id: string | nul
 
 /** What a tab's hash is: its label and icon. */
 function tabOf(hash: string): TabInfo | null {
-  let m = /^#\/(sound|set|song|sample)\/([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(hash);
+  let m = /^#\/(sound|set|song|sample|instrument)\/([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(hash);
   if (m) return { hash: `#/${m[1]}/${m[2]}`, label: m[2]!, kind: m[1] as TabKind, id: m[2]! };
   m = /^#\/audition(?:\/([A-Za-z][A-Za-z0-9_-]*))?$/.exec(hash);
   if (m) return { hash, label: m[1] ? `audition · ${m[1]}` : 'Audition', kind: 'audition', id: null };
@@ -143,12 +143,12 @@ function ShellInner({ store }: { store: Store }) {
   useEffect(() => { if (tabFocus) setSelected(tabFocus); }, [tabFocus?.kind, tabFocus?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = useCallback((f: Focus) => { location.hash = hashOf(f); if (narrowLib) setLibOverlay(false); }, [narrowLib]);
-  const openSound = useCallback((id: string) => { location.hash = `#/sound/${id}`; }, []);
+  const openSound = useCallback((id: string) => { location.hash = id.startsWith('sample:') ? `#/sample/${id.slice(7)}` : `#/sound/${id}`; }, []);
 
   const ask = useCallback(async (text: string, target: Focus | null = focus): Promise<boolean> => {
     if (!target || target.kind === 'set') { toast('Open or select a sound first, then ask.', 'warn'); return false; }
-    if (target.kind === 'sample') { toast('A request is made on a sound: open the sample\u2019s page and use Ask for changes there.', 'warn'); return false; }
-    const r = await store.askForChanges(target.id, text);
+    const item = target.kind === 'sample' ? `sample:${target.id}` : target.id;
+    const r = await store.askForChanges(item, text);
     if (r.ok) toast(`Sent to the agent: “${text}” on ${target.id}`);
     else toast(r.error ?? 'The request was refused.', 'error');
     return r.ok;
@@ -204,6 +204,7 @@ function ShellInner({ store }: { store: Store }) {
     { id: 'samples.library', label: 'Samples: browse the sample libraries', group: 'Samples', run: () => { setPrefs({ libTab: 'samples', samplesMode: 'library' }); if (narrowLib) setLibOverlay(true); else setPanels({ libOpen: true }); }, keywords: 'search recordings folders' },
     { id: 'samples.takes', label: 'Samples: takes to keep or discard', group: 'Samples', run: () => { setPrefs({ libTab: 'samples', samplesMode: 'takes' }); if (narrowLib) setLibOverlay(true); else setPanels({ libOpen: true }); }, keywords: 'generated' },
     { id: 'samples.import', label: 'Samples: import audio files\u2026', group: 'Samples', run: chooseFiles, keywords: 'add drop upload wav' },
+    { id: 'samples.generate', label: 'Samples: generate audio from a prompt\u2026', group: 'Samples', run: openGenerate, keywords: 'ai elevenlabs takes sound effect create make' },
     { id: 'samples.record', label: 'Samples: record from the microphone', group: 'Samples', shortcut: '⌥ R', key: 'alt+r', run: openRecorder, keywords: 'mic voice foley' },
     { id: 'panel.library', label: 'Toggle the library', group: 'Panels', shortcut: '⌥ 1', key: 'alt+1', run: toggleLibrary },
     { id: 'panel.inspector', label: 'Toggle the inspector', group: 'Panels', shortcut: '⌥ 2', key: 'alt+2', run: () => toast('This page has no inspector.') },

@@ -12,11 +12,15 @@ import { LicenceBadge, useRowHeight } from './Library.tsx';
 import { usePrefs, setPrefs, type Prefs } from './prefs.ts';
 import { cardsOf, fetchLibraries, filterSamples, parseFilter, rowNumbers, searchLibrary, SOURCE_GLYPH, SOURCE_WORD, useLibraryFile, type CardView } from './samplesApi.ts';
 import { useNewSamples } from './sampleSeen.ts';
+import { openGenerate } from '../samples/samplesUi.ts';
 
 /** What a dragged sample row carries: the sample's name. A layer list takes it as `layer add … sample`. */
 export const SAMPLE_MIME = 'application/x-soundclaw-sample';
 
 const MINUS = '−';
+
+/** A take waits to be kept or discarded: generated audio that carries neither the `kept` tag nor a record of the take it was kept from (the tag may be edited; the provenance stays). */
+export const isTake = (x: SampleInfo): boolean => x.source === 'generated' && !x.tags.includes('kept') && !x.keptFrom;
 
 /** A sample's peaks drawn small. */
 export function PeakWave({ peaks, w = 56, h = 16 }: { peaks: { min: number[]; max: number[] } | undefined; w?: number; h?: number }) {
@@ -97,7 +101,7 @@ export function SamplesBrowser({ store, inputRef, onOpen }: BrowserProps) {
   const prefs = usePrefs();
   const mode = prefs.samplesMode;
   const fresh = useNewSamples(store);
-  const taking = store.samples.filter((x) => x.source === 'generated' && !x.tags.includes('kept'));
+  const taking = store.samples.filter(isTake);
   const counts = { project: store.samples.length, library: null as number | null, takes: taking.length };
   return (
     <div className="smp-browser" data-testid="samples-browser" data-mode={mode}>
@@ -327,7 +331,7 @@ function KeepForm({ store, x, onDone }: { store: Store; x: SampleInfo; onDone():
   const valid = /^[a-z0-9][a-z0-9_-]{0,47}$/.test(name) && (name === x.name || !store.samples.some((s) => s.name === name));
   const keep = async () => {
     const tags = [...new Set([...x.tags, 'kept'])].join(',');
-    const cmds = [...(name !== x.name ? [`sample rename ${x.name} ${name}`] : []), `sample set ${name} licence=${licence} tags=${tags}`];
+    const cmds = [...(name !== x.name ? [`sample rename ${x.name} ${name}`] : []), `sample set ${name} licence=${licence} tags=${tags} kept-from=${x.keptFrom ?? x.name}`];
     const r = await store.run(cmds.join('\n'));
     if (r.ok) { toast(`Kept ${name}`); onDone(); } else toast(r.errors.map((e) => e.message).join('; '), 'error');
   };
@@ -345,7 +349,7 @@ function TakesMode({ store, onOpen, fresh }: { store: Store; onOpen(n: string): 
   const toast = useToast();
   const [sel, setSel] = useState<string | null>(null);
   const [keeping, setKeeping] = useState<string | null>(null);
-  const takes = useMemo(() => store.samples.filter((x) => x.source === 'generated' && !x.tags.includes('kept')).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (a.name < b.name ? -1 : 1)), [store.samples]);
+  const takes = useMemo(() => store.samples.filter(isTake).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (a.name < b.name ? -1 : 1)), [store.samples]);
   const names = takes.map((x) => x.name);
   const discard = async (x: SampleInfo) => {
     const r = await store.run(`sample remove ${x.name}`);
@@ -354,6 +358,7 @@ function TakesMode({ store, onOpen, fresh }: { store: Store; onOpen(n: string): 
   const onKeyDown = useListKeys(names, sel, setSel, { onPlay: (n) => void store.playSample(n), onEnter: onOpen, preview: false });
   return (
     <>
+      <div className="smp-takes-head"><button type="button" className="btn btn-agent" onClick={openGenerate} data-testid="takes-generate">Generate{'…'}</button></div>
       <div className="lib-sort"><span>Newest first</span><span className="mono" data-testid="lib-count">{takes.length} take{takes.length === 1 ? '' : 's'}</span></div>
       <div className="lib-list smp-list" onKeyDown={onKeyDown} tabIndex={0} data-testid="takes-list">
         {takes.length === 0 ? (

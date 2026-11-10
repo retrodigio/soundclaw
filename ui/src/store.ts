@@ -11,6 +11,7 @@ import { gridVersions, provenanceMemo, type Provenance, type Version } from './s
 import { loadNew, saveNew } from './studio/prefs.ts';
 import { sameUpToLevel } from './sets/abmath.ts';
 import { MeterHub } from './song/meters.ts';
+import { FrameJoiner, STREAM_OVER, chunkPlan, framesToFloats, readWavHead, totalOf, type WavHead } from './samples/stream.ts';
 
 export interface Measured {
   analysis: Analysis;
@@ -76,6 +77,7 @@ export type Route =
   | { kind: 'audition'; set: string | null }
   | { kind: 'session' }
   | { kind: 'review'; id: string }
+  | { kind: 'instrument'; id: string }
   | { kind: 'sample'; name: string; /** Opened from a layer: the trim handles write that layer's start and end. */ layer?: { sound: string; n: number } }
   | { kind: 'kit' };
 
@@ -93,6 +95,8 @@ export function parseRoute(hash: string): Route {
   if (m) return { kind: 'review', id: m[1]! };
   m = /^#\/sample\/([A-Za-z0-9][A-Za-z0-9_-]*)(?:\/layer\/([A-Za-z][A-Za-z0-9_-]*)\/(\d{1,3}))?$/.exec(hash);
   if (m) return { kind: 'sample', name: m[1]!, ...(m[2] ? { layer: { sound: m[2], n: Number(m[3]) } } : {}) };
+  m = new RegExp(`^#/instrument/${ID}$`).exec(hash);
+  if (m) return { kind: 'instrument', id: m[1]! };
   if (hash === '#/session') return { kind: 'session' };
   if (hash === '#/kit') return { kind: 'kit' };
   return { kind: 'cards' };
@@ -990,6 +994,12 @@ export class Store {
     return { instance: inst.index, pattern: inst.pattern.name, section: inst.section, step };
   }
 
+  /** The page's audio context (made on first use), for the live keyboard. */
+  audioContext(): AudioContext {
+    this.ctx ??= new AudioContext({ sampleRate: 44100 });
+    return this.ctx;
+  }
+
   /** Play one note of an instrument (its root, held half a second): what the instrument panel's play button sounds. */
   async playNote(inst: Instrument, midi = inst.root, gate = 0.5): Promise<void> {
     const key = `${inst.id}#note`;
@@ -1542,6 +1552,10 @@ export class Store {
       // already stopped
     }
     this.source = null;
+    this.streamAbort?.abort();
+    this.streamAbort = null;
+    for (const x of this.streamNodes) { try { x.stop(); } catch { /* not started */ } }
+    this.streamNodes = [];
     if (this.abNodes) {
       for (const x of this.abNodes.sources) { try { x.stop(); } catch { /* not started */ } }
       this.abNodes.A.disconnect();
@@ -1666,18 +1680,80 @@ export class Store {
     const token = ++this.playToken;
     this.playing = key;
     this.changed();
+    const abort = new AbortController();
+    this.streamAbort = abort;
     try {
       const at = ref.indexOf(':');
-      const r = await fetch(`/api/library/${encodeURIComponent(ref.slice(0, at))}/audio?path=${encodeURIComponent(ref.slice(at + 1))}&token=${encodeURIComponent(this.token)}`);
-      if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `audition ${r.status}`);
-      const pcm = decodeAudio(new Uint8Array(await r.arrayBuffer()), { lenient: true }).audio;
-      if (token !== this.playToken) return;
-      const data = pcmToSampleData(pcm);
-      const chans = data.left && data.right ? [data.left, data.right] : [data.data];
-      await this.playSampleBuffer(key, chans as Float32Array[], data.rate, ref, token, {});
+      const url = `/api/library/${encodeURIComponent(ref.slice(0, at))}/audio?path=${encodeURIComponent(ref.slice(at + 1))}&token=${encodeURIComponent(this.token)}`;
+      const ranged = (from: number, to: number): Promise<Response> => fetch(url, { headers: { Range: `bytes=${from}-${to}` }, signal: abort.signal });
+      const fail = async (r: Response): Promise<never> => { throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `audition ${r.status}`); };
+      // the first range: a short file comes back whole in it; a long one says its total, and plays from here while the rest is asked for
+      const first = await ranged(0, STREAM_OVER - 1);
+      if (!first.ok) await fail(first);
+      const total = first.status === 206 ? totalOf(first.headers.get('Content-Range')) : null;
+      const bytes = new Uint8Array(await first.arrayBuffer());
+      const head = total !== null && total > bytes.length ? readWavHead(bytes) : null;
+      if (!head) {
+        let whole = bytes;
+        if (total !== null && total > bytes.length) { // not the server's own WAV header: fetch it all, as short files are
+          const r = await fetch(url, { signal: abort.signal });
+          if (!r.ok) await fail(r);
+          whole = new Uint8Array(await r.arrayBuffer());
+        }
+        const pcm = decodeAudio(whole, { lenient: true }).audio;
+        if (token !== this.playToken) return;
+        const data = pcmToSampleData(pcm);
+        const chans = data.left && data.right ? [data.left, data.right] : [data.data];
+        await this.playSampleBuffer(key, chans as Float32Array[], data.rate, ref, token, {});
+        return;
+      }
+      await this.streamWav(key, ref, head, bytes, total!, ranged, token);
     } catch (e) {
-      if (token === this.playToken) { this.playing = null; this.error = (e as Error).message; this.changed(); }
+      if (token === this.playToken && (e as Error).name !== 'AbortError') { this.playing = null; this.error = (e as Error).message; this.changed(); }
     }
+  }
+
+  private streamAbort: AbortController | null = null;
+  private streamNodes: AudioBufferSourceNode[] = [];
+
+  /** A long file played as it arrives: each range becomes a buffer scheduled right after the one before it. */
+  private async streamWav(key: string, ref: string, head: WavHead, first: Uint8Array, total: number, ranged: (a: number, b: number) => Promise<Response>, token: number): Promise<void> {
+    this.ctx ??= new AudioContext({ sampleRate: 44100 });
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    if (token !== this.playToken) return;
+    const ctx = this.ctx;
+    const end = Math.min(total, head.dataOffset + head.dataBytes);
+    const joiner = new FrameJoiner(head.channels * head.bytes);
+    const frames = Math.floor(head.dataBytes / (head.channels * head.bytes));
+    let when = ctx.currentTime + 0.08;
+    this.streamNodes = [];
+    this.played.push({ id: key, loop: false, hash: sha256Text(`${ref}|${total}`), samples: frames, key, gain: 0 });
+    const feed = (raw: Uint8Array): void => {
+      const whole = joiner.push(raw);
+      if (!whole.length) return;
+      const chans = framesToFloats(whole, head);
+      const buf = ctx.createBuffer(chans.length, chans[0]!.length, head.rate);
+      chans.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.out());
+      when = Math.max(when, ctx.currentTime + 0.02);
+      src.start(when);
+      when += buf.duration;
+      this.streamNodes.push(src);
+    };
+    feed(first.subarray(head.dataOffset, Math.min(first.length, end)));
+    this.clock = { at: performance.now(), from: 0, len: frames / head.rate, loop: false };
+    this.changed();
+    for (const [a, b] of chunkPlan(first.length, end)) {
+      const r = await ranged(a, b);
+      if (token !== this.playToken) return;
+      if (!r.ok && r.status !== 206) throw new Error(`audition ${r.status}`);
+      feed(new Uint8Array(await r.arrayBuffer()));
+      if (token !== this.playToken) return;
+    }
+    const final = this.streamNodes.at(-1);
+    if (final) final.onended = () => { if (token === this.playToken) { this.streamNodes = []; this.playing = null; this.clock = null; this.changed(); this.wake(); } };
   }
 
   /** One buffer of audio at its own rate to the speakers, with the clock the playheads read. */

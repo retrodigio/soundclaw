@@ -14,6 +14,7 @@ import { useActions } from './registry.ts';
 import { useToast } from './controls.tsx';
 import { Spark } from './icons.tsx';
 import { projectPath } from './offline.tsx';
+import { plural } from './values.ts';
 
 const ALL_KEY = 'soundclaw.homeAll';
 
@@ -170,7 +171,7 @@ export function Home({ store }: { store: Store }) {
     <div className="home" data-testid="home">
       {!empty && <div className="home-head">
         <h1>{all ? 'All sounds' : 'Needs attention'}</h1>
-        <span className="dim" data-testid="home-sub">{all ? `${store.index.length} sounds, the ones that fail a check first` : `${needs.length} sound${needs.length === 1 ? '' : 's'} fail a check · sorted by severity, then by last change`}</span>
+        <span className="dim" data-testid="home-sub">{all ? `${plural(store.index.length, 'sound')}, the ones that fail a check first` : `${needs.length} sound${needs.length === 1 ? '' : 's'} fail a check · sorted by severity, then by last change`}</span>
         <span className="grow" />
         <Toggle checked={all} onChange={setAll} label="Show all" testId="show-all" />
         <Segmented value={prefs.homeView} onChange={(v) => setPrefs({ homeView: v })} label="View" testId="home-view"
@@ -184,7 +185,7 @@ export function Home({ store }: { store: Store }) {
             {store.sets.map((x) => (
               <article key={x.id} className="card set-tile" data-testid={`set-tile-${x.id}`}>
                 <h3><a href={`#/set/${x.id}`} data-testid={`set-open-${x.id}`}>{x.id}</a></h3>
-                <div className="dim">{x.members.length} members{x.target !== null ? ` · ${x.target} LUFS` : ''}</div>
+                <div className="dim">{plural(x.members.length, 'member')}{x.target !== null ? ` · ${x.target} LUFS` : ''}</div>
                 <div className="card-actions"><a className="button" href={`#/set/${x.id}`}>Open</a><a className="button" href={`#/audition/${x.id}`} data-testid={`set-audition-${x.id}`}>Audition</a></div>
               </article>
             ))}
@@ -199,7 +200,7 @@ export function Home({ store }: { store: Store }) {
       )}
       {empty && store.project && <NewProject store={store} starts={starts} />}
       {!empty && !all && needs.length === 0 && (
-        <p className="all-clear" data-testid="all-clear">Nothing fails a check right now. <button type="button" className="link-btn" onClick={() => setAll(true)}>Show all {store.index.length} sounds</button></p>
+        <p className="all-clear" data-testid="all-clear">Nothing fails a check right now. <button type="button" className="link-btn" onClick={() => setAll(true)}>Show all {plural(store.index.length, 'sound')}</button></p>
       )}
       {store.index.length > 0 && (all || needs.length > 0) && (
         prefs.homeView === 'rows'

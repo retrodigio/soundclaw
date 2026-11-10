@@ -146,3 +146,14 @@
   .sp-head h1 { font-size: var(--fs-15); }
   .smp-scrim { padding-top: 4vh; }
 }
+
+/* requests about a sample, and an unsaved trim */
+.chip-c.tone-warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn-text); background: var(--warn-bg); }
+.smp-radios { border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sp-requests { list-style: none; margin: 0 0 var(--sp-12); padding: 0; display: flex; flex-direction: column; gap: var(--sp-8); }
+.sp-requests li { border: 1px solid var(--line); border-radius: var(--r-cell); padding: var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-4); background: var(--panel); }
+.sp-requests li[data-state='claimed'], .sp-requests li[data-state='blocked'] { border-color: var(--agent-line); }
+.sp-req-head { display: flex; align-items: center; gap: var(--sp-8); }
+.sp-req-note { margin: 0; color: var(--text); }
+.sp-req-said { margin: 0; color: var(--agent-text); font-size: var(--fs-12); }
+.sp-req-actions { display: flex; gap: var(--sp-8); }

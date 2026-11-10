@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SONG_FEEDBACK_TAGS, arrange, channelNotes, formatCell, type SongDoc, type Pattern } from '@soundclaw/core';
 import type { Store } from './store.ts';
+import { plural } from './studio/values.ts';
 
 interface Report {
   id: string;
@@ -133,7 +134,7 @@ export function SongCard({ store, song }: { store: Store; song: SongDoc }) {
       <div className="channels" data-testid={`song-channels-${song.id}`}>
         {song.channels.map((c, i) => (
           <span key={c.name} className={`channel layer-${c.layer}`} data-testid={`song-channel-${song.id}-${c.name}`} data-audible={store.songAudible(song).includes(c.name)}>
-            <span className="channel-name" title={`${c.inst ?? 'drum kit'} · layer ${c.layer} · ${notes[i]} notes`}>{c.name}</span>
+            <span className="channel-name" title={`${c.inst ?? 'drum kit'} · layer ${c.layer} · ${plural(notes[i] ?? 0, 'note')}`}>{c.name}</span>
             <button className={`mini${g.mute.has(c.name) ? ' on' : ''}`} aria-pressed={g.mute.has(c.name)} data-testid={`song-mute-${song.id}-${c.name}`} onClick={() => store.toggleSongChannel(song.id, c.name, 'mute')} title="Mute (for listening here; not saved)">M</button>
             <button className={`mini${g.solo.has(c.name) ? ' on' : ''}`} aria-pressed={g.solo.has(c.name)} data-testid={`song-solo-${song.id}-${c.name}`} onClick={() => store.toggleSongChannel(song.id, c.name, 'solo')} title="Solo (for listening here; not saved)">S</button>
           </span>

@@ -85,7 +85,7 @@ export function ago(at: string | undefined, now: number): string {
 export const MINUS = '−';
 export const lufsText = (v: number | null | undefined): string => (v === undefined ? '…' : v === null ? `${MINUS}∞` : v.toFixed(1).replace('-', MINUS));
 
-export interface FeedItem { key: string; by: string; text: string; meta: string; at: number; sound: string | null; /** A sample the entry added: the rail plays it. */ sample?: string }
+export interface FeedItem { key: string; by: string; text: string; meta: string; at: number; sound: string | null; /** A sample the entry added: the rail plays it. */ sample?: string; /** An instrument the command is about: the rail links to its page. */ instrument?: string; /** Takes of one generation call arrive as one item. */ takes?: number }
 
 const WORDS_RE = /([A-Za-z][A-Za-z0-9-]*)=("(?:[^"\\]|\\.)*"|\S+)/g;
 const unquote = (v: string): string => (v.startsWith('"') ? v.slice(1, -1).replace(/\\(.)/g, '$1') : v);
@@ -109,15 +109,45 @@ export function sampleFeedText(cmd: string): { text: string; sample: string } | 
   }
 }
 
+/** The instrument a command is about (`instrument zone add harp …`, `instrument from-sample pad …`), or null. */
+export function instrumentOfCmd(cmd: string): string | null {
+  return /^instrument (?:zone|zones|set|new|from-sample|import|remove|rename|copy)(?: (?:add|set|remove|clear))? ([A-Za-z][A-Za-z0-9_-]*)/.exec(cmd)?.[1] ?? null;
+}
+
+/** What one generated `sample add` says, for putting the takes of a call together. */
+function generatedParts(cmd: string): { name: string; prompt: string; credits: number } | null {
+  const m = /^sample add (\S+) /.exec(cmd);
+  if (!m) return null;
+  const f: Record<string, string> = {};
+  for (const x of cmd.matchAll(WORDS_RE)) f[x[1]!] = unquote(x[2]!);
+  if (f.source !== 'generated') return null;
+  return { name: m[1]!, prompt: f.prompt ?? '', credits: Number(f.credits ?? 0) || 0 };
+}
+
 /** The live feed: the tape's newest commands and the requests' events, newest first. */
 export function buildFeed(store: Store, limit = 40): FeedItem[] {
   const known = new Set(store.index.map((x) => x.id));
   const now = Date.now();
   const items: FeedItem[] = [];
+  const gens = new Map<string, { item: FeedItem; takes: number; credits: number; prompt: string }>();
   for (const e of store.tape.slice(-limit)) {
     const sound = soundOfCmd(e.cmd, known);
     const smp = sampleFeedText(e.cmd);
-    items.push({ key: `t${e.seq}`, by: e.by, text: smp ? smp.text : e.cmd, meta: `#${e.seq} · ${e.by}${e.at ? ` · ${ago(e.at, now)}` : ''}`, at: e.at ? Date.parse(e.at) : 0, sound, ...(smp ? { sample: smp.sample } : {}) });
+    const gen = generatedParts(e.cmd);
+    // the takes of one generation call (one undo group) are one item: what was asked, how many came back and what it cost
+    const earlier = gen ? gens.get(e.group) : undefined;
+    if (gen && earlier) {
+      earlier.takes = (earlier.takes ?? 1) + 1;
+      earlier.credits += gen.credits;
+      earlier.item.takes = earlier.takes;
+      earlier.item.text = `Generated ${earlier.takes} takes${earlier.prompt ? `: \u201c${earlier.prompt.length > 80 ? `${earlier.prompt.slice(0, 79)}\u2026` : earlier.prompt}\u201d` : ''}${earlier.credits ? `, ${earlier.credits} credits` : ''}`;
+      earlier.item.meta = `#${e.seq} \u00b7 ${e.by}${e.at ? ` \u00b7 ${ago(e.at, now)}` : ''}`;
+      continue;
+    }
+    const instrument = instrumentOfCmd(e.cmd);
+    const item: FeedItem = { key: `t${e.seq}`, by: e.by, text: smp ? smp.text : e.cmd, meta: `#${e.seq} · ${e.by}${e.at ? ` · ${ago(e.at, now)}` : ''}`, at: e.at ? Date.parse(e.at) : 0, sound, ...(smp ? { sample: smp.sample } : {}), ...(instrument ? { instrument } : {}) };
+    if (gen) gens.set(e.group, { item, takes: 1, credits: gen.credits, prompt: gen.prompt });
+    items.push(item);
   }
   for (const q of store.requests.slice(-12)) {
     items.push({ key: `q${q.id}`, by: q.by, text: `${q.by.startsWith('human:') ? (q.kind === 'comparison' ? 'You compared' : 'You asked') : `${q.by} ${q.kind === 'comparison' ? 'compared' : 'asked'}`}: ${q.note}`, meta: `request ${q.id} · ${q.sound} · ${ago(q.at, now)}`, at: Date.parse(q.at), sound: null });

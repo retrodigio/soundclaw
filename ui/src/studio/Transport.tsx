@@ -11,6 +11,7 @@ import { usePrefs, setPanels } from './prefs.ts';
 import { PresencePill } from './Rail.tsx';
 import { shortcutLabel } from './registry.ts';
 import { lufsText, MINUS, type Focus } from './shellData.ts';
+import { plural } from './values.ts';
 
 const fmtTime = (s: number): string => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
 
@@ -83,7 +84,7 @@ export function Transport({ store, focus, onPalette, canLoop, onPlay, onStop, on
   const name = store.project?.name ?? '';
   return (
     <header className="transport" data-testid="transport" data-song={song ? true : undefined}>
-      <div className="t-project"><Logo size={24} /><span className="t-name" data-testid="project-name" title={store.project?.dir}>{name}</span><span className="mono dim small-mono" data-testid="project-counts">{store.index.length} sounds {'·'} {store.songs.length} songs</span></div>
+      <div className="t-project"><Logo size={24} /><span className="t-name" data-testid="project-name" title={store.project?.dir}>{name}</span><span className="mono dim small-mono" data-testid="project-counts">{plural(store.index.length, 'sound')} {'·'} {plural(store.songs.length, 'song')}</span></div>
       <div className="t-sep" />
       <div className="t-buttons" role="group" aria-label="Transport">
         <IconButton label={playingNow ? 'Stop' : 'Play'} shortcut={shortcutLabel('Space')} kind="primary" onClick={playingNow ? onStop : onPlay} testId="transport-play">{playingNow ? <Stop size={10} /> : <Play size={11} />}</IconButton>

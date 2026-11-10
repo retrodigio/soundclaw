@@ -8,6 +8,7 @@ import { Kbd, Keys } from './controls.tsx';
 import { Search, Spark } from './icons.tsx';
 import { fuzzy, recentIds, noteRecent, shortcutLabel, useActionList, type Action } from './registry.ts';
 import { hashOf, type Focus } from './shellData.ts';
+import { plural } from './values.ts';
 
 /** Restore focus to what had it when the dialog opened. */
 function useReturnFocus(): void {
@@ -57,8 +58,10 @@ export function Palette({ store, focus, onClose, ask }: { store: Store; focus: F
     const shown = actions.filter((a) => !a.noPalette && (!a.enabled || a.enabled()));
     const items: Extract<Row, { kind: 'item' }>[] = [
       ...store.index.map((s) => ({ kind: 'item' as const, label: s.id, group: 'Sounds', hash: `#/sound/${s.id}`, sub: s.voice })),
-      ...store.sets.map((s) => ({ kind: 'item' as const, label: s.id, group: 'Sets', hash: `#/set/${s.id}`, sub: `${s.members.length} members` })),
+      ...store.sets.map((s) => ({ kind: 'item' as const, label: s.id, group: 'Sets', hash: `#/set/${s.id}`, sub: plural(s.members.length, 'member') })),
       ...store.songs.map((s) => ({ kind: 'item' as const, label: s.id, group: 'Songs', hash: `#/song/${s.id}`, sub: `${s.tempo} BPM` })),
+      ...store.instruments.map((s) => ({ kind: 'item' as const, label: s.id, group: 'Instruments', hash: `#/instrument/${s.id}`, sub: s.zones?.length ? plural(s.zones.length, 'zone') : 'synth' })),
+      ...store.samples.map((s) => ({ kind: 'item' as const, label: s.name, group: 'Samples', hash: `#/sample/${s.name}`, sub: s.source })),
     ];
     const scoredActions = shown.map((a) => ({ a, s: text ? fuzzy(text, `${a.label} ${a.group} ${a.keywords ?? ''}`) : recentIds().includes(a.id) ? 100 - recentIds().indexOf(a.id) : 0 })).filter((x) => x.s !== null);
     scoredActions.sort((x, y) => (y.s ?? 0) - (x.s ?? 0));
