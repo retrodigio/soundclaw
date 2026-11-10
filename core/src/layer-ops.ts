@@ -53,6 +53,14 @@ function valuesText(specs: readonly PSpec[], p: Record<string, number | string>,
   return specs.filter((sp) => names.includes(sp.name)).map((sp) => `${sp.name}=${showValue(kind, sp.name, p[sp.name]!)}`).join(' ');
 }
 
+/** `makeup=auto` on a compressor: the makeup that brings a full-scale input back to full scale, from the threshold and ratio it has now. */
+export function autoMakeup(threshold: number, ratio: number): number {
+  return Math.min(24, Math.max(0, Math.round(-threshold * (1 - 1 / ratio) * 100) / 100));
+}
+function resolveAutoMakeup(f: { kind: string; p: Record<string, unknown> }): void {
+  if (f.kind === 'compress' && f.p.makeup === 'auto') f.p.makeup = autoMakeup(f.p.threshold as number, f.p.ratio as number);
+}
+
 export function applyLayerCommand(lib: Map<string, Sound>, c: Command): string | undefined {
   switch (c.op) {
     case 'layer-up': {
@@ -193,6 +201,7 @@ export function applyLayerCommand(lib: Map<string, Sound>, c: Command): string |
         if (!spec) throw new Error(`a ${c.kind} effect has no parameter '${k}' (parameters: ${paramNames(FX_SPECS[c.kind])})`);
         f.p[k] = parseValue(spec, raw, `fx add ${c.id} ${c.kind}`);
       }
+      resolveAutoMakeup(f);
       const at = c.at ?? fx.length + 1;
       if (at < 1 || at > fx.length + 1) throw new Error(`at=${at}: the new effect goes at 1 to ${fx.length + 1}`);
       fx.splice(at - 1, 0, f);
@@ -211,6 +220,7 @@ export function applyLayerCommand(lib: Map<string, Sound>, c: Command): string |
         f.p[k] = parseValue(spec, raw, `fx set ${c.id} ${c.k}`);
         delete f.envs[k];
       }
+      resolveAutoMakeup(f);
       lib.set(c.id, s);
       return `fx set ${c.id}${c.layer !== null ? ` layer=${c.layer}` : ''} ${c.k} ${valuesText(FX_SPECS[f.kind], f.p, c.values.map(([k]) => k))}`;
     }

@@ -664,6 +664,9 @@ function blockMax(buf: Float64Array): Float64Array {
  */
 function runLimiter(buf: Float64Array, f: Fx, memo?: { value: LimiterMemo | null }): void {
   const n = buf.length;
+  // (`gain`, in dB before limiting; absent or 0: nothing is done, so a limiter without it is bit for bit what it was)
+  const inGain = typeof f.p.gain === 'number' && f.p.gain > 0 ? exp2(f.p.gain * DB_TO_LOG2) : 1;
+  if (inGain !== 1) for (let i = 0; i < n; i++) buf[i] = buf[i]! * inGain;
   const key = `${f.p.ceiling}|${f.p.mode}`;
   const prev = memo?.value && memo.value.key === key && memo.value.input.length === n ? memo.value : null;
   const bmax = f.p.mode === 'sample' ? null : blockMax(buf);

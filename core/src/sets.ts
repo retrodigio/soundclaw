@@ -18,7 +18,7 @@ import { CLASSIC_FIELDS, type ClassicKey } from './classic.ts';
 import { integratedLoudness, melSpectrogram, truePeak, type MelSpec } from './analysis.ts';
 import { DEFAULT_STYLE, classTable, type CheckResult, type Style } from './checks.ts';
 import { Rng, hashText } from './generators.ts';
-import { FX_SPECS, layerSpecs, parseTarget, specOf, type Env, type LayeredSound, type PSpec } from './layered.ts';
+import { FX_SPECS, layerSpecs, newFx, parseTarget, specOf, type Env, type Fx, type LayeredSound, type PSpec } from './layered.ts';
 import { melDistance } from './views.ts';
 import { CLASSIC_FULL_SCALE, measuredChannels, mixdown, renderChannels } from './render.ts';
 import { SOUND_ID_RE, cloneSound, quoteText, type Sound } from './sound.ts';
@@ -258,6 +258,9 @@ export interface Matched {
 /** The most output level (dB, after the master chain) matching adds when gain 4 is not enough. */
 export const MATCH_OUT_MAX = 36;
 
+/** The most gain (dB) matching puts in front of the master limiter when the sound's gain 4 is not enough. */
+export const MATCH_LIMITER_GAIN_MAX = 48;
+
 const tpDb = (x: Float32Array): number => 20 * Math.log10(Math.max(1e-12, truePeak(x)));
 
 /**
@@ -308,36 +311,76 @@ export function matchGain(s: Sound, target: number, bank?: SampleBank, style: St
   if (cur.voice === 'classic') return matchClassic(s, cur, target, lufs, bank, style);
   const l = cur as LayeredSound;
   const startGain = l.gain, startOut = l.out ?? 0;
-  for (let i = 0; i < 8 && Math.abs(lufs - target) > 0.05; i++) {
+  const startLim = lastLimiter(l);
+  const startLimGain = startLim ? Number(startLim.p.gain ?? 0) : 0;
+  const startMaster = l.master.length;
+  const ceiling = Math.max(-24, Math.min(-1, Math.floor(style.truePeakMax)));
+  // (a limiter gives less loudness than the dB put in front of it, more so the further it works: the step is divided by what the last one gave)
+  let prevLg: number | null = null, prevLufs = lufs, slope = 1;
+  for (let i = 0; i < 12 && Math.abs(lufs - target) > 0.05; i++) {
     const need = target - lufs;
     let g = l.gain, o = l.out ?? 0;
+    let lim = lastLimiter(l);
+    let lg = lim ? Number(lim.p.gain ?? 0) : 0;
     if (need > 0) {
       const room = g > 0 ? 20 * Math.log10(4 / g) : 0;
       const dg = Math.min(need, Math.max(0, room));
       if (dg > 0) g = Math.min(4, Number((g * Math.pow(10, dg / 20)).toPrecision(5)));
-      o = Math.min(MATCH_OUT_MAX, Math.round((o + need - dg) * 100) / 100);
+      let rest = need - dg;
+      if (rest > 0.005 && prevLg !== null) {
+        const lgNow = lastLimiter(l)?.p.gain;
+        if (typeof lgNow === 'number' && Math.abs(lgNow - prevLg) > 0.01 && lufs !== prevLufs) slope = Math.min(1, Math.max(0.05, (lufs - prevLufs) / (lgNow - prevLg)));
+        rest /= slope;
+      }
+      // the rest goes into the limiter's own gain, before it, so the peaks that makes are held (an output level after the chain would not be)
+      if (rest > 0.005) {
+        if (!lim) { lim = newFx('limit'); lim.p.ceiling = ceiling; l.master.push(lim); }
+        lg = Math.min(MATCH_LIMITER_GAIN_MAX, Math.round((lg + rest) * 100) / 100);
+      }
     } else {
-      const down = Math.min(-need, Math.max(0, o));
-      o = Math.round((o - down) * 100) / 100;
-      const rest = -need - down;
-      if (rest > 0) g = Math.max(1e-5, Number((g * Math.pow(10, -rest / 20)).toPrecision(5)));
+      let down = -need;
+      const fromLim = Math.min(down, lg);
+      lg = Math.round((lg - fromLim) * 100) / 100;
+      down -= fromLim;
+      const fromOut = Math.min(down, Math.max(0, o));
+      o = Math.round((o - fromOut) * 100) / 100;
+      down -= fromOut;
+      if (down > 0) g = Math.max(1e-5, Number((g * Math.pow(10, -down / 20)).toPrecision(5)));
     }
-    if (g === l.gain && o === (l.out ?? 0)) break;
+    const limNow = lim ? Number(lim.p.gain ?? 0) : 0;
+    if (g === l.gain && o === (l.out ?? 0) && lg === limNow) break;
     l.gain = g;
     if (o === 0) delete l.out; else l.out = o;
+    prevLg = lim ? Number(lim.p.gain ?? 0) : null;
+    prevLufs = lufs;
+    if (lim) lim.p.gain = lg;
     lufs = loudnessOf(cur, bank);
   }
+  // a limiter added for nothing (its gain came back to 0) is taken out again
+  if (!startLim && l.master.length > startMaster && Number(l.master[l.master.length - 1]!.p.gain ?? 0) === 0) l.master.pop();
   const reached = Math.abs(lufs - target) <= 0.1;
   const endOut = l.out ?? 0;
+  const endLim = lastLimiter(l);
+  const endLimGain = endLim ? Number(endLim.p.gain ?? 0) : 0;
   let note: string | null = null;
   let error: string | undefined;
-  if (!reached && lufs < target) error = `${s.id} cannot reach ${target} LUFS: at gain ${l.gain} and out ${endOut >= 0 ? '+' : ''}${endOut} dB (the most normalize adds) it measures ${lufs.toFixed(1)} LUFS, ${(target - lufs).toFixed(1)} LU under; the sound is too sparse or quiet for that target: make its source louder (layer gain, a shorter sound, a compressor) or aim lower with loudness=<LUFS>`;
+  if (!reached && lufs < target) error = `${s.id} cannot reach ${target} LUFS: at gain ${l.gain} and a limiter gain of +${endLimGain} dB (the most normalize adds) it measures ${lufs.toFixed(1)} LUFS, ${(target - lufs).toFixed(1)} LU under; the sound is too sparse or quiet for that target (the limiter holds its peaks under ${endLim?.p.ceiling ?? ceiling} dB): make its source louder (layer gain, a shorter sound, a compressor with makeup=auto) or aim lower with loudness=<LUFS>`;
   else if (!reached) note = `${s.id}: matching left it ${(lufs - target).toFixed(1)} LU over the target ${target}`;
-  if (reached && endOut > startOut && endOut > 0) note = `${s.id}: gain 4 was not enough; out +${endOut} dB, after the master chain, brings it to ${lufs.toFixed(1)} LUFS (watch the clip check: a limiter on the master chain keeps the peaks under the ceiling)`;
+  if (reached && endLimGain > startLimGain) note = `${s.id}: gain 4 was not enough; ${startLim ? 'the master limiter' : 'a limiter added to the master chain (ceiling ' + ceiling + ' dB)'} now takes +${endLimGain} dB before it, which brings it to ${lufs.toFixed(1)} LUFS with the peaks held under the ceiling`;
+  const cmds: string[] = [];
+  if (endLim && !startLim) cmds.push(`fx add ${s.id} limit ceiling=${endLim.p.ceiling}${endLimGain ? ` gain=${endLimGain}` : ''}`);
+  else if (endLim && endLimGain !== startLimGain) cmds.push(`fx set ${s.id} ${l.master.indexOf(endLim) + 1} gain=${endLimGain}`);
   const sets: string[] = [];
   if (l.gain !== startGain) sets.push(`gain=${l.gain}`);
   if (endOut !== startOut) sets.push(`out=${endOut}`);
-  return { command: sets.length ? `sound set ${s.id} ${sets.join(' ')}` : null, lufs, reached, note, ...(error ? { error } : {}) };
+  if (sets.length) cmds.unshift(`sound set ${s.id} ${sets.join(' ')}`);
+  return { command: cmds.length ? cmds.join('\n') : null, lufs, reached, note, ...(error ? { error } : {}) };
+}
+
+/** The limiter that ends a sound's master chain (the one that holds what comes out), if it has one. */
+function lastLimiter(l: LayeredSound): Fx | null {
+  const last = l.master[l.master.length - 1];
+  return last && last.kind === 'limit' ? last : null;
 }
 
 /** The classic case of `matchGain`: volume, 0 up to the volume that does not clip. */

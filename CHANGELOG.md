@@ -6,6 +6,14 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+### Normalize and effects
+- **`normalize` no longer clips a sparse sound.** When gain 4 is not enough, the rest of the level now goes in front of the master limiter (a new
+  `limit` parameter `gain`, 0 to 48 dB, added before limiting; `normalize` adds a `limit ceiling=-1` at the end of the master chain when it has
+  none), not as an output level after the chain, so the peaks the extra level makes are held and the clip check passes. Going quieter takes that
+  gain back first. Documents without the parameter render and key as before.
+- **`compress makeup=auto`** in `fx add` and `fx set` writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB
+  (to 24), from the threshold and ratio the effect has then; the document holds the number.
+
 ## [0.2.0] - 2026-11-10
 
 Sampled sources: recorded, library and generated audio beside synthesis, pinned by hash so every render stays exact.

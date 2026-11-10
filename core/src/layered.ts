@@ -46,6 +46,8 @@ export interface PSpec {
   text?: boolean;
   /** The parameter may be absent (a seed). */
   optional?: boolean;
+  /** The word `auto` is accepted in a command in place of a number; the command works the number out and writes that. */
+  auto?: boolean;
   /** Left out of a sound's text and render key while it has its default, so documents made before the parameter existed read and render as they did. */
   quiet?: boolean;
 }
@@ -179,13 +181,14 @@ export const FX_SPECS: Record<FxKind, readonly PSpec[]> = {
     fxNum('ratio', 1, 20, 4, '', 'how much of the level above the threshold is kept: 4 means 4 dB over becomes 1 dB over'),
     fxNum('attack', 0.1, 200, 5, 'ms', 'how fast the detector follows a rise in level'),
     fxNum('release', 5, 2000, 100, 'ms', 'how fast the detector lets go after the level falls'),
-    fxNum('makeup', 0, 24, 0, 'dB', 'gain added after compressing'),
+    { ...fxNum('makeup', 0, 24, 0, 'dB', 'gain added after compressing; `auto` (in `fx add` and `fx set`) writes the makeup that brings a full-scale input back to full scale, −threshold × (1 − 1/ratio) dB, from the threshold and ratio the effect has then'), auto: true },
   ],
   limit: [
     fxNum('ceiling', -24, 0, -1, 'dB', 'nothing goes above this level (dBFS, or dBTP in true mode) after the limiter'),
     fxNum('release', 1, 1000, 20, 'ms', 'how fast the gain comes back after a peak (20 ms lets a train of hits each be limited on its own; a long release makes the hits after a loud one quieter)'),
     fxNum('lookahead', 0, 20, 5, 'ms', 'how long before a peak the gain starts to come down (0: it drops at once; in true mode at least 1 ms)'),
     choice('mode', ['true', 'sample'], 'true', 'true: the 4x-oversampled peak between the samples is held under the ceiling (0.1 dB inside it), so the clip check passes; sample: only the samples are'),
+    quietly(fxNum('gain', 0, 48, 0, 'dB', 'gain added before limiting, so a quiet or sparse sound can be made loud and the limiter still holds its peaks; `normalize` uses it when the sound\'s gain 4 is not enough')),
   ],
   convolve: [
     text('ir', '', 'the name of the sample that is the impulse response: a recorded room, a plate, a speaker or a tube (import or generate one, or `sample bounce` a reverb tail)'),
@@ -383,6 +386,7 @@ export function parseValue(spec: PSpec, raw: string, what: string): Value {
     if (!spec.choices.includes(raw)) throw new Error(`${what}: ${spec.name} is one of ${spec.choices.join(', ')} (got '${raw}')`);
     return raw;
   }
+  if (spec.auto && raw === 'auto') return 'auto';
   if (spec.text) {
     if (spec.name === 'sample' || spec.name === 'ir') {
       if (raw !== '' && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/.test(raw)) throw new Error(`${what}: '${raw}' is not a sample name (letters, digits, _ and -)`);
@@ -463,7 +467,7 @@ export function serializeLayered(s: LayeredSound): string[] {
   if (s.loudness !== undefined) lines.push(`loudness ${fmtNum(s.loudness)}`);
   const fxLines = (fx: Fx[], indent: string, prefix: string): void => {
     fx.forEach((f, i) => {
-      lines.push(`${indent}fx ${i + 1} ${f.kind} ${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(' ')}`);
+      lines.push(`${indent}fx ${i + 1} ${f.kind} ${FX_SPECS[f.kind].filter((sp) => !(sp.quiet && f.p[sp.name] === sp.default)).map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(' ')}`);
       for (const [k, e] of Object.entries(f.envs)) lines.push(`${indent}  env ${prefix}fx${i + 1}.${k} ${q(formatEnv(e))}`);
     });
   };
@@ -481,7 +485,7 @@ export function serializeLayered(s: LayeredSound): string[] {
 
 /** The canonical text the render key is a hash of: everything the audio depends on, in a fixed order. `sampleHash` says which bytes a sample name stood for. */
 export function layeredBody(s: LayeredSound, sampleHash: (name: string) => string): string {
-  const fx = (f: Fx): string => `${f.kind}(${FX_SPECS[f.kind].map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(',')};${Object.keys(f.envs).sort().map((k) => `${k}=${formatEnv(f.envs[k]!)}`).join(',')})${f.kind === 'convolve' ? `[${sampleHash(String(f.p.ir))}]` : ''}`;
+  const fx = (f: Fx): string => `${f.kind}(${FX_SPECS[f.kind].filter((sp) => !(sp.quiet && f.p[sp.name] === sp.default)).map((sp) => `${sp.name}=${fmtValue(f.p[sp.name]!)}`).join(',')};${Object.keys(f.envs).sort().map((k) => `${k}=${formatEnv(f.envs[k]!)}`).join(',')})${f.kind === 'convolve' ? `[${sampleHash(String(f.p.ir))}]` : ''}`;
   const parts = [`dur=${s.duration ?? 'auto'}`, `gain=${s.gain}`, `seed=${s.seed}`];
   if (s.out) parts.push(`out=${s.out}`);
   if (s.loop) parts.push(`loop=${s.loop.length}/${s.loop.fade}`);

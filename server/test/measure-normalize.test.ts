@@ -1,6 +1,6 @@
 // What `measure` says agrees with the exported file, and `normalize` reaches a target (or says why not):
 // a classic sound is measured as its WAV holds it (trunc(s x 32000) of 32768), a sparse or quiet layered
-// sound gets the rest of the level from the output gain after the master chain, a classic sound stops
+// sound gets the rest of the level as gain in front of a master limiter, which holds its peaks, a classic sound stops
 // at the volume where it would clip.
 
 import { spawnSync } from 'node:child_process';
@@ -74,32 +74,57 @@ describe('measure agrees with the exported file', () => {
 describe('normalize', () => {
   const SPARSE = 'sound new s voice=layered seed=1\nlayer add s osc wave=sine freq=440 dur=1 gain=0.02\nenv s 1.amp "0:0 0.01:1 0.9:0@exp"';
 
-  it('reaches the target of a quiet layered sound that gain 4 cannot: the rest is the output level after the master chain', () => {
+  it('reaches the target of a quiet layered sound that gain 4 cannot: the rest is gain in front of a master limiter', () => {
     run(SPARSE);
     const before = f.w.measure('s').analysis.lufs;
     expect(before).toBeLessThan(-40);
     const n = normalizeCommands(f.w, ['s'], 'target=-16');
     expect(n.commands).toMatch(/sound set s loudness=-16/);
-    expect(n.commands).toMatch(/sound set s gain=4 out=[\d.]+/);
-    expect(n.notes.join('\n')).toMatch(/gain 4 was not enough; out \+[\d.]+ dB, after the master chain/);
+    expect(n.commands).toMatch(/sound set s gain=4/);
+    expect(n.commands).toMatch(/fx add s limit ceiling=-1 gain=[\d.]+/);
+    expect(n.notes.join('\n')).toMatch(/gain 4 was not enough; a limiter added to the master chain \(ceiling -1 dB\) now takes \+[\d.]+ dB before it/);
     run(n.commands);
     const s = f.w.sound('s') as LayeredSound;
     expect(s.gain).toBe(4);
-    expect(s.out).toBeGreaterThan(0);
+    expect(s.out ?? 0).toBe(0);
+    expect(s.master.at(-1)!.kind).toBe('limit');
+    expect(s.master.at(-1)!.p.gain).toBeGreaterThan(0);
     expect(Math.abs(f.w.measure('s').analysis.lufs - -16)).toBeLessThan(0.1);
     expect(f.w.measure('s').checks.find((c) => c.name === 'loudness')!.pass).toBe(true);
-    // and `out` is plain data: it survives a restart, and can be taken back by normalizing to something quieter
-    expect((f.reopen().sound('s') as LayeredSound).out).toBe(s.out);
+    // the limiter's gain is plain data: it survives a restart, and is taken back first when normalizing to something quieter
+    expect((f.reopen().sound('s') as LayeredSound).master.at(-1)!.p.gain).toBe(s.master.at(-1)!.p.gain);
     run(normalizeCommands(f.w, ['s'], 'target=-30').commands);
     const quiet = f.w.sound('s') as LayeredSound;
     expect(Math.abs(f.w.measure('s').analysis.lufs - -30)).toBeLessThan(0.1);
-    expect(quiet.out ?? 0).toBeLessThan(s.out!); // the output level went first
+    expect(Number(quiet.master.at(-1)!.p.gain)).toBeLessThan(Number(s.master.at(-1)!.p.gain)); // the limiter's gain went first
+    expect(quiet.gain).toBe(4);
   });
-  it('says plainly when the target cannot be reached, and changes nothing', () => {
-    run('sound new s voice=layered seed=1\nlayer add s osc wave=sine freq=440 dur=1 gain=0.0008');
+  it('a sparse, high-crest sound reaches a loud target without clipping: the limiter holds what the gain makes', () => {
+    run('sound new k voice=layered seed=1\nlayer add k osc wave=white dur=0.15 gain=0.01\nenv k 1.amp "0:0 0.002:1 0.12:0@exp"\nsound set k duration=0.6');
+    const n = normalizeCommands(f.w, ['k'], 'target=-16');
+    run(n.commands);
+    const m = f.w.measure('k');
+    expect(Math.abs(m.analysis.lufs - -16)).toBeLessThan(0.2);
+    expect(m.checks.find((c) => c.name === 'clip')!.pass).toBe(true);
+    expect(m.checks.find((c) => c.name === 'loudness')!.pass).toBe(true);
+  });
+  it('an existing master limiter takes the gain, and so does one that is not last: a new one is added at the end', () => {
+    run(SPARSE + '\nfx add s limit ceiling=-3');
+    run(normalizeCommands(f.w, ['s'], 'target=-16').commands);
+    let s = f.w.sound('s') as LayeredSound;
+    expect(s.master).toHaveLength(1);
+    expect(s.master[0]!.p.ceiling).toBe(-3);
+    expect(Number(s.master[0]!.p.gain)).toBeGreaterThan(0);
+    run('sound new t voice=layered seed=1\nlayer add t osc wave=sine freq=440 dur=1 gain=0.02\nenv t 1.amp "0:0 0.01:1 0.9:0@exp"\nfx add t limit ceiling=-3\nfx add t reverb mix=0.1');
+    run(normalizeCommands(f.w, ['t'], 'target=-16').commands);
+    s = f.w.sound('t') as LayeredSound;
+    expect(s.master.map((x) => x.kind)).toEqual(['limit', 'reverb', 'limit']);
+  });
+  it('says plainly when the target cannot be reached (a click in a second: the limiter holds its peak), and changes nothing', () => {
+    run('sound new s voice=layered seed=1\nlayer add s osc wave=white dur=0.01 gain=0.05\nenv s 1.amp "0:0 0.0005:1 0.004:0@exp"\nsound set s duration=1');
     const before = f.w.tape().length;
     expect(() => normalizeCommands(f.w, ['s'], 'target=-16')).toThrow(ProjectError);
-    expect(() => normalizeCommands(f.w, ['s'], 'target=-16')).toThrow(/s cannot reach -16 LUFS: at gain 4 and out \+36 dB.*it measures -[\d.]+ LUFS, [\d.]+ LU under/);
+    expect(() => normalizeCommands(f.w, ['s'], 'target=-16')).toThrow(/s cannot reach -16 LUFS: at gain \d.* and a limiter gain of \+[\d.]+ dB.*it measures -[\d.]+ LUFS, [\d.]+ LU under/);
     expect(f.w.tape().length).toBe(before);
   });
   it('a classic sound goes to its target by volume but stops where it would clip, and says how far short it is', () => {
