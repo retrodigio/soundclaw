@@ -6,6 +6,10 @@ All notable changes to SoundClaw are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
+Agent workflow fixes from a field test: loud sparse sounds without clipping, partial normalize, level-matched compare, reference files by path, trimmed generated takes, and settings that MCP clients find.
+
 ### Settings
 - **Settings no longer depend on `XDG_CONFIG_HOME`.** MCP stdio clients drop that variable, so a CLI and an MCP-started server could read different settings
   (libraries, library tags, generation settings and spend). They are now in `~/.soundclaw`, or `SOUNDCLAW_CONFIG_DIR`, whatever the environment says, as the token
@@ -23,7 +27,7 @@ All notable changes to SoundClaw are listed here. The format follows
 - **`compare` no longer depends on level.** The same sound at two gains gave 15.6 dB and 11.4 dB against the same file. The spectral distance is now
   printed twice, as it is and with the second turned to the first's loudness; `compare --match-level` (and `view … compare --match-level`, MCP `view` with
   `matchLevel`) puts the matched one first. The JSON adds `spectralMatchedDb`, `averageSpectrumMatchedDb` and `levelMatchDb`. `generate … like=` ranks
-  the takes with the level matched and prints the distance both ways (`distanceWithLevel` in the JSON); `want=` depends on level only when it names it.
+  the takes with the level matched and prints the distance both ways: in the JSON, `distance` is now the level-matched value and the old one is `distanceWithLevel`; `want=` depends on level only when it names it.
 - **`describe`, `measure` and `view` take a reference file path** where they take a sound, as `compare` and `view … compare` already did (and
   `generate … like=`), so a reference that may not be shipped need not be imported to be read. The numbers, words and views are the sample's; nothing is
   written to the project.
@@ -573,7 +577,8 @@ The first release.
   MCP `await_requests`; `soundclaw work list|claim|progress|block|done` and the MCP `work`.
 - Per-command `--help` and `--version`; a Claude Code skill (`soundclaw skill install`).
 
-[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/retrodigio/soundclaw/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/retrodigio/soundclaw/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/retrodigio/soundclaw/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/retrodigio/soundclaw/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/retrodigio/soundclaw/releases/tag/v0.1.0

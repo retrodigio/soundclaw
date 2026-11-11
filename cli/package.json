@@ -1,6 +1,6 @@
 {
   "name": "soundclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "A sound effects and music workbench for AI agents: sounds made from parameters and recordings by command through an MCP server and a CLI, with a live browser view where people listen and edit.",
   "license": "MIT",

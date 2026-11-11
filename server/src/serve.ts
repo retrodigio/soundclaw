@@ -12,7 +12,7 @@ import { acquireLock, alive, createProject, loadProject, releaseLock, type Proje
 import { lastToken, removeTokenFile, writeTokenFile } from './runfile.ts';
 import { Writer } from './writer.ts';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const DEFAULT_PORT = 7427;
 
 export interface ServeOptions {
