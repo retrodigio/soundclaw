@@ -209,7 +209,7 @@ test('the shortcut sheet (?) is built from the registry; shortcuts do not fire i
   await expect(page.getByTestId('palette-input')).toHaveValue('?l');
   await page.keyboard.press('Escape');
   // outside a text field they run
-  await page.locator('body').click({ position: { x: 700, y: 20 } });
+  await blurFocus(page);
   await page.keyboard.press('?');
   await expect(page.getByTestId('shortcuts')).toBeVisible();
   for (const id of ['transport.play', 'edit.undo', 'nav.palette', 'panel.library', 'panel.rail', 'panel.bottom', 'view.density', 'help.shortcuts', 'edit.ask']) await expect(page.getByTestId(`sc-${id}`)).toBeVisible();
@@ -230,7 +230,7 @@ test('theme and density are kept per browser: the palette and ⌘. change them, 
   expect(await attr('density')).toBe('compact');
   const rowH = () => page.getByTestId('lib-row-beep').evaluate((e) => (e.parentElement as HTMLElement).getBoundingClientRect().height);
   expect(await rowH()).toBe(24);
-  await page.locator('body').click({ position: { x: 700, y: 20 } });
+  await blurFocus(page);
   await page.keyboard.press('Control+.');
   expect(await attr('density')).toBe('comfortable');
   await expect.poll(rowH).toBe(32);
@@ -292,7 +292,7 @@ test('the library: failing sounds first, ↑↓ browse and preview, Enter opens,
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#\/sound\/(beep|boop|soft)$/);
   // the filter field narrows the list; / focuses it
-  await page.locator('body').click({ position: { x: 700, y: 20 } });
+  await blurFocus(page);
   await page.keyboard.press('/');
   await expect(page.getByTestId('lib-filter')).toBeFocused();
   await page.keyboard.type('so');
@@ -305,6 +305,11 @@ test('the library: failing sounds first, ↑↓ browse and preview, Enter opens,
   await page.getByTestId('lib-row-steps').dblclick();
   await expect(page).toHaveURL(/#\/set\/steps$/);
 });
+
+/** Take focus off whatever has it, so a key goes to the page's shortcuts. (Not a click at a fixed spot: the header's controls sit at different x on other platforms' fonts, and a click at 700,20 opened the microphone dialog on Linux.) */
+async function blurFocus(page: Page): Promise<void> {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+}
 
 test('the agent rail: its changes pulse and keep a "new" dot until you play or open them; your requests show where they stand; the ask field writes one', async ({ page }) => {
   await open(page);
@@ -334,7 +339,7 @@ test('the agent rail: its changes pulse and keep a "new" dot until you play or o
   await expect(page.getByTestId('rail-request-r1')).toContainText('ready for review');
   // R opens the composer on the focused item, and Esc gives focus back
   await page.getByTestId('lib-row-beep').click();
-  await page.locator('body').click({ position: { x: 700, y: 20 } });
+  await blurFocus(page);
   await page.keyboard.press('r');
   await expect(page.getByTestId('composer-note')).toBeFocused();
   await page.keyboard.press('Escape');
